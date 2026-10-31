@@ -60,11 +60,12 @@ class ApiClient:
             urllib.request.ProxyHandler({}),
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def request(self, method, path, expected_status, payload=None, error_code=None):
+    def request(self, method, path, expected_status, payload=None, error_code=None, *,
+                content_type="application/json", accept="application/json"):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.base + path, data=data, method=method,
-            headers={"Content-Type": "application/json", "Accept": "application/json"})
+            headers={"Content-Type": content_type, "Accept": accept})
         try:
             response = self.opener.open(request, timeout=10)
         except urllib.error.HTTPError as error:
@@ -81,6 +82,50 @@ class ApiClient:
             assert envelope["data"] is None, "Error response exposed a data payload"
             assert envelope["error"]["code"] == error_code, "Unexpected API error code"
         return envelope
+
+
+def verify_feature_openapi(document):
+    """Check the real generated document, independent from the business API responses."""
+    def resolve(schema):
+        while "$ref" in schema:
+            target = document
+            for part in schema["$ref"].removeprefix("#/").split("/"):
+                target = target[part.replace("~1", "/").replace("~0", "~")]
+            schema = target
+        if "allOf" in schema:
+            merged = dict(schema, properties={})
+            for part in schema["allOf"]:
+                merged["properties"].update(resolve(part).get("properties", {}))
+            return merged
+        return schema
+
+    read = document["paths"]["/api/products/{id}/features"]["get"]
+    write = document["paths"]["/api/admin/products/{id}/features"]["put"]
+    envelope = resolve(read["responses"]["200"]["content"]["application/json"]["schema"])
+    response = resolve(envelope["properties"]["data"])
+    request = resolve(write["requestBody"]["content"]["application/json"]["schema"])
+    values = {"volumeMl", "description", "tasteTags", "aromaTags", "sourceName", "sourceUrl", "sourceNote"}
+    assert set(response["properties"]) == values | {"productId"}, "Generated feature response fields differ"
+    assert set(request["properties"]) == values, "Generated feature request exposed hidden fields"
+    for field in values:
+        schema = resolve(response["properties"][field])
+        nullable = schema.get("nullable") is True or "null" in schema.get("type", [])
+        nullable = nullable or any(part.get("type") == "null" for part in schema.get("anyOf", []))
+        assert nullable, f"Generated response lost unknown/null semantics: {field}"
+
+
+def documentation_contract(port):
+    client = ApiClient(port)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    root = client.base.removesuffix("/api")
+    with opener.open(root + "/v3/api-docs", timeout=15) as response:
+        assert response.status == 200 and response.headers.get_content_type() == "application/json"
+        document = json.load(response)
+    assert document["openapi"].startswith("3."), "Expected an OpenAPI v3 document"
+    verify_feature_openapi(document)
+    with opener.open(root + "/docs", timeout=15) as response:
+        assert response.status == 200 and response.headers.get_content_type() == "text/html"
+        assert "swagger-ui" in response.read().decode("utf-8").lower(), "Swagger UI entry is absent"
 
 
 def change_ci_product(environ, product_id, price, name):
@@ -115,6 +160,25 @@ def promote_ci_fixture_admin(environ, user_id):
         env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
 
 
+def count_ci_product_features(environ, product_id):
+    """Read only the feature counts for an owned fixture in the proven CI database."""
+    require_disposable_database(environ)
+    if type(product_id) is not int or not 1 <= product_id <= 2147483647:
+        raise ValueError("Invalid fixture product ID")
+    statement = (
+        f"SELECT (SELECT COUNT(*) FROM t_product_feature WHERE product_id={product_id}), "
+        f"(SELECT COUNT(*) FROM t_product_feature_tag WHERE product_id={product_id})")
+    result = subprocess.run([
+        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+        "mysql", "-u" + environ["PUBBURI_DB_USER"], "--batch", "--skip-column-names",
+        environ["PUBBURI_DB_NAME"], "--execute", statement,
+    ], capture_output=True, text=True, check=True,
+        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
+    counts = tuple(int(value) for value in result.stdout.split())
+    assert len(counts) == 2, "Unexpected feature-count result"
+    return counts
+
+
 def read_only_contract(client):
     page = client.request("GET", "/products?page=1&size=1", 200)["data"]
     assert page["page"] == 1 and page["size"] == 1
@@ -125,7 +189,12 @@ def read_only_contract(client):
     product = page["items"][0] if page["items"] else None
     if product is not None:
         assert {"id", "name", "type", "price", "img", "abv", "orderCount"} == set(product)
+        features = client.request("GET", f"/products/{product['id']}/features", 200)["data"]
+        assert set(features) == {"productId", "volumeMl", "description", "tasteTags", "aromaTags",
+                                 "sourceName", "sourceUrl", "sourceNote"}
+        assert features["productId"] == product["id"]
     client.request("GET", "/products/0", 404, error_code="NOT_FOUND")
+    client.request("GET", "/products/0/features", 404, error_code="NOT_FOUND")
     client.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
     client.request("GET", "/admin/orders", 401, error_code="UNAUTHORIZED")
     invalid = client.request("POST", "/auth/login", 400, {"id": "", "pass": ""}, "VALIDATION_FAILED")
@@ -306,6 +375,68 @@ def session_authority_contract(environ):
     other_admin_session.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
 
 
+def product_feature_contract(environ):
+    """Exercise unknown/known attributes without treating fixture values as product facts."""
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+    public = ApiClient(port)
+    admin_id = "ci_admin_" + uuid.uuid4().hex
+    password = uuid.uuid4().hex
+    public.request("POST", "/users", 201, {"id": admin_id, "name": "CI features", "pass": password})
+    member = ApiClient(port)
+    member.request("POST", "/auth/login", 200, {"id": admin_id, "pass": password})
+    public.request("PUT", "/admin/products/0/features", 401, {}, "UNAUTHORIZED")
+    member.request("PUT", "/admin/products/0/features", 403, {}, "FORBIDDEN")
+    promote_ci_fixture_admin(environ, admin_id)
+    admin = ApiClient(port)
+    admin.request("POST", "/auth/login", 200, {"id": admin_id, "pass": password})
+    created = admin.request("POST", "/admin/products", 201, {
+        "name": "CI feature fixture", "type": "탁주", "price": 15000, "img": "ci-feature.png",
+        "abv": 10, "orderCount": 0,
+    })["data"]
+    product_id = created["id"]
+    path = f"/products/{product_id}/features"
+    write_path = f"/admin/products/{product_id}/features"
+    unknown = {"productId": product_id, "volumeMl": None, "description": None, "tasteTags": None,
+               "aromaTags": None, "sourceName": None, "sourceUrl": None, "sourceNote": None}
+    assert public.request("GET", path, 200)["data"] == unknown
+    values = {
+        "volumeMl": 750, "description": " Synthetic validation data ", "tasteTags": [" Sweet ", "DRY"],
+        "aromaTags": [], "sourceName": " Synthetic CI fixture ",
+        "sourceUrl": "https://example.invalid/fixture", "sourceNote": "Not product facts or rights approval",
+    }
+    saved = admin.request("PUT", write_path, 200, values)["data"]
+    assert saved == dict(values, productId=product_id, description="Synthetic validation data",
+                         tasteTags=["dry", "sweet"], sourceName="Synthetic CI fixture")
+    assert saved["aromaTags"] == [] and saved["tasteTags"] != []
+    assert public.request("GET", path, 200)["data"] == saved
+    assert admin.request("PUT", write_path, 200, values)["data"] == saved
+    assert public.request("GET", f"/products/{product_id}", 200)["data"] == created
+    assert count_ci_product_features(environ, product_id) == (1, 2)
+    admin.request("PUT", write_path, 415, {}, "UNSUPPORTED_MEDIA_TYPE", content_type="text/plain")
+    public.request("GET", path, 406, error_code="NOT_ACCEPTABLE", accept="text/plain")
+    assert public.request("GET", path, 200)["data"] == saved
+    for invalid in ({"tasteTags": []}, {"volumeMl": 0, "sourceName": "Fixture"},
+                    {"volumeMl": 750.5, "sourceName": "Fixture"},
+                    {"sourceUrl": "file:///invalid"}, {"tasteTags": [None], "sourceName": "Fixture"},
+                    {"tasteTags": [1], "sourceName": "Fixture"},
+                    {"aromaTags": [True], "sourceName": "Fixture"},
+                    {"tasteTags": [{}], "sourceName": "Fixture"},
+                    {"description": True, "sourceName": "Fixture"}, {"sourceName": 42, "tasteTags": []}):
+        admin.request("PUT", write_path, 400, invalid, "VALIDATION_FAILED")
+    admin.request("PUT", write_path, 400, {"tasteTags": ["sweet", " SWEET "], "sourceName": "Fixture"},
+                  "BAD_REQUEST")
+    assert public.request("GET", path, 200)["data"] == saved
+    assert admin.request("PUT", write_path, 200, {})["data"] == unknown
+    assert public.request("GET", path, 200)["data"] == unknown
+    assert count_ci_product_features(environ, product_id) == (1, 0)
+    admin.request("PUT", write_path, 200, values)
+    admin.request("DELETE", f"/admin/products/{product_id}", 200)
+    public.request("GET", path, 404, error_code="NOT_FOUND")
+    admin.request("PUT", write_path, 404, {}, "NOT_FOUND")
+    assert count_ci_product_features(environ, product_id) == (0, 0)
+
+
 def main():
     mutating = os.environ.get("PUBBURI_SMOKE_MUTATING") == "1"
     report = {"status": "failed", "mode": "disposable-db" if mutating else "read-only", "completed": []}
@@ -313,6 +444,8 @@ def main():
         client = ApiClient(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         product = read_only_contract(client)
         report["completed"].append("read-only HTTP envelope, pagination, auth and validation")
+        documentation_contract(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
+        report["completed"].append("runtime OpenAPI feature paths/schemas and Swagger UI")
         if mutating:
             mutating_contract(client, product, os.environ)
             report["completed"].append("session, authorization, order price snapshots and rollback")
@@ -320,6 +453,8 @@ def main():
             report["completed"].append("deleted references, anonymized owner and preserved order snapshots")
             session_authority_contract(os.environ)
             report["completed"].append("live roles, account incarnation, password revocation and profile freshness")
+            product_feature_contract(os.environ)
+            report["completed"].append("product attributes, unknown/empty semantics, source validation and deletion")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")

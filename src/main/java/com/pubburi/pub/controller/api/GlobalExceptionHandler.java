@@ -7,16 +7,41 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 	private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+	@ResponseStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+	public ResponseEntity<ApiResponse<Void>> handleUnsupportedMedia(HttpMediaTypeNotSupportedException exception) {
+		return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).contentType(MediaType.APPLICATION_JSON)
+				.body(ApiResponse.error(ApiError.of("UNSUPPORTED_MEDIA_TYPE", "Unsupported Content-Type")));
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+	@ResponseStatus(HttpStatus.NOT_ACCEPTABLE)
+	public ResponseEntity<ApiResponse<Void>> handleUnacceptableMedia(HttpMediaTypeNotAcceptableException exception) {
+		return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).contentType(MediaType.APPLICATION_JSON)
+				.body(ApiResponse.error(ApiError.of("NOT_ACCEPTABLE", "Requested response type is not available")));
+	}
+
+	@ExceptionHandler(HttpMessageNotReadableException.class)
+	public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException exception) {
+		return ResponseEntity.badRequest()
+				.body(ApiResponse.error(ApiError.of("VALIDATION_FAILED", "Malformed request body")));
+	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException exception) {

@@ -9,8 +9,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from api_smoke import (
-    ApiClient, change_ci_product, promote_ci_fixture_admin,
-    require_disposable_database, session_authority_contract,
+    ApiClient, change_ci_product, count_ci_product_features, product_feature_contract,
+    promote_ci_fixture_admin, require_disposable_database, session_authority_contract,
+    verify_feature_openapi,
 )
 
 
@@ -84,6 +85,38 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 session_authority_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
             client.assert_not_called()
+
+    def test_feature_workflow_requires_the_disposable_database_before_any_http(self):
+        with patch("api_smoke.ApiClient") as client:
+            with self.assertRaises(RuntimeError):
+                product_feature_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
+            client.assert_not_called()
+
+    def test_feature_counts_are_guarded_and_only_accept_integer_fixture_ids(self):
+        with patch("api_smoke.subprocess.run") as run:
+            with self.assertRaises(RuntimeError):
+                count_ci_product_features(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"), 1)
+            run.assert_not_called()
+        for product_id in (True, 0, "1;DELETE FROM t_product", 2147483648):
+            with patch("api_smoke.require_disposable_database"), patch("api_smoke.subprocess.run") as run:
+                with self.assertRaises(ValueError):
+                    count_ci_product_features(self.environ, product_id)
+                run.assert_not_called()
+
+    def test_openapi_contract_detects_missing_fields_and_lost_unknown_semantics(self):
+        fields = {name: {"nullable": True} for name in (
+            "volumeMl", "description", "tasteTags", "aromaTags", "sourceName", "sourceUrl", "sourceNote")}
+        schema = {"properties": {"data": {"properties": dict(fields, productId={"type": "integer"})}}}
+        document = {"paths": {
+            "/api/products/{id}/features": {"get": {"responses": {"200": {"content": {
+                "application/json": {"schema": schema}}}}}},
+            "/api/admin/products/{id}/features": {"put": {"requestBody": {"content": {
+                "application/json": {"schema": {"properties": dict(fields)}}}}}},
+        }}
+        verify_feature_openapi(document)
+        fields["tasteTags"].clear()
+        with self.assertRaisesRegex(AssertionError, "unknown/null"):
+            verify_feature_openapi(document)
 
     def test_missing_marker_is_rejected(self):
         run = Mock(side_effect=[self.inspect, subprocess.CompletedProcess([], 0, "")])
