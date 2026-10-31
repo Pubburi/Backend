@@ -9,10 +9,11 @@
 | 요청 | 성공 data | 조건 |
 |---|---|---|
 | GET `/api/users/me/favorites?page=1&size=20` | 기존 PageResponse의 items/page/size/total/totalPages/hasNext | 본인의 현재 상품 페이지 |
+| GET `/api/users/me/favorites/{productId}` | `{"productId":1,"favorited":false}` | 본인 상태만 조회. 없는 관계·없는/삭제 상품도 200 false |
 | PUT `/api/users/me/favorites/{productId}` | `{"productId":1,"favorited":true}` | 관계를 존재하게 함. 없는 상품은 404 |
 | DELETE `/api/users/me/favorites/{productId}` | `{"productId":1,"favorited":false}` | 관계를 없게 함. 없는 관계·삭제 상품도 200 |
 
-세 경로는 JSON ApiResponse와 세션 쿠키를 사용한다. PUT/DELETE에는 요청 본문이 없다.
+네 연산은 JSON ApiResponse와 세션 쿠키를 사용한다. 단건 GET/PUT/DELETE에는 요청 본문이 없다.
 body/query의 userId/authEpoch로 소유자를 선택하지 않으며 타인 ID 경로도 제공하지 않는다.
 비인증·삭제/회수된 계정 인스턴스는 401이다. 살아 있는 계정의 찜이 없을 때만 빈 페이지를 반환한다.
 지원하지 않는 POST는 405·METHOD_NOT_ALLOWED와 Allow를 반환한다. 지원하지 않는 Accept는
@@ -34,10 +35,18 @@ t_user_favorite의 기본키(user_id, product_id)가 중복 관계를 막는다.
 삭제된 참조의 찜을 제거하며 상품/회원을 0이나 가짜 ID로 대체하지 않는다. 회원 삭제 후 같은 ID로
 가입해도 예전 관계를 복구하지 않는다. 기존 주문 이력은 별도의 스냅샷/SET NULL 정책을 유지한다.
 
-GET은 REPEATABLE_READ 트랜잭션에서 현재 id+authEpoch의 계정 존재·count·items를 확인한다.
+목록 GET은 REPEATABLE_READ 트랜잭션에서 현재 id+authEpoch의 계정 존재·count·items를 확인한다.
 empty와 만료 계정을 구분하며 두 목록 쿼리는 같은 읽기 스냅샷을 사용한다. PUT/DELETE는 먼저
 사용자 행을 FOR UPDATE하고 epoch를 다시 비교한다. PUT만 상품 행을 잠그며 User→Product 순서로
 기존 주문 잠금과 맞춘다. Guard 뒤 삭제/같은 ID 재생성을 거친 대기 요청은 새 계정에 쓰지 않는다.
+
+단건 GET은 t_user의 id+epoch를 조건으로 한 SELECT와 t_user_favorite의 EXISTS를 같은 SQL에서
+읽는다. 현재 계정 행이 없으면 null→401, 현재 계정이 있고 관계만 없으면 false→200이다.
+기존 AccessGuard의 현재 세션 확인 조회는 별도이며 요청 전체가 SQL 한 번이라는 의미는 아니다.
+기존 기본키(user_id, product_id)의 두 값을 조건으로 하며 전체 목록·count·상품 조회를 수행하지
+않는다. 다른 계정 ID를 지정할 수 없으며 관리자도 본인 상태만 읽는다. 응답은 상품 존재 확인
+API가 아니다. GET으로 관계나 created_at/목록 순서를 바꾸지 않는다. 화면 상세 버튼의 초기 상태를
+위한 경계이며 목록의 각 상품마다 이 API를 추가 호출하는 N+1 설계를 권장하지 않는다.
 
 PUT/DELETE는 원하는 상태를 명시하는 멱등 연산이다. 동시 요청은 DB 잠금으로 직렬화하지만
 서로 반대인 PUT/DELETE의 최종 상태가 브라우저의 마지막 클릭 의도와 같다는 보장은 없다.

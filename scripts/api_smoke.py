@@ -214,7 +214,7 @@ def verify_favorite_openapi(document):
     assert set(page["properties"]) == {"items", "page", "size", "total", "totalPages", "hasNext"}
     product = resolve(page["properties"]["items"]["items"])
     assert set(product["properties"]) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
-    for method in ("put", "delete"):
+    for method in ("get", "put", "delete"):
         operation = member[method]
         assert "requestBody" not in operation, "Membership operations do not consume a body"
         envelope = resolve(operation["responses"]["200"]["content"]["application/json"]["schema"])
@@ -672,6 +672,7 @@ def favorite_contract(environ):
         return client, user_id, password
 
     public.request("GET", path, 401, error_code="UNAUTHORIZED")
+    public.request("GET", path + "/1", 401, error_code="UNAUTHORIZED")
     public.request("PUT", path + "/1", 401, error_code="UNAUTHORIZED")
     public.request("DELETE", path + "/1", 401, error_code="UNAUTHORIZED")
     owner, user_id, password = account()
@@ -683,7 +684,9 @@ def favorite_contract(environ):
     first_path = path + "/" + str(first["id"])
     second_path = path + "/" + str(second["id"])
     assert owner.request("GET", path, 200)["data"]["total"] == 0
+    assert owner.request("GET", first_path, 200)["data"] == {"productId": first["id"], "favorited": False}
     assert owner.request("PUT", first_path, 200)["data"] == {"productId": first["id"], "favorited": True}
+    assert owner.request("GET", first_path, 200)["data"]["favorited"] is True
     owner.request("PUT", second_path, 200)
     owner.request("PUT", first_path, 200)
     page = owner.request("GET", path + "?size=1", 200)["data"]
@@ -697,13 +700,16 @@ def favorite_contract(environ):
     another_session.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
     assert another_session.request("GET", path + "?size=1", 200)["data"] == page
     assert other.request("GET", path, 200)["data"]["total"] == 0
+    assert other.request("GET", first_path + "?userId=" + user_id, 200)["data"]["favorited"] is False
     assert admin.request("GET", path + "?userId=" + user_id, 200)["data"]["total"] == 0
+    assert admin.request("GET", first_path, 200)["data"]["favorited"] is False
     admin.request("PUT", first_path, 200, {"userId": user_id})
     assert owner.request("GET", path, 200)["data"]["total"] == 2
     assert public.request("GET", f"/products/{first['id']}", 200)["data"] == first
-    owner.request("POST", first_path, 405, error_code="METHOD_NOT_ALLOWED", allowed_methods={"PUT", "DELETE"})
+    owner.request("POST", first_path, 405, error_code="METHOD_NOT_ALLOWED", allowed_methods={"GET", "PUT", "DELETE"})
     owner.request("GET", path, 406, error_code="NOT_ACCEPTABLE", accept="text/plain")
     for suffix in ("/abc", "/0", "/-1", "/1.5", "/2147483648"):
+        owner.request("GET", path + suffix, 400, error_code="BAD_REQUEST")
         owner.request("PUT", path + suffix, 400, error_code="BAD_REQUEST")
         owner.request("DELETE", path + suffix, 400, error_code="BAD_REQUEST")
     for query in ("?page=abc", "?size=1.5", "?page=2147483647&size=100"):
@@ -715,13 +721,16 @@ def favorite_contract(environ):
     assert owner.request("GET", path + "?page=2&size=1", 200)["data"]["items"] == [current]
     public.request("GET", "/products/2147483647", 404, error_code="NOT_FOUND")
     owner.request("PUT", path + "/2147483647", 404, error_code="NOT_FOUND")
+    assert owner.request("GET", path + "/2147483647", 200)["data"]["favorited"] is False
     assert owner.request("DELETE", path + "/2147483647", 200)["data"]["favorited"] is False
     owner.request("DELETE", second_path, 200)
     owner.request("DELETE", second_path, 200)
+    assert owner.request("GET", second_path, 200)["data"]["favorited"] is False
     assert another_session.request("GET", path, 200)["data"]["items"] == [current]
     admin.request("DELETE", f"/admin/products/{first['id']}", 200)
     assert owner.request("GET", path, 200)["data"]["total"] == 0
     assert count_ci_favorites(environ, user_id) == 0
+    assert owner.request("GET", first_path, 200)["data"]["favorited"] is False
     owner.request("DELETE", first_path, 200)
     owner.request("PUT", first_path, 404, error_code="NOT_FOUND")
     owner.request("PUT", second_path, 200)
@@ -730,15 +739,18 @@ def favorite_contract(environ):
     admin.request("DELETE", f"/admin/users/{user_id}", 200)
     assert count_ci_favorites(environ, user_id) == 0
     owner.request("GET", path, 401, error_code="UNAUTHORIZED")
+    owner.request("GET", second_path, 401, error_code="UNAUTHORIZED")
     replacement_password = uuid.uuid4().hex
     public.request("POST", "/users", 201, {"id": user_id, "name": "Fresh favorite fixture", "pass": replacement_password})
     fresh = ApiClient(port)
     fresh.request("POST", "/auth/login", 200, {"id": user_id, "pass": replacement_password})
     assert fresh.request("GET", path, 200)["data"]["total"] == 0
     dormant.request("GET", path, 401, error_code="UNAUTHORIZED")
+    dormant.request("GET", second_path, 401, error_code="UNAUTHORIZED")
     dormant.request("PUT", second_path, 401, error_code="UNAUTHORIZED")
     dormant.request("DELETE", second_path, 401, error_code="UNAUTHORIZED")
     assert fresh.request("GET", path, 200)["data"]["total"] == 0
+    assert fresh.request("GET", second_path, 200)["data"]["favorited"] is False
     admin.request("DELETE", f"/admin/products/{second['id']}", 200)
 
 

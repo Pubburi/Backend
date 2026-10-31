@@ -6,6 +6,7 @@ import com.pubburi.pub.model.dto.Product;
 
 public interface FavoriteService {
 	enum MutationResult { PRESENT, ABSENT, ACCOUNT_EXPIRED, PRODUCT_MISSING }
+	Boolean getOwnedState(String userId, String authEpoch, int productId);
 	PageResponse<Product> getOwnedPage(String userId, String authEpoch, PageCriteria criteria);
 	MutationResult setOwned(String userId, String authEpoch, int productId, boolean favorited);
 }

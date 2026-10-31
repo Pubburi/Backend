@@ -27,6 +27,15 @@ public class FavoriteServiceImpl implements FavoriteService {
 	}
 
 	@Override
+	@Transactional(readOnly = true)
+	public Boolean getOwnedState(String userId, String authEpoch, int productId) {
+		if (productId <= 0) throw new IllegalArgumentException("Product ID must be a positive integer");
+		if (!identityPresent(userId, authEpoch)) return null;
+		// One snapshot: no user row means expired; an existing user can return false.
+		return favoriteDao.selectOwnedState(userId, authEpoch, productId);
+	}
+
+	@Override
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public PageResponse<Product> getOwnedPage(String userId, String authEpoch, PageCriteria criteria) {
 		if (!identityPresent(userId, authEpoch) || userDao.selectSessionIdentity(userId, authEpoch) == null) return null;

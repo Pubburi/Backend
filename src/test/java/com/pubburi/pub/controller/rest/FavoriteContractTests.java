@@ -33,6 +33,7 @@ class FavoriteContractTests {
 	void allOperationsRequireCurrentAuthentication() throws Exception {
 		Fixture fixture = new Fixture();
 		fixture.mvc().perform(get(PATH)).andExpect(status().isUnauthorized());
+		fixture.mvc().perform(get(PATH + "/7")).andExpect(status().isUnauthorized());
 		fixture.mvc().perform(put(PATH + "/7")).andExpect(status().isUnauthorized());
 		fixture.mvc().perform(delete(PATH + "/7")).andExpect(status().isUnauthorized());
 		assertThat(fixture.calls).isZero();
@@ -47,6 +48,19 @@ class FavoriteContractTests {
 		assertThat(fixture.owner).isEqualTo("admin"); assertThat(fixture.epoch).isEqualTo("fixture-admin");
 		var product = new ObjectMapper().readTree(body).path("data").path("items").get(0);
 		assertThat(product.size()).isEqualTo(7); assertThat(product.path("price").asInt()).isEqualTo(12345);
+	}
+
+	@Test
+	void singleStateUsesOnlyTheCurrentOwnerAndMissingProductsReturnFalse() throws Exception {
+		Fixture fixture = new Fixture();
+		String body = fixture.mvc().perform(get(PATH + "/7?userId=victim").session(fixture.session()))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.productId").value(7))
+				.andExpect(jsonPath("$.data.favorited").value(true)).andReturn().getResponse().getContentAsString();
+		assertThat(new ObjectMapper().readTree(body).path("data").size()).isEqualTo(2);
+		assertThat(fixture.owner).isEqualTo("admin"); assertThat(fixture.epoch).isEqualTo("fixture-admin");
+		fixture.missing = true;
+		fixture.mvc().perform(get(PATH + "/2147483647").session(fixture.session()))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.favorited").value(false));
 	}
 
 	@Test
@@ -65,6 +79,7 @@ class FavoriteContractTests {
 	void expiredIdentityIs401AndMissingPutTargetIs404() throws Exception {
 		Fixture fixture = new Fixture(); fixture.expired = true;
 		fixture.mvc().perform(get(PATH).session(fixture.session())).andExpect(status().isUnauthorized());
+		fixture.mvc().perform(get(PATH + "/7").session(fixture.session())).andExpect(status().isUnauthorized());
 		fixture.mvc().perform(put(PATH + "/7").session(fixture.session())).andExpect(status().isUnauthorized());
 		fixture.expired = false; fixture.missing = true;
 		fixture.mvc().perform(put(PATH + "/7").session(fixture.session())).andExpect(status().isNotFound());
@@ -75,6 +90,7 @@ class FavoriteContractTests {
 	void malformedPathAndQueryNumbersAreClientErrorsWithoutServiceCalls() throws Exception {
 		Fixture fixture = new Fixture();
 		for (String id : List.of("abc", "1.5", "-1", "0", "2147483648")) {
+			fixture.mvc().perform(get(PATH + "/" + id).session(fixture.session())).andExpect(status().isBadRequest());
 			fixture.mvc().perform(put(PATH + "/" + id).session(fixture.session())).andExpect(status().isBadRequest());
 			fixture.mvc().perform(delete(PATH + "/" + id).session(fixture.session())).andExpect(status().isBadRequest());
 		}
@@ -97,7 +113,7 @@ class FavoriteContractTests {
 		var response = fixture.mvc().perform(post(PATH + "/7").session(fixture.session()))
 				.andExpect(status().isMethodNotAllowed()).andExpect(jsonPath("$.error.code").value("METHOD_NOT_ALLOWED"))
 				.andReturn().getResponse();
-		assertThat(response.getHeader("Allow")).contains("PUT", "DELETE");
+		assertThat(response.getHeader("Allow")).contains("GET", "PUT", "DELETE");
 		assertThat(fixture.calls).isZero();
 	}
 
@@ -108,6 +124,9 @@ class FavoriteContractTests {
 		MockHttpSession session() {
 			MockHttpSession session = new MockHttpSession();
 			session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(SessionFixtures.user("admin", "ADMIN"))); return session;
+		}
+		@Override public Boolean getOwnedState(String id, String epoch, int productId) {
+			calls++; owner = id; this.epoch = epoch; return expired ? null : !missing;
 		}
 		@Override public PageResponse<Product> getOwnedPage(String id, String epoch, PageCriteria criteria) {
 			calls++; owner = id; this.epoch = epoch; if (expired) return null;
