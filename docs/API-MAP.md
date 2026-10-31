@@ -30,6 +30,9 @@
 - `GET /api/auth/me`: 현재 session 사용자 조회
 - `GET /api/users/me/preferences`: 현재 계정만의 명시취향·설문 상태 조회
 - `PUT /api/users/me/preferences`: 현재 계정만의 명시취향 전체 교체
+- `GET /api/users/me/favorites?page=1&size=20`: 본인 찜의 현재 상품 페이지
+- `PUT /api/users/me/favorites/{productId}`: 본인 찜 저장(멱등, 기존 추가 순서 유지)
+- `DELETE /api/users/me/favorites/{productId}`: 본인 찜 해제(없는 관계·삭제 상품도 200)
 - `POST /api/users`: 회원가입
 - `GET /api/users/id-available?id={id}`: 아이디 중복 확인
 - `GET /api/users/{id}/profile`: 사용자 프로필과 최근 주문 요약
@@ -42,6 +45,10 @@
 명시취향은 관리자도 본인만 접근한다. soft 주종/태그/목표 도수와 hard 예산/허용 도수를 분리하고
 NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약](EXPLICIT-PREFERENCES.md)과
 [OpenAPI](openapi/explicit-preferences.json)를 따르며 기존 타인 profile/관리자 회원 응답에는 포함하지 않는다.
+
+찜도 관리자 포함 본인 전용이다. 요청 본문/소유자 선택 없이 세션 계정에 저장하며, 기존 상품 응답의
+현재 일곱 필드를 반환한다. [계정 찜 계약](ACCOUNT-FAVORITES.md)·[OpenAPI](openapi/account-favorites.json)의
+페이지·반복 PUT·삭제/재가입·405 Allow 정책을 따른다. 찜 DELETE의 멱등 200은 일반 리소스 삭제 404와 구분한다.
 
 ## Products
 

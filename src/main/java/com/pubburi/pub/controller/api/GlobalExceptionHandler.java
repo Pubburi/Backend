@@ -14,6 +14,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -22,6 +23,14 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 	private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	@ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+	public ResponseEntity<ApiResponse<Void>> handleUnsupportedMethod(HttpRequestMethodNotSupportedException exception) {
+		return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).headers(exception.getHeaders())
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(ApiResponse.error(ApiError.of("METHOD_NOT_ALLOWED", "Request method is not supported")));
+	}
 
 	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
 	@ResponseStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE)

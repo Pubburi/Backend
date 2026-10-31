@@ -61,7 +61,7 @@ class ApiClient:
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def request(self, method, path, expected_status, payload=None, error_code=None, *,
-                content_type="application/json", accept="application/json"):
+                content_type="application/json", accept="application/json", allowed_methods=None):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.base + path, data=data, method=method,
@@ -74,6 +74,9 @@ class ApiClient:
             assert response.status == expected_status, (
                 f"{method} {path}: expected HTTP {expected_status}, got {response.status}")
             assert response.headers.get_content_type() == "application/json", "Expected JSON response"
+            if allowed_methods is not None:
+                allowed = {item.strip() for item in response.headers.get("Allow", "").split(",")}
+                assert set(allowed_methods) <= allowed, "Required Allow methods are missing"
             envelope = json.load(response)
         assert set(envelope) == {"data", "message", "error"}, "ApiResponse contract changed"
         if error_code is None:
@@ -124,6 +127,7 @@ def documentation_contract(port):
     assert document["openapi"].startswith("3."), "Expected an OpenAPI v3 document"
     verify_feature_openapi(document)
     verify_preference_openapi(document)
+    verify_favorite_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
         assert "swagger-ui" in response.read().decode("utf-8").lower(), "Swagger UI entry is absent"
@@ -160,6 +164,32 @@ def verify_preference_openapi(document):
         assert set(values) == fields, "Soft targets and hard bounds were mixed"
         assert all(nullable(value) for value in values.values()), "Unknown preference fields lost null"
         assert nullable(request["properties"][group]), "Omitted/null input groups must mean unknown"
+
+
+def verify_favorite_openapi(document):
+    def resolve(schema):
+        while "$ref" in schema:
+            target = document
+            for part in schema["$ref"].removeprefix("#/").split("/"):
+                target = target[part.replace("~1", "/").replace("~0", "~")]
+            schema = target
+        return schema
+
+    paths = document["paths"]
+    assert "/api/users/{id}/favorites" not in paths, "Unexpected other-account favorites endpoint"
+    listing = paths["/api/users/me/favorites"]["get"]
+    member = paths["/api/users/me/favorites/{productId}"]
+    assert "post" not in member, "Toggle POST must not be advertised"
+    envelope = resolve(listing["responses"]["200"]["content"]["application/json"]["schema"])
+    page = resolve(envelope["properties"]["data"])
+    assert set(page["properties"]) == {"items", "page", "size", "total", "totalPages", "hasNext"}
+    product = resolve(page["properties"]["items"]["items"])
+    assert set(product["properties"]) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
+    for method in ("put", "delete"):
+        operation = member[method]
+        assert "requestBody" not in operation, "Membership operations do not consume a body"
+        envelope = resolve(operation["responses"]["200"]["content"]["application/json"]["schema"])
+        assert set(resolve(envelope["properties"]["data"])["properties"]) == {"productId", "favorited"}
 
 
 def change_ci_product(environ, product_id, price, name):
@@ -580,6 +610,109 @@ def private_preference_contract(environ):
     assert fresh.request("GET", path, 200)["data"] == empty()
 
 
+def count_ci_favorites(environ, user_id):
+    require_disposable_database(environ)
+    if not isinstance(user_id, str) or not re.fullmatch(r"ci_favorite_[0-9a-f]{32}", user_id):
+        raise ValueError("Only generated favorite fixture IDs are supported")
+    user_hex = user_id.encode("utf-8").hex()
+    result = subprocess.run([
+        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+        "mysql", "-u" + environ["PUBBURI_DB_USER"], "--batch", "--skip-column-names",
+        environ["PUBBURI_DB_NAME"], "--execute",
+        f"SELECT COUNT(*) FROM t_user_favorite WHERE CAST(user_id AS BINARY)=UNHEX('{user_hex}')",
+    ], capture_output=True, text=True, check=True,
+        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
+    return int(result.stdout.strip())
+
+
+def favorite_contract(environ):
+    """Private persisted state, not popularity, behavioral training or conversion evidence."""
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+    path = "/users/me/favorites"
+    public = ApiClient(port)
+
+    def account(admin=False):
+        user_id = ("ci_admin_" if admin else "ci_favorite_") + uuid.uuid4().hex
+        password = uuid.uuid4().hex
+        public.request("POST", "/users", 201, {"id": user_id, "name": "CI favorite fixture", "pass": password})
+        if admin:
+            promote_ci_fixture_admin(environ, user_id)
+        client = ApiClient(port)
+        client.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
+        return client, user_id, password
+
+    public.request("GET", path, 401, error_code="UNAUTHORIZED")
+    public.request("PUT", path + "/1", 401, error_code="UNAUTHORIZED")
+    public.request("DELETE", path + "/1", 401, error_code="UNAUTHORIZED")
+    owner, user_id, password = account()
+    other, _, _ = account()
+    admin, _, _ = account(True)
+    fixture = {"name": "CI favorite product", "type": "맥주", "price": 4000, "img": "ci-favorite.png", "abv": 4.5, "orderCount": 0}
+    first = admin.request("POST", "/admin/products", 201, fixture)["data"]
+    second = admin.request("POST", "/admin/products", 201, dict(fixture, name="CI second favorite"))["data"]
+    first_path = path + "/" + str(first["id"])
+    second_path = path + "/" + str(second["id"])
+    assert owner.request("GET", path, 200)["data"]["total"] == 0
+    assert owner.request("PUT", first_path, 200)["data"] == {"productId": first["id"], "favorited": True}
+    owner.request("PUT", second_path, 200)
+    owner.request("PUT", first_path, 200)
+    page = owner.request("GET", path + "?size=1", 200)["data"]
+    assert page["total"] == 2 and page["totalPages"] == 2 and page["hasNext"] is True
+    assert page["items"] == [second]
+    page2 = owner.request("GET", path + "?page=2&size=1", 200)["data"]
+    assert page2["items"] == [first] and page2["hasNext"] is False
+    assert owner.request("GET", path + "?page=3&size=1", 200)["data"]["items"] == []
+    assert count_ci_favorites(environ, user_id) == 2
+    another_session = ApiClient(port)
+    another_session.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
+    assert another_session.request("GET", path + "?size=1", 200)["data"] == page
+    assert other.request("GET", path, 200)["data"]["total"] == 0
+    assert admin.request("GET", path + "?userId=" + user_id, 200)["data"]["total"] == 0
+    admin.request("PUT", first_path, 200, {"userId": user_id})
+    assert owner.request("GET", path, 200)["data"]["total"] == 2
+    assert public.request("GET", f"/products/{first['id']}", 200)["data"] == first
+    owner.request("POST", first_path, 405, error_code="METHOD_NOT_ALLOWED", allowed_methods={"PUT", "DELETE"})
+    owner.request("GET", path, 406, error_code="NOT_ACCEPTABLE", accept="text/plain")
+    for suffix in ("/abc", "/0", "/-1", "/1.5", "/2147483648"):
+        owner.request("PUT", path + suffix, 400, error_code="BAD_REQUEST")
+        owner.request("DELETE", path + suffix, 400, error_code="BAD_REQUEST")
+    for query in ("?page=abc", "?size=1.5", "?page=2147483647&size=100"):
+        owner.request("GET", path + query, 400, error_code="BAD_REQUEST")
+    assert owner.request("GET", path + "?size=1", 200)["data"] == page
+    updated = dict(fixture, name="Updated current favorite", price=4500)
+    admin.request("PUT", f"/admin/products/{first['id']}", 200, updated)
+    current = public.request("GET", f"/products/{first['id']}", 200)["data"]
+    assert owner.request("GET", path + "?page=2&size=1", 200)["data"]["items"] == [current]
+    public.request("GET", "/products/2147483647", 404, error_code="NOT_FOUND")
+    owner.request("PUT", path + "/2147483647", 404, error_code="NOT_FOUND")
+    assert owner.request("DELETE", path + "/2147483647", 200)["data"]["favorited"] is False
+    owner.request("DELETE", second_path, 200)
+    owner.request("DELETE", second_path, 200)
+    assert another_session.request("GET", path, 200)["data"]["items"] == [current]
+    admin.request("DELETE", f"/admin/products/{first['id']}", 200)
+    assert owner.request("GET", path, 200)["data"]["total"] == 0
+    assert count_ci_favorites(environ, user_id) == 0
+    owner.request("DELETE", first_path, 200)
+    owner.request("PUT", first_path, 404, error_code="NOT_FOUND")
+    owner.request("PUT", second_path, 200)
+    dormant = ApiClient(port)
+    dormant.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
+    admin.request("DELETE", f"/admin/users/{user_id}", 200)
+    assert count_ci_favorites(environ, user_id) == 0
+    owner.request("GET", path, 401, error_code="UNAUTHORIZED")
+    replacement_password = uuid.uuid4().hex
+    public.request("POST", "/users", 201, {"id": user_id, "name": "Fresh favorite fixture", "pass": replacement_password})
+    fresh = ApiClient(port)
+    fresh.request("POST", "/auth/login", 200, {"id": user_id, "pass": replacement_password})
+    assert fresh.request("GET", path, 200)["data"]["total"] == 0
+    dormant.request("GET", path, 401, error_code="UNAUTHORIZED")
+    dormant.request("PUT", second_path, 401, error_code="UNAUTHORIZED")
+    dormant.request("DELETE", second_path, 401, error_code="UNAUTHORIZED")
+    assert fresh.request("GET", path, 200)["data"]["total"] == 0
+    admin.request("DELETE", f"/admin/products/{second['id']}", 200)
+
+
 def main():
     mutating = os.environ.get("PUBBURI_SMOKE_MUTATING") == "1"
     report = {"status": "failed", "mode": "disposable-db" if mutating else "read-only", "completed": []}
@@ -600,6 +733,8 @@ def main():
             report["completed"].append("product attributes, unknown/empty semantics, source validation and deletion")
             private_preference_contract(os.environ)
             report["completed"].append("private explicit preferences, soft/hard separation, account isolation and lifecycle")
+            favorite_contract(os.environ)
+            report["completed"].append("account favorites, idempotent membership, current products and ownership lifecycle")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")

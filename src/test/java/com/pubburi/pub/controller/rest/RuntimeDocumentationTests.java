@@ -109,6 +109,33 @@ class RuntimeDocumentationTests {
 		return false;
 	}
 
+	@Test
+	void favoritesDocumentHasOnlySelfPathsAndTheCurrentProductPageContract() throws Exception {
+		JsonNode document = mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString());
+		JsonNode paths = document.path("paths");
+		assertThat(paths.has("/api/users/{id}/favorites")).isFalse();
+		JsonNode list = paths.path("/api/users/me/favorites");
+		JsonNode member = paths.path("/api/users/me/favorites/{productId}");
+		assertThat(list.has("get")).isTrue();
+		assertThat(member.has("put") && member.has("delete")).isTrue();
+		assertThat(member.has("post")).isFalse();
+		JsonNode envelope = resolve(document, list.path("get").path("responses").path("200").path("content")
+				.path("application/json").path("schema"));
+		JsonNode page = resolve(document, envelope.path("properties").path("data"));
+		assertThat(fieldNames(page.path("properties"))).isEqualTo(Set.of("items", "page", "size", "total", "totalPages", "hasNext"));
+		JsonNode product = resolve(document, page.path("properties").path("items").path("items"));
+		assertThat(fieldNames(product.path("properties"))).isEqualTo(Set.of("id", "name", "type", "price", "img", "abv", "orderCount"));
+		for (String method : Set.of("put", "delete")) {
+			JsonNode operation = member.path(method);
+			assertThat(operation.has("requestBody")).isFalse();
+			JsonNode mutation = resolve(document, operation.path("responses").path("200").path("content")
+					.path("application/json").path("schema"));
+			assertThat(fieldNames(resolve(document, mutation.path("properties").path("data")).path("properties")))
+					.isEqualTo(Set.of("productId", "favorited"));
+		}
+	}
+
 	private Set<String> fieldNames(JsonNode object) {
 		Set<String> names = new HashSet<>();
 		object.fieldNames().forEachRemaining(names::add);
