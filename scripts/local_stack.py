@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -39,7 +39,10 @@ def environment():
             key, sep, value = line.partition("=")
             if not sep or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
                 raise RuntimeError("Use simple KEY=value entries in Backend/.env.")
-            env.setdefault(key, value.strip().strip("\"'"))
+            value = value.strip()
+            if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+                value = value[1:-1]
+            env.setdefault(key, value)
     for key, default in [("PUBBURI_SERVER_PORT", "9987"),
                          ("PUBBURI_FRONTEND_PORT", "5173"),
                          ("PUBBURI_RECOMMENDATION_PORT", "8000"),
@@ -119,8 +122,10 @@ def probe(name, url):
         body = response.read()
         if name == "backend":
             envelope = json.loads(body)
-            if envelope.get("error") is not None or not envelope["data"]["items"]:
-                raise RuntimeError("Product API returned an error or an empty seed catalog.")
+            data = envelope.get("data")
+            if ("error" not in envelope or envelope["error"] is not None
+                    or not isinstance(data, dict) or not isinstance(data.get("items"), list)):
+                raise RuntimeError("Product API returned an error or an invalid page.")
         elif name == "recommendation":
             result = json.loads(body)
             if result != {"status": "ok", "service": "pubburi-recommendation"}:
@@ -129,33 +134,76 @@ def probe(name, url):
             raise RuntimeError("Frontend did not return the application document.")
 
 
-def stop(child):
-    if child.poll() is None:
-        try:
+class ProcessCleanupError(RuntimeError):
+    """Keep the operation lock when owned processes could not be stopped."""
+
+
+def group_exists(group):
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # macOS can reject killpg(0) after the last member exits. Confirm the
+        # group using process metadata instead of assuming permission means death.
+        pass
+    rows = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True)
+    return any(int(fields[0]) == group and not fields[1].startswith("Z")
+               for row in rows.splitlines() if len(fields := row.split()) == 2)
+
+
+def stop(child, grace=15):
+    # The launcher can exit before its descendants. Its PID is the PGID created
+    # by start_new_session, so inspect and signal the group independently.
+    try:
+        if group_exists(child.pid):
             os.killpg(child.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            child.wait()
-            return
-        try:
-            child.wait(timeout=15)
-        except subprocess.TimeoutExpired:
+        deadline = time.monotonic() + grace
+        while group_exists(child.pid) and time.monotonic() < deadline:
+            child.poll()  # Reap the launcher, even if descendants are still running.
+            time.sleep(0.05)
+        if group_exists(child.pid):
             os.killpg(child.pid, signal.SIGKILL)
-            child.wait()
+        child.wait()
+        deadline = time.monotonic() + 5
+        while group_exists(child.pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if group_exists(child.pid):
+            raise ProcessCleanupError("Owned process group remains; preserve the local-stack lock and inspect it.")
+    except ProcessLookupError:
+        child.wait()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ProcessCleanupError("Cannot stop owned processes; preserve the local-stack lock.") from error
+    except KeyboardInterrupt as error:
+        raise ProcessCleanupError("Process cleanup interrupted; preserve the local-stack lock.") from error
+
+
+@contextmanager
+def operation_lock():
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    lock = STATE / "local-stack-lock"
+    try:
+        lock.mkdir(mode=0o700)
+    except FileExistsError:
+        raise RuntimeError("Local stack is already owned. Inspect its terminal before retrying.")
+    try:
+        yield
+    except ProcessCleanupError:
+        # Do not let another command stop/reset the DB while app ownership is uncertain.
+        raise
+    except BaseException:
+        lock.rmdir()
+        raise
+    else:
+        lock.rmdir()
 
 
 def start(env, smoke):
     doctor(env)
     if not (FRONTEND / "node_modules").is_dir() or not (RECOMMENDATION / ".venv").is_dir():
         raise RuntimeError("Run ./scripts/local-stack.sh install first.")
-    STATE.mkdir(mode=0o700, exist_ok=True)
-    # Atomic ownership covers startup, running processes and shutdown.
-    lock = STATE / "local-stack-lock"
-    try:
-        lock.mkdir(mode=0o700)
-    except FileExistsError:
-        raise RuntimeError("Local stack is already owned. Inspect its terminal before retrying.")
-    with ExitStack() as stack:
-        stack.callback(lock.rmdir)
+    # The same atomic lock serializes up, down and reset-db.
+    with operation_lock(), ExitStack() as stack:
         for key in ["PUBBURI_FRONTEND_PORT", "PUBBURI_SERVER_PORT", "PUBBURI_RECOMMENDATION_PORT"]:
             with socket.socket() as candidate:
                 candidate.bind(("127.0.0.1", int(env[key])))
@@ -224,16 +272,15 @@ def main():
             except (urllib.error.URLError, TimeoutError, OSError, ValueError, RuntimeError):
                 print(f"{name}: unavailable")
     else:
-        if (STATE / "local-stack-lock").exists():
-            raise RuntimeError("Stop the local-stack terminal with Ctrl+C first.")
-        if args.command == "reset-db":
-            if not args.confirm_delete_local_data:
-                raise RuntimeError("Reset deletes the dedicated local DB volume. Pass --confirm-delete-local-data explicitly.")
-            compose("down", "--volumes", env=env)
-            print("Dedicated local DB removed; the next up initializes data.sql.")
-        else:
-            compose("down", env=env)
-            print("Local database stopped; its volume was retained.")
+        with operation_lock():
+            if args.command == "reset-db":
+                if not args.confirm_delete_local_data:
+                    raise RuntimeError("Reset deletes the dedicated local DB volume. Pass --confirm-delete-local-data explicitly.")
+                compose("down", "--volumes", env=env)
+                print("Dedicated local DB removed; the next up initializes data.sql.")
+            else:
+                compose("down", env=env)
+                print("Local database stopped; its volume was retained.")
 
 
 def interrupted(*_):

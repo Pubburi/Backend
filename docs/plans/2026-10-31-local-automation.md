@@ -21,3 +21,11 @@
 - [Backend PR #2](https://github.com/Pubburi/Backend/pull/2), [Frontend PR #2](https://github.com/Pubburi/Frontend/pull/2), [Recommendation PR #2](https://github.com/Pubburi/Recommendation/pull/2). 최신 검사 결과는 각 PR Checks에서 확인한다.
 - Codex 리뷰 요청은 전송했으나 아직 완료되지 않았다. CI 성공을 리뷰 승인으로 대신하지 않으며 병합하지 않는다.
 - 기존 프론트 npm audit 14건(높음 8, 보통 6)은 FE01에서 검토한다. 이 변경의 해결 성과가 아니다.
+
+## Codex 리뷰 반영
+
+- 실행기 종료 후 남은 프로세스 그룹과 SIGTERM을 무시한 자식까지 정리하고, 정리를 확인할 수 없으면 잠금을 유지한다. macOS의 종료 직후 killpg 확인 권한 오류와 zombie 상태도 프로세스 상태로 구분한다.
+- up/down/reset-db가 같은 잠금을 원자적으로 획득한다. 별도 스레드의 종료·초기화가 실행 중일 때 경쟁 시작을 거부하는 검증을 추가했다.
+- 정상적인 빈 상품 목록을 준비 상태로 허용하고 CI의 신규 시드 검증과 분리했다.
+- 환경변수는 일치하는 바깥 따옴표 한 쌍만 제거해 비밀번호의 내부 따옴표·공백을 보존한다.
+- 로컬 도구 회귀 검증은 9개로 늘었으며 모두 통과했다. 최신 필수 CI와 수정 커밋 Codex 재리뷰를 확인한 뒤 병합한다.

@@ -1,13 +1,16 @@
 """Safety and lifecycle checks for local setup and cooperative automation."""
 
 import importlib.util
+import io
 import json
 import os
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -82,6 +85,81 @@ class LocalToolsTests(unittest.TestCase):
             if child.poll() is None:
                 child.kill()
                 child.wait()
+
+    def test_descendants_are_stopped_after_launcher_exits_or_ignores_term(self):
+        for launcher_exits in (True, False):
+            with self.subTest(launcher_exits=launcher_exits):
+                descendant = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"
+                launcher_code = (
+                    "import subprocess,sys,time; "
+                    f"p=subprocess.Popen([sys.executable,'-c',{descendant!r}],stdout=subprocess.PIPE); "
+                    "p.stdout.readline(); print(p.pid,flush=True); "
+                    + ("" if launcher_exits else "time.sleep(60)")
+                )
+                launcher = subprocess.Popen([sys.executable, "-c", launcher_code],
+                                            stdout=subprocess.PIPE, text=True,
+                                            start_new_session=True)
+                try:
+                    descendant_pid = int(launcher.stdout.readline().strip())
+                    if launcher_exits:
+                        launcher.wait(timeout=5)
+                    local.stop(launcher, grace=0.2)
+                    self.assertFalse(local.group_exists(launcher.pid))
+                    # A zombie may await the host's init reaper, but cannot own
+                    # ports or access the DB. No running descendant may remain.
+                    self.assertGreater(descendant_pid, 0)
+                finally:
+                    if local.group_exists(launcher.pid):
+                        os.killpg(launcher.pid, 9)
+                    launcher.wait()
+                    launcher.stdout.close()
+
+    def test_down_and_reset_hold_exclusive_lock_until_compose_finishes(self):
+        for command in ("down", "reset-db"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+                entered, finish = threading.Event(), threading.Event()
+
+                def compose(*args, **kwargs):
+                    entered.set()
+                    if not finish.wait(timeout=5):
+                        raise RuntimeError("Test did not release Compose.")
+
+                argv = ["local_stack.py", command, "--confirm-delete-local-data"]
+                with patch.object(local, "STATE", Path(directory)), \
+                     patch.object(local, "environment", return_value={}), \
+                     patch.object(local, "compose", side_effect=compose), \
+                     patch.object(sys, "argv", argv), ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(local.main)
+                    try:
+                        self.assertTrue(entered.wait(timeout=5))
+                        with self.assertRaisesRegex(RuntimeError, "already owned"):
+                            with local.operation_lock():
+                                self.fail("A competing startup acquired the shutdown lock.")
+                    finally:
+                        finish.set()
+                    future.result(timeout=5)
+                    self.assertFalse((Path(directory) / "local-stack-lock").exists())
+
+    def test_readiness_allows_empty_catalog_but_rejects_api_error(self):
+        valid = {"error": None, "data": {"items": [], "total": 0}}
+        with patch.object(local.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(valid).encode())):
+            local.probe("backend", "http://unused.invalid/")
+        invalid = {"error": {"message": "failed"}, "data": None}
+        with patch.object(local.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(invalid).encode())):
+            with self.assertRaisesRegex(RuntimeError, "invalid page"):
+                local.probe("backend", "http://unused.invalid/")
+
+    def test_env_preserves_password_quotes_and_spaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(local, "BACKEND", root), patch.object(local, "STATE", root / ".pubburi"):
+                local.initialize()
+                p = root / ".env"
+                lines = [line for line in p.read_text().splitlines() if not line.startswith("PUBBURI_DB_PASSWORD=")]
+                for literal, expected in [("\"abc'\"", "abc'"), ("'abc\"'", 'abc"'), ('" space "', ' space ')]:
+                    p.write_text("\n".join(lines) + "\nPUBBURI_DB_PASSWORD=" + literal + "\n")
+                    with patch.dict(os.environ, {}, clear=True):
+                        self.assertEqual(local.environment()["PUBBURI_DB_PASSWORD"], expected)
 
     def test_reset_requires_explicit_confirmation_before_docker(self):
         with tempfile.TemporaryDirectory() as directory, \
