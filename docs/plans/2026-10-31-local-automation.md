@@ -1,6 +1,6 @@
 # C01/C02: 자동화 운영과 로컬 통합 기반
 
-- 상태: 구현 중. PR·CI·최신 Codex 리뷰·통합 검증 후 병합 완료를 기록한다.
+- 상태: 구현·로컬 검증 완료, 최신 CI·Codex 리뷰 후 병합 대기. 리뷰 연결은 별도 확인 중이다.
 - 범위: README 정리, 운영 기준, ignored 소유권/체크포인트, 세 레포 통합 실행·안전 종료·명시적 DB 초기화.
 - 기능 개발은 DELIVERY-PLAN.md와 기획의 ID별 작업을 이어간다. 추천 모델은 이 변경에서 구현하지 않는다.
 - 공개 계약: 기존 API·세션·health 유지. 개발 프록시와 포트의 환경변수 설정만 추가한다.
@@ -8,3 +8,16 @@
   기존 Maven/Vue/추천 테스트·빌드, 실제 MySQL+HTTP+웹 프록시 통합 smoke.
 - 성능: 실행 도구·문서 변경이므로 성능 향상을 주장하지 않는다. 실제 실행 성공과 안전 동작을 검증한다.
 - 차단/결과: 실행 후 근거를 아래에 추가한다. 미실행·실패·과거 CI를 이번 검증 성공으로 바꾸지 않는다.
+
+## 실행 결과 (2026-10-31)
+
+- Java 17 Maven verify: 기존 13개 테스트 및 패키징 성공.
+- 로컬 도구 5개 테스트 성공: 소유권 경쟁/잘못된 해제 거부, env 보존/원격 DB 거부, 포트 충돌 보존/잠금 정리, 자기 프로세스 종료, DB 초기화 명시적 확인.
+- Node 24: 기존 Vue 20개 테스트와 프로덕션 빌드 성공.
+- Python 3.12: Ruff·pytest health 1개·wheel/sdist 빌드 성공. 기존 httpx deprecation 경고는 별도 기록으로 유지한다.
+- 첫 통합 시도는 기존 DB 포트 충돌로 실패했다. 기존 서비스를 종료하지 않고 전용 로컬 설정만 다른 포트로 변경한 뒤 재검증했다.
+- 실제 MySQL 8.4 초기화, Backend 상품 API, 웹 HTML와 /api 프록시, Recommendation /health HTTP 검증 성공. 추천 기능 자체의 완료를 의미하지 않는다.
+- 이번 실행의 앱 프로세스를 종료하고 전용 Compose down으로 DB 볼륨을 보존했다.
+- [Backend PR #2](https://github.com/Pubburi/Backend/pull/2), [Frontend PR #2](https://github.com/Pubburi/Frontend/pull/2), [Recommendation PR #2](https://github.com/Pubburi/Recommendation/pull/2). 최신 검사 결과는 각 PR Checks에서 확인한다.
+- Codex 리뷰 요청은 전송했으나 아직 완료되지 않았다. CI 성공을 리뷰 승인으로 대신하지 않으며 병합하지 않는다.
+- 기존 프론트 npm audit 14건(높음 8, 보통 6)은 FE01에서 검토한다. 이 변경의 해결 성과가 아니다.
