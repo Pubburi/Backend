@@ -15,10 +15,10 @@
 - [현재 기능과 범위](#features)
 - [기술 스택](#technology)
 - [시스템 구조](#architecture)
+- [문제 해결](#case-studies)
 - [로컬 실행](#development)
 - [검증과 협업](#verification)
 - [개발 계획](#roadmap)
-- [관련 프로젝트와 개발자](#links)
 
 <br />
 
@@ -68,6 +68,290 @@ flowchart LR
     Service -. "후속 연동" .-> Recommendation["추천 서비스"]
 ~~~
 
+<a id="case-studies"></a>
+
+## 🧩 문제 해결
+
+데이터 조회·입력 정규화·인증 전환·실행 소유권에서 내린 판단을 정리했습니다.
+아래 결과는 현재 구현의 동작 범위이며, 응답 시간·처리량의 전후 개선 수치는 아직 측정하지 않았습니다.
+
+### 1. 주문 페이지를 유지하면서 상세를 일괄 조립하기
+
+#### 문제
+
+주문 내역은 주문 단위로 페이지를 나누지만, 각 주문에는 여러 상품 상세가 붙습니다. 주문마다 상세를 따로 조회하는 구조는 페이지의 주문 수에 따라 DB 왕복을 늘립니다.
+
+#### 원인
+
+주문과 상세의 일대다 관계를 그대로 순회하면 상세 조회가 반복됩니다. 반대로 상세까지 펼친 JOIN 결과에 바로 페이지를 적용하면 한 주문의 상품 행이 페이지 경계를 차지해 주문 단위 페이지와 맞지 않을 수 있습니다.
+
+#### 해결
+
+주문 페이지를 먼저 조회하고 그 주문 ID들을 한 번에 전달해 상세를 가져옵니다. 상세를 주문 ID로 묶은 뒤 원래 주문 목록에 연결하며, 빈 페이지는 상세 조회 전에 반환합니다.
+
+#### 결과
+
+페이지의 주문 순서와 경계를 유지한 채 각 주문에 해당하는 상세가 연결됩니다. 상세가 없는 주문에는 빈 목록을 부여하고, 사용자·관리자·기간별 주문 조회가 같은 조립 경로를 사용합니다.
+
+#### 대체안/회고
+
+단일 JOIN은 단건 상세에는 단순하지만 목록 페이지의 기준을 별도로 처리해야 합니다. 현재 방식은 조회와 조립의 책임이 분명한 대신 일괄 조회 뒤 메모리에서 묶는 비용이 있습니다. 페이지 크기와 데이터 분포를 통제한 DB 실측으로 지연·메모리 영향을 확인할 과제가 남아 있습니다.
+
+#### 코드
+
+~~~java
+private List<OrderInfo> attachDetails(List<OrderInfo> orders) {
+	if (orders == null || orders.isEmpty()) {
+		return List.of();
+	}
+	List<Integer> orderIds = orders.stream().map(OrderInfo::getoId).toList();
+	Map<Integer, List<OrderDetailInfo>> detailsByOrderId = orderDao.getOrderDetailInfoByOrderIds(orderIds).stream()
+			.collect(Collectors.groupingBy(OrderDetailInfo::getOrderId));
+	for (OrderInfo order : orders) {
+		order.setDetails(detailsByOrderId.getOrDefault(order.getoId(), List.of()));
+	}
+	return orders;
+}
+~~~
+
+[주문 조립 메서드](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [ID 집합으로 상세를 조회하는 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml)
+
+### 2. 기존 로그인을 유지하며 비밀번호 해시를 점진적으로 전환하기
+
+#### 문제
+
+SHA-256으로 저장한 기존 비밀번호와 BCrypt를 사용하는 신규 비밀번호가 공존할 때, 저장 형식 전환 때문에 기존 사용자의 정상 로그인을 막지 않아야 합니다.
+
+#### 원인
+
+저장된 해시만으로 새 BCrypt 해시를 만들 수는 없습니다. 사용자가 입력한 원문이 있는 인증 시점에 기존 형식의 일치 여부와 갱신 필요 여부를 함께 판단해야 합니다.
+
+#### 해결
+
+해시 형식에 맞춰 비밀번호를 확인하고, 인증에 성공한 구형 해시만 BCrypt 갱신 경로로 보냅니다. 신규 가입·비밀번호 수정은 BCrypt를 사용하고 로그인 반환 값에서는 비밀번호 필드를 제거합니다.
+
+#### 결과
+
+BCrypt와 기존 SHA-256을 구분하는 인증 경로, 인증 성공 후 구형 해시 갱신 경로가 구현돼 있습니다. 잘못된 비밀번호는 갱신 경로에 진입하지 않으며 로그인 응답에는 저장 해시를 담지 않습니다.
+
+#### 대체안/회고
+
+전체 사용자에게 비밀번호 재설정을 요구하면 구형 형식을 빠르게 종료할 수 있지만 사용자 조치가 필요합니다. 현재는 로그인 시점 전환을 선택했습니다. 구형 형식 지원 종료 정책과 실제 DB의 갱신 실패 처리, 권한 변경을 기존 세션에 반영하는 문제는 별도 개선 대상으로 남아 있습니다.
+
+#### 코드
+
+~~~java
+public boolean matches(String raw, String hashed) {
+	if (raw == null || hashed == null) {
+		return false;
+	}
+	if (isBcrypt(hashed)) {
+		return encoder.matches(raw, hashed);
+	}
+	return hashed.equals(legacySha256(raw));
+}
+
+public boolean needsUpgrade(String hashed) {
+	return hashed != null && !isBcrypt(hashed);
+}
+~~~
+
+~~~java
+@Override
+@Transactional
+public User login(User user) {
+	if (user == null || isBlank(user.getId()) || isBlank(user.getPass())) {
+		return null;
+	}
+	User stored = userDao.selectById(user.getId());
+	if (stored == null || !passwordHasher.matches(user.getPass(), stored.getPass())) {
+		return null;
+	}
+	if (passwordHasher.needsUpgrade(stored.getPass())) {
+		userDao.updatePassword(stored.getId(), passwordHasher.hash(user.getPass()));
+	}
+	return stored.withoutPass();
+}
+~~~
+
+[해시 형식 판단](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/PasswordHasher.java) · [로그인과 갱신 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java)
+
+### 3. 중복 상품을 정규화한 뒤 같은 수량으로 주문과 적립을 처리하기
+
+#### 문제
+
+주문 요청에 같은 상품이 여러 행으로 들어오면 상세 저장·상품 주문 수·스탬프 적립이 서로 다른 단위로 계산될 수 있습니다. 처리 도중 상품이나 회원을 찾지 못했을 때도 실패를 성공 결과와 구분해야 합니다.
+
+#### 원인
+
+클라이언트가 보낸 행을 그대로 저장하면 상품 단위 수량과 요청 행 수가 섞입니다. 주문 헤더·상세·상품 집계·적립은 서로 다른 DAO에 있어 입력 정규화와 쓰기 실패 처리의 경계를 서비스가 정해야 합니다.
+
+#### 해결
+
+DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상세를 거부합니다. 정규화한 상세를 기준으로 상품 집계와 적립 수량을 계산하며, 쓰기 결과가 기대와 다르면 예외로 종료합니다. 쓰기 흐름은 서비스의 트랜잭션 경계 안에 둡니다.
+
+#### 결과
+
+같은 상품의 중복 행은 합산된 상세로 전달되고, 해당 합산 수량을 상품 주문 수와 스탬프 적립에 사용합니다. 존재하지 않는 상품에서는 이후 상세·적립 생성을 진행하지 않는 예외 경로가 있습니다.
+
+#### 대체안/회고
+
+클라이언트 합산은 화면 상태를 단순하게 만들지만 다른 클라이언트나 직접 API 호출의 입력까지 보장하지는 않습니다. 서버 정규화를 공통 경계로 선택했습니다. 트랜잭션 선언만으로 실제 DB 롤백·동시성·재시도 멱등성을 실증한 것은 아니며, 주문 당시 단가와 상품 삭제 뒤 이력 보존도 추가 개선이 필요합니다.
+
+#### 코드
+
+~~~java
+private List<OrderDetail> normalizeDetails(List<OrderDetail> details) {
+	Map<Integer, OrderDetail> byProductId = new LinkedHashMap<>();
+	for (OrderDetail detail : details) {
+		if (detail == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
+			throw new IllegalArgumentException("Invalid order detail");
+		}
+		byProductId.compute(detail.getProductId(), (productId, existing) -> {
+			if (existing == null) {
+				OrderDetail normalized = new OrderDetail();
+				normalized.setProductId(productId);
+				normalized.setQuantity(detail.getQuantity());
+				return normalized;
+			}
+			existing.setQuantity(existing.getQuantity() + detail.getQuantity());
+			return existing;
+		});
+	}
+	return List.copyOf(byProductId.values());
+}
+~~~
+
+~~~java
+@Override
+@Transactional
+public int makeOrder(Order order, List<OrderDetail> details) {
+	if (order == null || isBlank(order.getUserId()) || details == null || details.isEmpty()) {
+		return 0;
+	}
+	List<OrderDetail> normalizedDetails = normalizeDetails(details);
+	if (isBlank(order.getCompleted())) {
+		order.setCompleted("N");
+	}
+	int result = orderDao.insert(order);
+	if (result <= 0) {
+		return 0;
+	}
+	int totalQuantity = 0;
+	for (OrderDetail detail : normalizedDetails) {
+		detail.setOrderId(order.getoId());
+		if (productDao.incrementOrderCount(detail.getProductId(), detail.getQuantity()) <= 0) {
+			throw new IllegalArgumentException("Product not found: " + detail.getProductId());
+		}
+		totalQuantity += detail.getQuantity();
+	}
+	if (orderDetailDao.insertAll(normalizedDetails) != normalizedDetails.size()) {
+		throw new IllegalStateException("Order details could not be created");
+	}
+	Stamp stamp = new Stamp();
+	stamp.setUserId(order.getUserId());
+	stamp.setOrderId(order.getoId());
+	stamp.setQuantity(totalQuantity);
+	if (stampDao.insert(stamp) <= 0) {
+		throw new IllegalStateException("Stamp could not be created");
+	}
+
+	if (userDao.incrementStamps(order.getUserId(), totalQuantity) <= 0) {
+		throw new IllegalArgumentException("User not found: " + order.getUserId());
+	}
+	return result;
+}
+~~~
+
+[정규화와 주문 쓰기 흐름](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 집계 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [스탬프 증가 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml)
+
+### 4. 실행기와 자식 서버의 수명을 분리해 로컬 작업 소유권 지키기
+
+#### 문제
+
+실행기가 자식 서버보다 먼저 종료되거나 자식이 종료 신호를 무시하면 서버가 포트를 점유한 채 남을 수 있습니다. 동시에 다른 명령이 DB를 종료·초기화하면 실행 중인 작업의 상태도 훼손할 수 있습니다.
+
+#### 원인
+
+실행기 PID의 종료 여부는 전체 서버의 종료 여부가 아닙니다. 시작 명령만 잠그고 종료 명령은 잠금 존재만 확인하면 확인 직후 다른 시작이 끼어드는 경쟁도 생깁니다.
+
+#### 해결
+
+이번 실행을 새 세션의 프로세스 그룹으로 만들고 실행기 종료와 별개로 그 그룹을 정리합니다. 종료를 확인할 수 없으면 잠금을 보존합니다. 시작·종료·DB 초기화는 같은 디렉터리 잠금을 원자적으로 획득하며, 정리 완료 후에만 다음 작업이 진입합니다.
+
+#### 결과
+
+실행기가 먼저 끝나는 경우와 종료 신호를 무시한 자식에 대해 소유한 그룹을 정리하는 경로를 갖췄습니다. DB 작업은 동일한 소유권 경계로 직렬화하고, 일반 종료에서는 전용 DB 볼륨을 보존합니다.
+
+#### 대체안/회고
+
+런타임별 PID 파일은 여러 자식과 재시작을 각각 추적해야 하고, 별도 프로세스 관리자는 추가 운영 의존성이 됩니다. 현재 로컬 도구는 POSIX 프로세스 그룹과 원자적 잠금을 선택했습니다. macOS의 종료 직후 권한 오류와 zombie 상태를 구분하며, 이 구현을 Windows 동작이나 운영 배포의 성과로 확대하지 않습니다.
+
+#### 코드
+
+~~~python
+def group_exists(group):
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # macOS can reject killpg(0) after the last member exits. Confirm the
+        # group using process metadata instead of assuming permission means death.
+        pass
+    rows = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True)
+    return any(int(fields[0]) == group and not fields[1].startswith("Z")
+               for row in rows.splitlines() if len(fields := row.split()) == 2)
+
+
+def stop(child, grace=15):
+    # The launcher can exit before its descendants. Its PID is the PGID created
+    # by start_new_session, so inspect and signal the group independently.
+    try:
+        if group_exists(child.pid):
+            os.killpg(child.pid, signal.SIGTERM)
+        deadline = time.monotonic() + grace
+        while group_exists(child.pid) and time.monotonic() < deadline:
+            child.poll()  # Reap the launcher, even if descendants are still running.
+            time.sleep(0.05)
+        if group_exists(child.pid):
+            os.killpg(child.pid, signal.SIGKILL)
+        child.wait()
+        deadline = time.monotonic() + 5
+        while group_exists(child.pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if group_exists(child.pid):
+            raise ProcessCleanupError("Owned process group remains; preserve the local-stack lock and inspect it.")
+    except ProcessLookupError:
+        child.wait()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ProcessCleanupError("Cannot stop owned processes; preserve the local-stack lock.") from error
+    except KeyboardInterrupt as error:
+        raise ProcessCleanupError("Process cleanup interrupted; preserve the local-stack lock.") from error
+
+
+@contextmanager
+def operation_lock():
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    lock = STATE / "local-stack-lock"
+    try:
+        lock.mkdir(mode=0o700)
+    except FileExistsError:
+        raise RuntimeError("Local stack is already owned. Inspect its terminal before retrying.")
+    try:
+        yield
+    except ProcessCleanupError:
+        # Do not let another command stop/reset the DB while app ownership is uncertain.
+        raise
+    except BaseException:
+        lock.rmdir()
+        raise
+    else:
+        lock.rmdir()
+~~~
+
+[프로세스 그룹과 동작 잠금](https://github.com/Pubburi/Backend/blob/main/scripts/local_stack.py)
+
 <a id="development"></a>
 
 ## 🚀 로컬 실행
@@ -111,7 +395,7 @@ docker compose up -d db
 ./scripts/check.sh
 ~~~
 
-기존 테스트와 패키징을 실행합니다. CI는 별도 임시 MySQL을 초기화하고 80개 상품·페이지 응답을 조회해 서버 기동도 확인합니다. CI의 DB 값은 폐기되는 테스트 설정입니다.
+검증 명령과 실행 절차는 [로컬 개발 문서](docs/LOCAL-DEVELOPMENT.md)에 정리하고, 실행 결과와 회귀 근거는 작업 계획·PR에서 관리합니다.
 
 main은 PR·backend-ci 성공·최신 main 반영·대화 해결을 요구합니다. 필수 승인은 0명이고 관리자에게도 적용합니다. Squash merge 뒤 작업 브랜치를 정리합니다.
 
@@ -128,22 +412,3 @@ main은 PR·backend-ci 성공·최신 main 반영·대화 해결을 요구합니
 - [ ] 추천 서비스 요청·응답과 실패 시 대체 추천
 - [ ] 주문 당시 단가·상품 삭제 이력 보존 등 기존 정합성 개선
 - [ ] 실제 DB 통합 테스트와 후속 배포 설계
-
-<a id="links"></a>
-
-## 🔗 관련 프로젝트와 개발자
-
-| 레포 | 담당 |
-|---|---|
-| [Backend](https://github.com/Pubburi/Backend) | 회원·상품·후기·데모 주문 및 공통 API |
-| [Frontend](https://github.com/Pubburi/Frontend) | 현재 Vue 웹·관리자 화면, 향후 React 전환 |
-| [Recommendation](https://github.com/Pubburi/Recommendation) | 추천 서비스 기반, 향후 데이터·알고리즘·평가 |
-
-[기획·해야 할 일](https://www.notion.so/3ff86a7a8f8a80d298adfd1b0e0c6ae6) · [협업 규칙](CONTRIBUTING.md)
-
-| 개발자 | 이 레포의 담당 |
-|---|---|
-| [오인성](https://github.com/ois0886) | 백엔드 구조·데이터·API·테스트 |
-
-[소스 출처](docs/PROVENANCE.md)
-프로젝트에는 별도 담당자의 모바일 앱도 포함되며, 이 레포는 공통 API 연동 범위를 다룹니다.
