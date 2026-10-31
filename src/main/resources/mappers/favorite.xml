@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pubburi.pub.model.dao.FavoriteDao">
+    <select id="selectOwnedState" resultType="java.lang.Boolean">
+        SELECT EXISTS (
+            SELECT 1 FROM t_user_favorite f WHERE f.user_id = u.id AND f.product_id = #{productId}
+        ) AS favorited
+        FROM t_user u WHERE u.id = #{userId} AND u.auth_epoch = #{authEpoch}
+    </select>
     <select id="selectOwnedPage" resultType="Product">
         SELECT p.id, p.name, p.type, p.price, p.img, p.abv, p.order_count
         FROM t_user_favorite f JOIN t_user u ON u.id = f.user_id JOIN t_product p ON p.id = f.product_id

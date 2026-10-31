@@ -89,7 +89,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "Supported methods for this route. Member route includes PUT and DELETE."
+                "description": "Supported methods for this route. Member route includes GET, PUT and DELETE."
               }
             }
           },
@@ -127,6 +127,107 @@
       }
     },
     "/api/users/me/favorites/{productId}": {
+      "get": {
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "operationId": "getOwnFavoriteState",
+        "description": "No body or owner selector. Read only the current account incarnation. Active account with absent membership, missing or deleted product returns 200 false; expired account is 401. Does not reorder or create favorites.",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current private membership, productId and favorited only. Missing or deleted product is false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BAD_REQUEST: malformed ID, integer or pagination overflow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: no current account incarnation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "METHOD_NOT_ALLOWED. Unsupported method; no membership changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Supported methods for this route. Member route includes GET, PUT and DELETE."
+              }
+            }
+          },
+          "406": {
+            "description": "NOT_ACCEPTABLE JSON envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: related-data integrity failure, never a successful membership.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_SERVER_ERROR. Unexpected DB failures are not empty favorites or success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "security": [
           {
@@ -192,7 +293,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "Supported methods for this route. Member route includes PUT and DELETE."
+                "description": "Supported methods for this route. Member route includes GET, PUT and DELETE."
               }
             }
           },
@@ -303,7 +404,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "Supported methods for this route. Member route includes PUT and DELETE."
+                "description": "Supported methods for this route. Member route includes GET, PUT and DELETE."
               }
             }
           },

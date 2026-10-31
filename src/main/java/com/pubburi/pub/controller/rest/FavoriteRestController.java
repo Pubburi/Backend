@@ -54,6 +54,18 @@ public class FavoriteRestController {
 		return ResponseEntity.ok(ApiResponse.ok(result.map(ResponseMapper::product)));
 	}
 
+	@GetMapping("/{productId}")
+	@Operation(summary = "Read one product's private favorite state", description = "No body or other-account selector. Missing membership or deleted product is 200 false; expired account is 401. Does not change saved order.")
+	public ResponseEntity<ApiResponse<FavoriteMembershipResponse>> state(
+			@Parameter(schema = @Schema(types = {"integer"}, minimum = "1", maximum = "2147483647")) @PathVariable String productId,
+			HttpSession session) {
+		SessionUser owner = guard.requireLogin(session);
+		int id = positiveProductId(productId);
+		Boolean favorited = service.getOwnedState(owner.id(), owner.authEpoch(), id);
+		if (favorited == null) throw expired();
+		return ResponseEntity.ok(ApiResponse.ok(new FavoriteMembershipResponse(id, favorited)));
+	}
+
 	@PutMapping("/{productId}")
 	@Operation(summary = "Ensure a product is favorited", description = "No body. Idempotent 200; duplicate PUT preserves creation order. Missing product 404; no other-account selector.")
 	public ResponseEntity<ApiResponse<FavoriteMembershipResponse>> put(

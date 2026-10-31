@@ -20,6 +20,33 @@ import com.pubburi.pub.model.dto.User;
 
 class FavoriteServiceTests {
 	@Test
+	void oneStateReadDistinguishesAbsenceFromExpiredIdentityWithoutListsOrWrites() {
+		Fixture fixture = new Fixture(); fixture.ids.add(7);
+		assertThat(fixture.service().getOwnedState("member", "current", 7)).isTrue();
+		assertThat(fixture.service().getOwnedState("member", "current", 8)).isFalse();
+		fixture.ids.clear(); fixture.productExists = false;
+		assertThat(fixture.service().getOwnedState("member", "current", 7)).isFalse();
+		assertThat(fixture.service().getOwnedState("member", "old", 7)).isNull();
+		fixture.userExists = false;
+		assertThat(fixture.service().getOwnedState("member", "current", 7)).isNull();
+		assertThat(fixture.events).containsExactly("state:member:current:7", "state:member:current:8",
+				"state:member:current:7", "state:member:old:7", "state:member:current:7");
+		assertThat(fixture.ids).isEmpty();
+	}
+
+	@Test
+	void invalidStateIdentityAndReadFailureCannotBeDisguisedAsAnUnsavedProduct() {
+		Fixture fixture = new Fixture();
+		assertThat(fixture.service().getOwnedState("member", "", 7)).isNull();
+		assertThatThrownBy(() -> fixture.service().getOwnedState("member", "current", 0))
+				.isInstanceOf(IllegalArgumentException.class);
+		assertThat(fixture.events).isEmpty();
+		fixture.failRead = true;
+		assertThatThrownBy(() -> fixture.service().getOwnedState("member", "current", 7))
+				.isInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
 	void activeEmptyPageDiffersFromExpiredAccountAndBothQueriesBindTheEpoch() {
 		Fixture fixture = new Fixture();
 		var page = fixture.service().getOwnedPage("member", "current", PageCriteria.of(1, 20, 20));
@@ -78,7 +105,7 @@ class FavoriteServiceTests {
 	}
 
 	private static class Fixture implements FavoriteDao {
-		boolean userExists = true; boolean productExists = true; boolean failInsert;
+		boolean userExists = true; boolean productExists = true; boolean failInsert; boolean failRead;
 		Set<Integer> ids = new LinkedHashSet<>(); List<String> events = new ArrayList<>();
 		FavoriteService service() {
 			UserDao userDao = (UserDao) Proxy.newProxyInstance(UserDao.class.getClassLoader(), new Class<?>[] {UserDao.class},
@@ -97,6 +124,11 @@ class FavoriteServiceTests {
 						events.add("lock-product:" + args[0]); return productExists ? new Product() : null;
 					});
 			return new FavoriteServiceImpl(this, userDao, products);
+		}
+		@Override public Boolean selectOwnedState(String id, String epoch, int productId) {
+			events.add("state:" + id + ":" + epoch + ":" + productId);
+			if (failRead) throw new IllegalStateException("Controlled read failure");
+			return userExists && "current".equals(epoch) ? ids.contains(productId) : null;
 		}
 		@Override public List<Product> selectOwnedPage(String id, String epoch, int limit, int offset) {
 			events.add("page:" + id + ":" + epoch + ":" + limit + ":" + offset); return List.of();

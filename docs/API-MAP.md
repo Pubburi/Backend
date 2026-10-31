@@ -31,6 +31,7 @@
 - `GET /api/users/me/preferences`: 현재 계정만의 명시취향·설문 상태 조회
 - `PUT /api/users/me/preferences`: 현재 계정만의 명시취향 전체 교체
 - `GET /api/users/me/favorites?page=1&size=20`: 본인 찜의 현재 상품 페이지
+- `GET /api/users/me/favorites/{productId}`: 본인의 단건 찜 상태(없는 관계·없는/삭제 상품도 200 false)
 - `PUT /api/users/me/favorites/{productId}`: 본인 찜 저장(멱등, 기존 추가 순서 유지)
 - `DELETE /api/users/me/favorites/{productId}`: 본인 찜 해제(없는 관계·삭제 상품도 200)
 - `POST /api/users`: 회원가입

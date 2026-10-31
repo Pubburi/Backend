@@ -118,7 +118,7 @@ class RuntimeDocumentationTests {
 		JsonNode list = paths.path("/api/users/me/favorites");
 		JsonNode member = paths.path("/api/users/me/favorites/{productId}");
 		assertThat(list.has("get")).isTrue();
-		assertThat(member.has("put") && member.has("delete")).isTrue();
+		assertThat(member.has("get") && member.has("put") && member.has("delete")).isTrue();
 		assertThat(member.has("post")).isFalse();
 		JsonNode envelope = resolve(document, list.path("get").path("responses").path("200").path("content")
 				.path("application/json").path("schema"));
@@ -126,7 +126,7 @@ class RuntimeDocumentationTests {
 		assertThat(fieldNames(page.path("properties"))).isEqualTo(Set.of("items", "page", "size", "total", "totalPages", "hasNext"));
 		JsonNode product = resolve(document, page.path("properties").path("items").path("items"));
 		assertThat(fieldNames(product.path("properties"))).isEqualTo(Set.of("id", "name", "type", "price", "img", "abv", "orderCount"));
-		for (String method : Set.of("put", "delete")) {
+		for (String method : Set.of("get", "put", "delete")) {
 			JsonNode operation = member.path(method);
 			assertThat(operation.has("requestBody")).isFalse();
 			JsonNode mutation = resolve(document, operation.path("responses").path("200").path("content")
