@@ -8,7 +8,10 @@ import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
-from api_smoke import ApiClient, change_ci_product, promote_ci_fixture_admin, require_disposable_database
+from api_smoke import (
+    ApiClient, change_ci_product, promote_ci_fixture_admin,
+    require_disposable_database, session_authority_contract,
+)
 
 
 class DisposableDatabaseGuardTests(unittest.TestCase):
@@ -75,6 +78,12 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 promote_ci_fixture_admin(self.environ, "admin")
             run.assert_not_called()
+
+    def test_session_workflow_requires_the_disposable_database_before_any_http(self):
+        with patch("api_smoke.ApiClient") as client:
+            with self.assertRaises(RuntimeError):
+                session_authority_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
+            client.assert_not_called()
 
     def test_missing_marker_is_rejected(self):
         run = Mock(side_effect=[self.inspect, subprocess.CompletedProcess([], 0, "")])

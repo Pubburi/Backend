@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.auth.SessionUser;
+import com.pubburi.pub.controller.auth.SessionFixtures;
 import com.pubburi.pub.controller.request.AdminUserRequest;
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
@@ -35,10 +36,10 @@ class ControllerBehaviorTests {
 	@Test
 	void missingProductDeleteReturnsNotFound() {
 		ProductService productService = new MissingProductService();
-		AccessGuard accessGuard = new AccessGuard();
+		AccessGuard accessGuard = SessionFixtures.guard(SessionFixtures.user("admin", "ADMIN"));
 		ProductRestController controller = new ProductRestController(productService, accessGuard);
 		MockHttpSession session = new MockHttpSession();
-		session.setAttribute(AccessGuard.SESSION_USER, new SessionUser("admin", "관리자", 0, "ADMIN"));
+		session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(SessionFixtures.user("admin", "ADMIN")));
 
 		assertThatThrownBy(() -> controller.deleteProduct(404, session))
 				.isInstanceOfSatisfying(ResponseStatusException.class,
@@ -47,10 +48,10 @@ class ControllerBehaviorTests {
 
 	@Test
 	void currentAdminCannotDeleteOwnAccount() {
-		AccessGuard accessGuard = new AccessGuard();
+		AccessGuard accessGuard = SessionFixtures.guard(SessionFixtures.user("admin", "ADMIN"));
 		UserRestController controller = new UserRestController(null, null, accessGuard, null);
 		MockHttpSession session = new MockHttpSession();
-		session.setAttribute(AccessGuard.SESSION_USER, new SessionUser("admin", "관리자", 0, "ADMIN"));
+		session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(SessionFixtures.user("admin", "ADMIN")));
 
 		assertThatThrownBy(() -> controller.deleteUser("admin", session))
 				.isInstanceOfSatisfying(ResponseStatusException.class,

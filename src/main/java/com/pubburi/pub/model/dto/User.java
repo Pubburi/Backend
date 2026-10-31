@@ -1,11 +1,18 @@
 package com.pubburi.pub.model.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 public class User {
 	private String id;
 	private String name;
 	private String pass;
 	private int stamps;
 	private String role;
+	private String authEpoch;
+
+	@JsonIgnore
+	public String getAuthEpoch() { return authEpoch; }
+	public void setAuthEpoch(String authEpoch) { this.authEpoch = authEpoch; }
 
 	public User() {
 	}

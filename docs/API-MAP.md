@@ -18,6 +18,11 @@
 
 인증이 필요한 API는 session cookie를 사용하며, frontend API client는 `credentials: include`를 유지한다.
 
+보호 요청은 세션 snapshot의 권한 대신 DB의 현재 계정/역할을 확인한다. 삭제 계정·동일 ID 재가입의
+옛 세션·비밀번호 변경으로 회수된 세션은 401, 현재 계정의 권한 부족은 403이다. auth/me는 최신
+이름·스탬프·역할을 반환하며 UserResponse의 기존 다섯 필드는 유지한다. 내부 auth_epoch는 공개하지
+않는다. DB 조회 장애를 비로그인으로 바꾸지 않는다. [세션/003 전환 계약](SESSION-AUTHORITY.md)을 따른다.
+
 ## Auth And Users
 
 - `POST /api/auth/login`: 로그인

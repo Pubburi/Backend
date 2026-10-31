@@ -7,16 +7,17 @@ CREATE TABLE t_user (
     name VARCHAR(100) NOT NULL,
     password_hash VARCHAR(100) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'USER',
+    auth_epoch CHAR(36) NOT NULL,
     stamps INT NOT NULL DEFAULT 0
 );
 
-INSERT INTO t_user (id, name, password_hash, role, stamps) VALUES
-('admin', '관리자', '$2y$10$P2jZKcx4Z66jff6TPxEsTO8JQgOycI8Jp/j1OVOS6pVzeOw3Iee/.', 'ADMIN', 0),
-('id01', '홍길동', '$2y$10$786lYHcZi9Rn1vhrznqTUeNbjK3xssSaWUoi6bf4M9vXzFxYDgPwm', 'USER', 5),
-('id02', '이순신', '$2y$10$1lbGqt87pETZ2TGxPxEPRe4s0xPZD6k349JAMEBc9IKk/8nP3Gtwm', 'USER', 2),
-('id03', '김유신', '$2y$10$Typye3dxHHSn3ADVSRcp7ehHWYpaNpfg5RddjZEmIsHivhG7n.RH2', 'USER', 7),
-('id04', '강감찬', '$2y$10$cpCgAO5h1EsNJ08IZK.gbOvzSCl.Q7AjWOda9g.N6Bbmb37NjacQ2', 'USER', 1),
-('id05', '신사임당', '$2y$10$HhwLCRKy73Pz5BpedbN8ge9ON3gURMVr5GbdmMT472nKQpakrx.IK', 'USER', 3);
+INSERT INTO t_user (id, name, password_hash, role, stamps, auth_epoch) VALUES
+('admin', '관리자', '$2y$10$P2jZKcx4Z66jff6TPxEsTO8JQgOycI8Jp/j1OVOS6pVzeOw3Iee/.', 'ADMIN', 0, UUID()),
+('id01', '홍길동', '$2y$10$786lYHcZi9Rn1vhrznqTUeNbjK3xssSaWUoi6bf4M9vXzFxYDgPwm', 'USER', 5, UUID()),
+('id02', '이순신', '$2y$10$1lbGqt87pETZ2TGxPxEPRe4s0xPZD6k349JAMEBc9IKk/8nP3Gtwm', 'USER', 2, UUID()),
+('id03', '김유신', '$2y$10$Typye3dxHHSn3ADVSRcp7ehHWYpaNpfg5RddjZEmIsHivhG7n.RH2', 'USER', 7, UUID()),
+('id04', '강감찬', '$2y$10$cpCgAO5h1EsNJ08IZK.gbOvzSCl.Q7AjWOda9g.N6Bbmb37NjacQ2', 'USER', 1, UUID()),
+('id05', '신사임당', '$2y$10$HhwLCRKy73Pz5BpedbN8ge9ON3gURMVr5GbdmMT472nKQpakrx.IK', 'USER', 3, UUID());
 
 -- 술 상품 테이블
 CREATE TABLE t_product (

@@ -17,7 +17,8 @@ public interface UserDao {
 
 	int update(User user);
 
-	int updatePassword(@Param("id") String id, @Param("pass") String pass);
+	int upgradePassword(@Param("id") String id, @Param("expectedHash") String expectedHash,
+			@Param("authEpoch") String authEpoch, @Param("pass") String pass);
 
 	int delete(String id);
 
@@ -30,4 +31,6 @@ public interface UserDao {
 	User selectById(String userId);
 
 	User selectByIdForUpdate(@Param("userId") String userId);
+
+	User selectSessionIdentity(@Param("id") String id, @Param("authEpoch") String authEpoch);
 }

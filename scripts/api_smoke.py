@@ -233,7 +233,7 @@ def history_preservation_contract(environ):
     admin.request("DELETE", f"/admin/users/{buyer_id}", 200)
     expected["userId"], expected["orderTable"] = None, None
     assert admin.request("GET", order_path, 200)["data"] == expected, "Account deletion changed order snapshots"
-    buyer.request("GET", order_path, 403, error_code="FORBIDDEN")
+    buyer.request("GET", order_path, 401, error_code="UNAUTHORIZED")
     admin_orders = admin.request("GET", "/admin/orders?page=1&size=100", 200)["data"]
     assert admin_orders["total"] == before_total, "Deletion removed an order from pagination"
     assert next(o for o in admin_orders["items"] if o["oId"] == created["oId"]) == expected
@@ -245,6 +245,65 @@ def history_preservation_contract(environ):
     replacement.request("POST", "/auth/login", 200, {"id": buyer_id, "pass": replacement_password})
     assert replacement.request("GET", f"/users/{buyer_id}/orders", 200)["data"]["total"] == 0
     replacement.request("GET", order_path, 403, error_code="FORBIDDEN")
+
+
+def session_authority_contract(environ):
+    """Use independent cookie jars to exercise live account/credential boundaries."""
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+
+    def account(role="USER"):
+        client = ApiClient(port)
+        user_id = ("ci_admin_" if role == "ADMIN" else "ci_session_") + uuid.uuid4().hex
+        password = uuid.uuid4().hex
+        client.request("POST", "/users", 201, {"id": user_id, "name": "CI session", "pass": password})
+        if role == "ADMIN":
+            promote_ci_fixture_admin(environ, user_id)
+        client.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
+        return client, user_id, password
+
+    admin, admin_id, admin_password = account("ADMIN")
+    demoted, demoted_id, _ = account("ADMIN")
+    demoted.request("GET", "/admin/users", 200)
+    admin.request("PUT", f"/admin/users/{demoted_id}", 200, {"role": "USER"})
+    demoted.request("GET", "/admin/users", 403, error_code="FORBIDDEN")
+    assert demoted.request("GET", "/auth/me", 200)["data"]["role"] == "USER"
+
+    deleted, deleted_id, deleted_password = account()
+    dormant = ApiClient(port)
+    dormant.request("POST", "/auth/login", 200, {"id": deleted_id, "pass": deleted_password})
+    admin.request("DELETE", f"/admin/users/{deleted_id}", 200)
+    deleted.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
+    replacement = ApiClient(port)
+    replacement_password = uuid.uuid4().hex
+    replacement.request("POST", "/users", 201, {
+        "id": deleted_id, "name": "Recreated account", "pass": replacement_password,
+    })
+    # This cookie was not queried between deletion and recreation.
+    dormant.request("GET", f"/users/{deleted_id}/profile", 401, error_code="UNAUTHORIZED")
+    replacement.request("POST", "/auth/login", 200, {"id": deleted_id, "pass": replacement_password})
+    assert replacement.request("GET", "/auth/me", 200)["data"]["name"] == "Recreated account"
+
+    changed, changed_id, old_password = account()
+    new_password = uuid.uuid4().hex
+    admin.request("PUT", f"/admin/users/{changed_id}", 200, {"pass": new_password})
+    changed.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
+    login = ApiClient(port)
+    login.request("POST", "/auth/login", 401, {"id": changed_id, "pass": old_password}, "UNAUTHORIZED")
+    login.request("POST", "/auth/login", 200, {"id": changed_id, "pass": new_password})
+    login.request("GET", "/auth/me", 200)
+
+    profile, profile_id, _ = account()
+    admin.request("PUT", f"/admin/users/{profile_id}", 200, {"name": "Updated session", "stamps": 17})
+    current = profile.request("GET", "/auth/me", 200)["data"]
+    assert set(current) == {"id", "name", "stamps", "role", "admin"}
+    assert current["name"] == "Updated session" and current["stamps"] == 17 and current["role"] == "USER"
+
+    other_admin_session = ApiClient(port)
+    other_admin_session.request("POST", "/auth/login", 200, {"id": admin_id, "pass": admin_password})
+    admin.request("PUT", f"/admin/users/{admin_id}", 200, {"pass": uuid.uuid4().hex})
+    admin.request("GET", "/admin/users", 200)
+    other_admin_session.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
 
 
 def main():
@@ -259,6 +318,8 @@ def main():
             report["completed"].append("session, authorization, order price snapshots and rollback")
             history_preservation_contract(os.environ)
             report["completed"].append("deleted references, anonymized owner and preserved order snapshots")
+            session_authority_contract(os.environ)
+            report["completed"].append("live roles, account incarnation, password revocation and profile freshness")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")

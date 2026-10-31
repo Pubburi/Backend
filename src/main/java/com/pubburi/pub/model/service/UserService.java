@@ -5,6 +5,8 @@ import java.util.List;
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
 import com.pubburi.pub.model.dto.User;
+import com.pubburi.pub.model.dto.UserUpdate;
+import com.pubburi.pub.model.dto.UserUpdateResult;
 
 public interface UserService {
 	List<User> getUserList();
@@ -13,7 +15,7 @@ public interface UserService {
 
 	int addUser(User user);
 
-	int modifyUser(User user);
+	UserUpdateResult modifyUser(String id, UserUpdate changes);
 
 	int removeUser(String id);
 
