@@ -395,7 +395,7 @@ docker compose up -d db
 ./scripts/check.sh
 ~~~
 
-검증 명령과 실행 절차는 [로컬 개발 문서](docs/LOCAL-DEVELOPMENT.md)에 정리하고, 실행 결과와 회귀 근거는 작업 계획·PR에서 관리합니다.
+검증 명령과 폐기용 DB의 HTTP 검사 절차는 [테스트·CI 안내](docs/TESTING.md), 실행 환경은 [로컬 개발 문서](docs/LOCAL-DEVELOPMENT.md)를 따릅니다. 실행 결과와 회귀 근거는 작업 계획·PR에서 관리합니다.
 
 main은 PR·backend-ci 성공·최신 main 반영·대화 해결을 요구합니다. 필수 승인은 0명이고 관리자에게도 적용합니다. Squash merge 뒤 작업 브랜치를 정리합니다.
 

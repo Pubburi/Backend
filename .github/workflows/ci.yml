@@ -41,6 +41,7 @@ jobs:
       PUBBURI_DB_ROOT_PASSWORD: ci_root_only
       PUBBURI_DB_URL: jdbc:mysql://127.0.0.1:3306/pubburi_ci
       PUBBURI_SERVER_PORT: '9987'
+      PUBBURI_SMOKE_RUN_TOKEN: pubburi-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,13 +58,29 @@ jobs:
       - name: Initialize disposable database
         env:
           MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
-        run: >-
-          docker exec -i -e MYSQL_PWD="$PUBBURI_DB_ROOT_PASSWORD"
-          "$MYSQL_CONTAINER_ID" mysql -uroot "$PUBBURI_DB_NAME"
+        run: |
+          docker exec -i -e MYSQL_PWD="$PUBBURI_DB_ROOT_PASSWORD" \
+          "$MYSQL_CONTAINER_ID" mysql -uroot "$PUBBURI_DB_NAME" \
           < data.sql > /dev/null
+          docker exec -e MYSQL_PWD="$PUBBURI_DB_ROOT_PASSWORD" "$MYSQL_CONTAINER_ID" \
+            mysql -uroot "$PUBBURI_DB_NAME" --execute \
+            "CREATE TABLE pubburi_ci_smoke_guard (token VARCHAR(80) PRIMARY KEY); INSERT INTO pubburi_ci_smoke_guard VALUES ('$PUBBURI_SMOKE_RUN_TOKEN');"
       - name: Validate local database configuration
         run: docker compose config --quiet
       - name: Test and package
         run: ./mvnw --batch-mode --no-transfer-progress verify
-      - name: Verify schema and API startup
+      - name: Verify packaged HTTP API and order rollback
+        env:
+          PUBBURI_SMOKE_MUTATING: '1'
+          PUBBURI_SMOKE_CONTAINER_ID: ${{ job.services.mysql.id }}
         run: ./scripts/smoke.sh
+      - name: Preserve validation reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/surefire-reports/*.xml
+            target/api-smoke-report.json
+          if-no-files-found: ignore
+          retention-days: 7
