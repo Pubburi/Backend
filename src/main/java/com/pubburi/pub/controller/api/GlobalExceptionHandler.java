@@ -18,11 +18,29 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 	private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	@ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+	public ResponseEntity<ApiResponse<Void>> handleMultipartSize(MaxUploadSizeExceededException exception) {
+		return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(ApiResponse.error(ApiError.of("PAYLOAD_TOO_LARGE", "Multipart request is too large")));
+	}
+
+	@ExceptionHandler(MultipartException.class)
+	@ResponseStatus(HttpStatus.BAD_REQUEST)
+	public ResponseEntity<ApiResponse<Void>> handleMultipart(MultipartException exception) {
+		return ResponseEntity.badRequest()
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(ApiResponse.error(ApiError.of("BAD_MULTIPART_REQUEST", "Malformed multipart request")));
+	}
 
 	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
 	@ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)

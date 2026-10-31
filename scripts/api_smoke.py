@@ -87,6 +87,35 @@ class ApiClient:
         return envelope
 
 
+def multipart_security_contract(environ):
+    """Tiny parser probes only; never induce large uploads or memory exhaustion."""
+    require_disposable_database(environ)
+    root = ApiClient(environ.get("PUBBURI_SERVER_PORT", "9987")).base
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    boundary = "pubburi-owned-fixture"
+    for extra, status, code in (("", 415, "UNSUPPORTED_MEDIA_TYPE"),
+                                ("X-Fixture: " + "a" * 2048 + "\r\n", 413, "PAYLOAD_TOO_LARGE")):
+        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"fixture\"\r\n"
+                + extra + f"\r\nx\r\n--{boundary}--\r\n").encode("ascii")
+        request = urllib.request.Request(root + "/auth/login", data=body, method="POST", headers={
+            "Content-Type": "multipart/form-data; boundary=" + boundary,
+            "Accept": "application/json",
+        })
+        try:
+            response = opener.open(request, timeout=15)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            assert response.status == status, "Unexpected multipart status"
+            assert response.headers.get_content_type() == "application/json"
+            envelope = json.load(response)
+        assert set(envelope) == {"data", "message", "error"}
+        assert envelope["data"] is None and envelope["error"]["code"] == code
+        assert envelope["error"]["fields"] == {}
+        assert envelope["error"]["message"] == (
+            "Unsupported Content-Type" if status == 415 else "Multipart request is too large")
+
+
 def verify_feature_openapi(document):
     """Check the real generated document, independent from the business API responses."""
     def resolve(schema):
@@ -723,6 +752,8 @@ def main():
         documentation_contract(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         report["completed"].append("runtime OpenAPI feature paths/schemas and Swagger UI")
         if mutating:
+            multipart_security_contract(os.environ)
+            report["completed"].append("bounded multipart headers, safe client errors and unchanged media rejection")
             mutating_contract(client, product, os.environ)
             report["completed"].append("session, authorization, order price snapshots and rollback")
             history_preservation_contract(os.environ)
