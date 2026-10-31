@@ -10,6 +10,13 @@ public class OrderInfo {
 	private String orderTable;
 	private String completed;
 	private Date orderTime;
+	private Integer totalPrice;
+	private String priceBasis;
+
+	public Integer getTotalPrice() { return totalPrice; }
+	public void setTotalPrice(Integer totalPrice) { this.totalPrice = totalPrice; }
+	public String getPriceBasis() { return priceBasis; }
+	public void setPriceBasis(String priceBasis) { this.priceBasis = priceBasis; }
 
 	private List<OrderDetailInfo> details;
 

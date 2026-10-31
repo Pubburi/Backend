@@ -19,6 +19,7 @@ import com.pubburi.pub.model.dto.Order;
 import com.pubburi.pub.model.dto.OrderDetail;
 import com.pubburi.pub.model.dto.OrderDetailInfo;
 import com.pubburi.pub.model.dto.OrderInfo;
+import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.Stamp;
 
 @Service
@@ -49,21 +50,46 @@ public class OrderServiceImpl implements OrderService {
 		if (isBlank(order.getCompleted())) {
 			order.setCompleted("N");
 		}
+		order.setPriceBasis("ORDER_SNAPSHOT");
+		order.setTotalPrice(0);
 		int result = orderDao.insert(order);
 		if (result <= 0) {
 			return 0;
 		}
 		int totalQuantity = 0;
+		int totalPrice = 0;
 		for (OrderDetail detail : normalizedDetails) {
 			detail.setOrderId(order.getoId());
+			Product product = productDao.selectByIdForUpdate(detail.getProductId());
+			if (product == null) {
+				throw new IllegalArgumentException("Product not found: " + detail.getProductId());
+			}
+			// Capture server prices under a row lock before any amount-dependent write.
+			if (product.getPrice() < 0) {
+				throw new IllegalArgumentException("Invalid product price: " + detail.getProductId());
+			}
+			detail.setProductName(product.getName());
+			detail.setProductType(product.getType());
+			detail.setProductImg(product.getImg());
+			detail.setUnitPrice(product.getPrice());
+			try {
+				detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
+				totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
+				totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
+			} catch (ArithmeticException ex) {
+				throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
+			}
 			if (productDao.incrementOrderCount(detail.getProductId(), detail.getQuantity()) <= 0) {
 				throw new IllegalArgumentException("Product not found: " + detail.getProductId());
 			}
-			totalQuantity += detail.getQuantity();
 		}
 		if (orderDetailDao.insertAll(normalizedDetails) != normalizedDetails.size()) {
 			throw new IllegalStateException("Order details could not be created");
 		}
+		if (orderDao.updateTotalPrice(order.getoId(), totalPrice) != 1) {
+			throw new IllegalStateException("Order total could not be captured");
+		}
+		order.setTotalPrice(totalPrice);
 		Stamp stamp = new Stamp();
 		stamp.setUserId(order.getUserId());
 		stamp.setOrderId(order.getoId());
@@ -167,7 +193,11 @@ public class OrderServiceImpl implements OrderService {
 					normalized.setQuantity(detail.getQuantity());
 					return normalized;
 				}
-				existing.setQuantity(existing.getQuantity() + detail.getQuantity());
+				try {
+					existing.setQuantity(Math.addExact(existing.getQuantity(), detail.getQuantity()));
+				} catch (ArithmeticException ex) {
+					throw new IllegalArgumentException("Order quantity is out of range", ex);
+				}
 				return existing;
 			});
 		}

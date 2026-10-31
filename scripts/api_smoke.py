@@ -83,6 +83,22 @@ class ApiClient:
         return envelope
 
 
+def change_ci_product(environ, product_id, price, name):
+    """Change only the proven disposable fixture; never accept SQL from a caller."""
+    require_disposable_database(environ)
+    if not isinstance(product_id, int) or product_id <= 0 or not isinstance(price, int) or price < 0:
+        raise ValueError("Invalid CI product mutation")
+    name_hex = name.encode("utf-8").hex()
+    statement = (f"UPDATE t_product SET price = {price}, "
+                 f"name = CONVERT(UNHEX('{name_hex}') USING utf8mb4) WHERE id = {product_id}")
+    subprocess.run([
+        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+        "mysql", "-u" + environ["PUBBURI_DB_USER"], environ["PUBBURI_DB_NAME"],
+        "--execute", statement,
+    ], capture_output=True, text=True, check=True,
+        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
+
+
 def read_only_contract(client):
     page = client.request("GET", "/products?page=1&size=1", 200)["data"]
     assert page["page"] == 1 and page["size"] == 1
@@ -129,7 +145,21 @@ def mutating_contract(client, product, environ):
     assert created["userId"] == user_id and created["completed"] == "N"
     assert len(created["details"]) == 1 and created["details"][0]["quantity"] == 3
     assert created["details"][0]["sumPrice"] == before_product["price"] * 3
+    assert created["details"][0]["unitPrice"] == before_product["price"]
+    assert created["totalPrice"] == before_product["price"] * 3
+    assert created["priceBasis"] == "ORDER_SNAPSHOT"
     client.request("GET", f"/orders/{created['oId']}", 200)
+    try:
+        changed_price = before_product["price"] + 123
+        change_ci_product(environ, product_id, changed_price, "CI renamed product")
+        changed_product = client.request("GET", f"/products/{product_id}", 200)["data"]
+        assert changed_product["price"] == changed_price and changed_product["name"] == "CI renamed product"
+        assert client.request("GET", f"/orders/{created['oId']}", 200)["data"] == created, (
+            "Changing catalog price/name changed an existing order snapshot")
+        assert client.request("GET", orders_path, 200)["data"]["items"] == [created], (
+            "Order page does not use the same immutable snapshots")
+    finally:
+        change_ci_product(environ, product_id, before_product["price"], before_product["name"])
     orders_before = client.request("GET", orders_path, 200)["data"]
     product_before = client.request("GET", f"/products/{product_id}", 200)["data"]
     profile_before = client.request("GET", f"/users/{user_id}/profile", 200)["data"]
@@ -162,7 +192,7 @@ def main():
         report["completed"].append("read-only HTTP envelope, pagination, auth and validation")
         if mutating:
             mutating_contract(client, product, os.environ)
-            report["completed"].append("session, authorization, order persistence and rollback")
+            report["completed"].append("session, authorization, order price snapshots and rollback")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")

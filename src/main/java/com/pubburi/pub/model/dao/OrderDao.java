@@ -33,6 +33,8 @@ public interface OrderDao {
 	 */
 	int insert(Order order);
 
+	int updateTotalPrice(@Param("orderId") int orderId, @Param("totalPrice") int totalPrice);
+
 	/**
 	 * 주문 정보를 수정한다.
 	 *

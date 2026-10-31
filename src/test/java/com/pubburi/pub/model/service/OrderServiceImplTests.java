@@ -25,6 +25,8 @@ import com.pubburi.pub.model.dto.OrderInfo;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.Stamp;
 import com.pubburi.pub.model.dto.User;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 class OrderServiceImplTests {
 	private final FakeOrderDao orderDao = new FakeOrderDao();
@@ -34,6 +36,59 @@ class OrderServiceImplTests {
 	private final FakeProductDao productDao = new FakeProductDao();
 	private final OrderServiceImpl orderService = new OrderServiceImpl(orderDao, orderDetailDao, stampDao, userDao,
 			productDao);
+
+	@Test
+	void makeOrderCapturesServerPriceRatherThanMutableCatalogOrClientValues() {
+		Order order = new Order();
+		order.setUserId("id01");
+		orderService.makeOrder(order, List.of(detail(1, 2)));
+		JsonNode saved = new ObjectMapper().valueToTree(orderDetailDao.insertedDetails.get(0));
+		assertThat(saved.path("unitPrice").asInt()).isEqualTo(1000);
+		assertThat(saved.path("sumPrice").asInt()).isEqualTo(2000);
+		assertThat(saved.path("productName").asText()).isEqualTo("상품 1");
+		assertThat(order.getTotalPrice()).isEqualTo(2000);
+		assertThat(order.getPriceBasis()).isEqualTo("ORDER_SNAPSHOT");
+		productDao.price = 5000;
+		assertThat(orderDetailDao.insertedDetails.get(0).getUnitPrice()).isEqualTo(1000);
+		assertThat(order.getTotalPrice()).isEqualTo(2000);
+	}
+
+	@Test
+	void clientSnapshotsAreDiscardedAndServerTotalsAreCaptured() {
+		Order order = new Order();
+		order.setUserId("id01");
+		order.setTotalPrice(1);
+		OrderDetail item = detail(1, 2);
+		item.setUnitPrice(1);
+		item.setProductName("client supplied");
+		orderService.makeOrder(order, List.of(item));
+		assertThat(orderDetailDao.insertedDetails.get(0).getProductName()).isEqualTo("상품 1");
+		assertThat(orderDetailDao.insertedDetails.get(0).getSumPrice()).isEqualTo(2000);
+		assertThat(orderDao.savedTotal).isEqualTo(2000);
+	}
+
+	@Test
+	void outOfRangeLineAmountStopsBeforeDetailsAndRewards() {
+		Order order = new Order();
+		order.setUserId("id01");
+		productDao.price = Integer.MAX_VALUE;
+		assertThatThrownBy(() -> orderService.makeOrder(order, List.of(detail(1, 2))))
+				.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("out of range");
+		assertThat(orderDetailDao.insertedDetails).isEmpty();
+		assertThat(stampDao.saved).isNull();
+		assertThat(productDao.orderCountIncrements).isEmpty();
+	}
+
+	@Test
+	void outOfRangeOrderTotalStopsBeforeDetailsAndRewards() {
+		Order order = new Order();
+		order.setUserId("id01");
+		productDao.price = 1_500_000_000;
+		assertThatThrownBy(() -> orderService.makeOrder(order, List.of(detail(1, 1), detail(2, 1))))
+				.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("out of range");
+		assertThat(orderDetailDao.insertedDetails).isEmpty();
+		assertThat(stampDao.saved).isNull();
+	}
 
 	@Test
 	void makeOrderAggregatesDuplicateProductsAndIncrementsStampsAtomically() {
@@ -56,6 +111,7 @@ class OrderServiceImplTests {
 		assertThat(stampDao.saved.getQuantity()).isEqualTo(6);
 		assertThat(userDao.incrementedId).isEqualTo("id01");
 		assertThat(userDao.incrementedQuantity).isEqualTo(6);
+		assertThat(order.getTotalPrice()).isEqualTo(6000);
 	}
 
 	@Test
@@ -122,6 +178,13 @@ class OrderServiceImplTests {
 		private List<OrderDetailInfo> details = new ArrayList<>();
 		private int batchDetailCalls;
 		private List<Integer> lastDetailOrderIds = List.of();
+		private int savedTotal;
+
+		@Override
+		public int updateTotalPrice(int orderId, int totalPrice) {
+			savedTotal = totalPrice;
+			return 1;
+		}
 
 		@Override
 		public List<Order> selectByUserId(String userId) {
@@ -308,6 +371,7 @@ class OrderServiceImplTests {
 	private static class FakeProductDao implements ProductDao {
 		private Map<Integer, Integer> orderCountIncrements = new LinkedHashMap<>();
 		private Set<Integer> missingProductIds = Set.of();
+		private int price = 1000;
 
 		@Override
 		public List<Product> selectAll() {
@@ -326,7 +390,12 @@ class OrderServiceImplTests {
 
 		@Override
 		public Product selectById(int id) {
-			return null;
+			return missingProductIds.contains(id) ? null : new Product(id, "상품 " + id, "탁주", price, "test.png", 6);
+		}
+
+		@Override
+		public Product selectByIdForUpdate(int id) {
+			return selectById(id);
 		}
 
 		@Override

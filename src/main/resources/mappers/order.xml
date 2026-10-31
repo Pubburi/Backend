@@ -5,9 +5,14 @@
 <mapper namespace="com.pubburi.pub.model.dao.OrderDao">
 
     <insert id="insert" parameterType="Order" useGeneratedKeys="true" keyProperty="oId" keyColumn="o_id">
-        INSERT INTO t_order (user_id, order_type, order_table, completed)
-        VALUES (#{userId}, #{orderType}, #{orderTable}, #{completed})
+        INSERT INTO t_order (user_id, order_type, order_table, completed, total_price, price_basis)
+        VALUES (#{userId}, #{orderType}, #{orderTable}, #{completed}, #{totalPrice}, #{priceBasis})
     </insert>
+
+    <update id="updateTotalPrice">
+        UPDATE t_order SET total_price = #{totalPrice}
+        WHERE o_id = #{orderId} AND price_basis = 'ORDER_SNAPSHOT'
+    </update>
 
     <update id="update" parameterType="Order">
         UPDATE t_order
@@ -21,20 +26,20 @@
     </delete>
 
     <select id="selectByUserId" parameterType="string" resultType="Order">
-        SELECT o_id, user_id, order_type, order_table, completed, order_time
+        SELECT o_id, user_id, order_type, order_table, completed, order_time, total_price, price_basis
         FROM t_order
         WHERE user_id = #{userId}
         ORDER BY o_id DESC
     </select>
 
     <select id="selectById" parameterType="int" resultMap="orderMap">
-        SELECT o_id, user_id, order_type, order_table, completed, order_time
+        SELECT o_id, user_id, order_type, order_table, completed, order_time, total_price, price_basis
         FROM t_order
         WHERE o_id = #{oId}
     </select>
 
     <select id="selectOrderInfo" parameterType="int" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         WHERE o_id = #{oId}
     </select>
@@ -45,13 +50,12 @@
             d.order_id AS orderId,
             d.product_id AS productId,
             d.quantity,
-            p.name,
-            p.type,
-            p.price AS unitPrice,
-            (p.price * d.quantity) AS sumPrice,
-            p.img
+            d.product_name AS name,
+            d.product_type AS type,
+            d.unit_price AS unitPrice,
+            d.sum_price AS sumPrice,
+            d.product_img AS img
         FROM t_order_detail d
-        JOIN t_product p ON d.product_id = p.id
         WHERE d.order_id = #{orderId}
         ORDER BY d.d_id ASC
     </select>
@@ -62,13 +66,12 @@
             d.order_id AS orderId,
             d.product_id AS productId,
             d.quantity,
-            p.name,
-            p.type,
-            p.price AS unitPrice,
-            (p.price * d.quantity) AS sumPrice,
-            p.img
+            d.product_name AS name,
+            d.product_type AS type,
+            d.unit_price AS unitPrice,
+            d.sum_price AS sumPrice,
+            d.product_img AS img
         FROM t_order_detail d
-        JOIN t_product p ON d.product_id = p.id
         WHERE d.order_id IN
         <foreach collection="orderIds" item="orderId" open="(" separator="," close=")">
             #{orderId}
@@ -77,14 +80,14 @@
     </select>
 
     <select id="selectOrderInfoListByUserId" parameterType="string" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         WHERE user_id = #{userId}
         ORDER BY o_id DESC
     </select>
 
     <select id="selectOrderInfoPageByUserId" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         WHERE user_id = #{userId}
         ORDER BY o_id DESC
@@ -98,13 +101,13 @@
     </select>
 
     <select id="selectAllOrderInfo" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         ORDER BY o_id DESC
     </select>
 
     <select id="selectAllOrderInfoPaged" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         ORDER BY o_id DESC
         LIMIT #{limit} OFFSET #{offset}
@@ -116,7 +119,7 @@
     </select>
 
 	<select id="getLastMonthOrder" parameterType="string" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         WHERE user_id = #{id}
           AND order_time > DATE_ADD(NOW(), INTERVAL -1 MONTH)
@@ -124,7 +127,7 @@
     </select>
 
     <select id="getLast6MonthOrder" parameterType="string" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
         FROM t_order
         WHERE user_id = #{id}
           AND order_time > DATE_ADD(NOW(), INTERVAL -6 MONTH)
@@ -138,6 +141,8 @@
         <result property="orderTable" column="order_table" />
         <result property="completed" column="completed" />
         <result property="orderTime" column="order_time" />
+        <result property="totalPrice" column="total_price" />
+        <result property="priceBasis" column="price_basis" />
     </resultMap>
 
     <resultMap id="orderInfoMap" type="OrderInfo">
@@ -146,6 +151,8 @@
 	    <result property="orderType" column="order_type" />
 	    <result property="orderTable" column="order_table" />
 	    <result property="orderTime" column="order_time" />
+        <result property="totalPrice" column="total_price" />
+        <result property="priceBasis" column="price_basis" />
 	    <result property="completed" column="completed" />
 	</resultMap>
 </mapper>

@@ -36,7 +36,7 @@ public final class ResponseMapper {
 		List<OrderDetailResponse> details = order.getDetails() == null ? List.of()
 				: order.getDetails().stream().map(ResponseMapper::orderDetail).toList();
 		return new OrderResponse(order.getoId(), order.getUserId(), order.getOrderType(), order.getOrderTable(),
-				order.getCompleted(), order.getOrderTime(), details);
+				order.getCompleted(), order.getOrderTime(), details, order.getTotalPrice(), order.getPriceBasis());
 	}
 
 	private static OrderDetailResponse orderDetail(OrderDetailInfo detail) {

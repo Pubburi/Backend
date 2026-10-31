@@ -60,6 +60,13 @@
 		WHERE id = #{id}
 	</select>
 
+	<select id="selectByIdForUpdate" parameterType="int" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		WHERE id = #{id}
+		FOR UPDATE
+	</select>
+
 	<insert id="insert" parameterType="Product" useGeneratedKeys="true" keyProperty="id">
 		INSERT INTO t_product (name, type, price, img, abv, order_count)
 		VALUES (#{name}, #{type}, #{price}, #{img}, #{abv}, COALESCE(#{orderCount}, 0))

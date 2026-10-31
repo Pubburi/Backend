@@ -10,6 +10,13 @@ public class Order {
 	private String orderTable;
 	private String completed;
 	private Timestamp orderTime;
+	private Integer totalPrice;
+	private String priceBasis;
+
+	public Integer getTotalPrice() { return totalPrice; }
+	public void setTotalPrice(Integer totalPrice) { this.totalPrice = totalPrice; }
+	public String getPriceBasis() { return priceBasis; }
+	public void setPriceBasis(String priceBasis) { this.priceBasis = priceBasis; }
 
 	// ✅ 주문 상세 리스트 필드 추가
 	private List<OrderDetail> details;
