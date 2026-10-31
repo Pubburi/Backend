@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.pubburi.pub.model.dao.MarketDao">
+
+    <!-- 전체 마켓 조회 -->
+    <select id="selectAll" resultType="Market">
+        SELECT
+            id,
+            name,
+            lat AS latitude,
+            lng AS longitude,
+            img AS image
+        FROM t_market
+        ORDER BY id
+    </select>
+
+    <select id="selectPaged" resultType="Market">
+        SELECT
+            id,
+            name,
+            lat AS latitude,
+            lng AS longitude,
+            img AS image
+        FROM t_market
+        ORDER BY id
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAll" resultType="int">
+        SELECT COUNT(*)
+        FROM t_market
+    </select>
+
+    <!-- ID로 마켓 조회 -->
+    <select id="selectById" parameterType="int" resultType="Market">
+        SELECT
+            id,
+            name,
+            lat AS latitude,
+            lng AS longitude,
+            img AS image
+        FROM t_market
+        WHERE id = #{id}
+    </select>
+
+    <!-- 마켓 삽입 -->
+    <insert id="insert" parameterType="Market" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_market (name, lat, lng, img)
+        VALUES (#{name}, #{latitude}, #{longitude}, #{image})
+    </insert>
+
+    <!-- 마켓 수정 -->
+    <update id="update" parameterType="Market">
+        UPDATE t_market
+        SET name = #{name},
+            lat = #{latitude},
+            lng = #{longitude},
+            img = #{image}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 마켓 삭제 -->
+    <delete id="delete" parameterType="int">
+        DELETE FROM t_market
+        WHERE id = #{id}
+    </delete>
+
+</mapper>

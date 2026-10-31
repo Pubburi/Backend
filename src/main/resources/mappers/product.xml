@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.pubburi.pub.model.dao.ProductDao">
+
+	<resultMap id="ProductResult" type="Product">
+		<id column="id" property="id" />
+		<result column="name" property="name" />
+		<result column="type" property="type" />
+		<result column="price" property="price" />
+		<result column="img" property="img" />
+		<result column="abv" property="abv" />
+		<result column="order_count" property="orderCount" />
+	</resultMap>
+
+	<select id="selectAll" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		ORDER BY id
+	</select>
+
+	<select id="selectFiltered" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		<where>
+			<if test="type != null">
+				type = #{type}
+			</if>
+			<if test="q != null">
+				AND (name LIKE CONCAT('%', #{q}, '%') OR type LIKE CONCAT('%', #{q}, '%'))
+			</if>
+		</where>
+		<choose>
+			<when test="sort == 'priceAsc'">ORDER BY price ASC, id ASC</when>
+			<when test="sort == 'priceDesc'">ORDER BY price DESC, id ASC</when>
+			<when test="sort == 'name'">ORDER BY name ASC, id ASC</when>
+			<otherwise>ORDER BY order_count DESC, id ASC</otherwise>
+		</choose>
+		LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="countFiltered" resultType="int">
+		SELECT COUNT(*)
+		FROM t_product
+		<where>
+			<if test="type != null">
+				type = #{type}
+			</if>
+			<if test="q != null">
+				AND (name LIKE CONCAT('%', #{q}, '%') OR type LIKE CONCAT('%', #{q}, '%'))
+			</if>
+		</where>
+	</select>
+
+	<select id="selectById" parameterType="int" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		WHERE id = #{id}
+	</select>
+
+	<insert id="insert" parameterType="Product" useGeneratedKeys="true" keyProperty="id">
+		INSERT INTO t_product (name, type, price, img, abv, order_count)
+		VALUES (#{name}, #{type}, #{price}, #{img}, #{abv}, COALESCE(#{orderCount}, 0))
+	</insert>
+
+	<update id="update" parameterType="Product">
+		UPDATE t_product
+		SET name = #{name},
+		    type = #{type},
+		    price = #{price},
+		    img = #{img},
+		    abv = #{abv},
+		    order_count = #{orderCount}
+		WHERE id = #{id}
+	</update>
+
+	<delete id="delete" parameterType="int">
+		DELETE FROM t_product WHERE id = #{id}
+	</delete>
+
+	<select id="selectPopular" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		ORDER BY order_count DESC, id ASC
+		LIMIT 12
+	</select>
+
+	<update id="incrementOrderCount">
+		UPDATE t_product
+		SET order_count = order_count + #{quantity}
+		WHERE id = #{productId}
+	</update>
+
+	<select id="selectByExactName" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		WHERE name = #{name}
+		LIMIT 1
+	</select>
+
+	<select id="selectTopNByTypeExcludeName" resultMap="ProductResult">
+		SELECT id, name, type, price, img, abv, order_count
+		FROM t_product
+		WHERE type = #{type}
+		  AND name != #{excludeName}
+		ORDER BY order_count DESC, id ASC
+		LIMIT #{n}
+	</select>
+</mapper>
