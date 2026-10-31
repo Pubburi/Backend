@@ -1,9 +1,11 @@
 # Backend 문제 해결 사례 등록부
 
-이전 사례 기준 소스는 main `defb45a`, BE01 수정 기준은 `a563c369`, BE02 수정 기준은 `56a76d1`이다. README에는 실제 현재 구현에 근거한 대표 사례 **4개**를 유지한다.
+이전 사례 기준 소스는 main `defb45a`, BE01 수정 기준은 `a563c369`, BE02 수정 기준은 `56a76d1`, BE03 수정 기준은 `0a3ddeec`다. README에는 실제 현재 구현에 근거한 대표 사례 **4개**를 유지한다.
 BE01 가격 스냅샷에 이어 BE02의 삭제 이력 분리와 개인정보 정리를 구현하고 Java 검증·패키징,
 Python 도구·저장소 검사와 실제 HTTP/DB 전후·전환을 검증했다. [BE01 계획](plans/2026-10-31-order-price-snapshot.md)과
 [BE02 계획](plans/2026-10-31-order-history-preservation.md)에 각 기준·범위·근거를 구분한다.
+BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를 구현하고 실제 HTTP 전후·003 전환과
+표준 smoke를 확인했다. [BE03 계획](plans/2026-11-01-session-authority.md)의 구현/검증과 향후 PR/main 게이트를 구분한다.
 개인별 구현 기여나 관측하지 않은 과거 장애를 추정하지 않는다. 소스 출처 기록은 PROVENANCE.md에 보존한다.
 
 ## 현재 선정
@@ -11,7 +13,7 @@ Python 도구·저장소 검사와 실제 HTTP/DB 전후·전환을 검증했다
 | ID | README 사례 | 채용 관점의 선정 이유 | 근거 범위 | 실측 성능 |
 |---|---|---|---|---|
 | BE-CS01 | 주문 페이지와 상세 일괄 조립 | 일대다 조회에서 페이지 경계·DB 왕복·메모리 조립의 선택을 설명한다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
-| BE-CS02 | 로그인 시 해시 점진 전환 | 원문이 없는 저장 데이터의 전환 시점과 인증 응답 경계를 다룬다. | 해시·서비스 및 기존 로그인 검증 | 미측정·성능 향상 주장 없음 |
+| BE-CS02 | 같은 ID 재가입·권한 변경의 기존 세션 구분 | 계정 인스턴스와 자격 수명, 실권한·표시·DB 실패·세션 경합을 구분하고 재발급의 버전 경계를 설명한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·003 전환, 제어한 단위 인터리빙 | 독립 경계 각각 1/1→0/1은 정확성; 성능 미측정 |
 | BE-CS03 | 중복 주문 상품 정규화 | 입력 단위와 저장·집계 단위의 차이, 여러 쓰기의 책임 경계를 드러낸다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
 | BE-CS04 | 가격·참조 삭제에서 주문 이력 분리 | 업무 기록과 활성 상품/회원의 수명·잠금·스냅샷·nullable/권한·개인정보·FK 전환 판단을 연결한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·기존 스키마 전환 | 가격 3/3→0/3, 상세 2/3→0/3·주문 유실 3/3→0/3은 각 실험의 정확성; 성능 미측정 |
 
@@ -28,10 +30,12 @@ Python 도구·저장소 검사와 실제 HTTP/DB 전후·전환을 검증했다
 
 ### BE-CS02
 
-- 구현: [PasswordHasher](../src/main/java/com/pubburi/pub/model/service/PasswordHasher.java), [UserServiceImpl.login](../src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java).
-- 기존 근거: [PasswordHasherTests](../src/test/java/com/pubburi/pub/model/service/PasswordHasherTests.java)의 BCrypt 일치/불일치 및 구형 해시 판별, [UserServiceImplTests](../src/test/java/com/pubburi/pub/model/service/UserServiceImplTests.java)의 `loginMigratesLegacySha256Password`.
-- 경계: 서비스 검증은 가짜 DAO를 사용한다. 실제 DB 업데이트 실패·행 미존재·구형 형식 종료 정책이 검증된 것은 아니다. 권한 회수/계정 변경의 기존 세션 반영(BE03)은 이 사례의 완료 성과에 포함하지 않는다.
-- 추가 확보: 실제 MySQL에서 올바른/틀린 암호 및 갱신 실패의 보존 여부를 확인하고 구형 형식 종료 기준을 문서화한다. BCrypt 계산 비용은 보안 전환 결과와 분리해 측정한다.
+- 구현: [AccessGuard](../src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java), [SessionUser](../src/main/java/com/pubburi/pub/controller/auth/SessionUser.java), [잠금 안의 수정/버전 캡처](../src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java), [UserUpdateResult](../src/main/java/com/pubburi/pub/model/dto/UserUpdateResult.java), [계정 조회/CAS SQL](../src/main/resources/mappers/user.xml), [003](migrations/003-session-auth-epoch.sql).
+- 실제 근거: 같은 초기 업무 시드의 실제 MySQL 8.4/JDK 17에서 강등 후 관리자 API 허용, 삭제 계정 인증, 동일 ID 재가입의 dormant 쿠키 접근, 비밀번호 변경 후 구세션 허용을 각각 1/1→0/1로 확인했다. 별도 표시 시나리오의 stale name/stamps도 1/1→0/1이다. [원값·SHA·재현·전환](measurements/2026-11-01-session-authority.md).
+- 전환: 기존 회원 6/주문 3/상세 4와 사용자 기존 필드 바이트를 보존했다. 6 distinct epoch·NULL 0·NOT NULL을 확인했고, 비밀번호/epoch 원문은 근거에 공개하지 않았다. CI 기본 collation 새 폐기 DB에서 표준 smoke·본인 비밀번호 수정 현재 세션 유지/다른 기존 세션 401을 확인했다.
+- 제어한 경합 근거: [AccessGuardTests](../src/test/java/com/pubburi/pub/controller/auth/AccessGuardTests.java)의 잠금 전/커밋 뒤 자격 회전, 프로필 갱신 epoch 미채택·로그인 전환/로그아웃·DB 실패 보존과 [UserSessionRefreshTests](../src/test/java/com/pubburi/pub/controller/rest/UserSessionRefreshTests.java)의 컨트롤러 사후 재조회 금지. 가짜 DAO 인터리빙을 실제 MySQL 동시 부하 결과로 바꾸지 않는다.
+- 경계: 각각 N=1의 로컬 고정 정확성 결과다. 신규 로그인/구 비밀번호 차단은 기존에도 동작한 대조 조건이고, 이를 새 성과로 세지 않는다. 전체 요청의 인증과 쓰기를 계정 삭제와 원자적으로 묶거나 모든 in-flight 작업을 취소한 것은 아니다. Guard DB 읽기/수정 잠금 비용·분산 세션·전체 동시성은 미측정/미완료다.
+- 남은 근거: 실제 DB 동시 실행·실패 주입을 BE06/C04의 업무 경계와 맞춰 확장하고 요청별 조회 비용을 성능 조건부터 정해 측정한다. 구형 해시 형식 종료 정책·실제 DB의 재해시 경합은 별도 확인하며 보안 형식 전환을 지연 개선으로 표현하지 않는다.
 
 ### BE-CS03
 
@@ -48,7 +52,7 @@ Python 도구·저장소 검사와 실제 HTTP/DB 전후·전환을 검증했다
 - 전환: 주문 6개·상세 8개 보존, 기존 주문은 LEGACY_ESTIMATE. 파일 전체 재실행은 중복 컬럼 오류로 중단되고 행 수/총액 추가 변화 없음. 자동 멱등 마이그레이션으로 포장하지 않는다.
 - BE02 결과: 기준 56a76d의 동일 세 주문에서 상품 A 삭제→회원 삭제를 순차 관찰했다. 상품 상세 보존 위반 2/3→0/3(상세 4→2가 4→4로 변경), 이어 회원 삭제의 주문 유실 3/3→0/3(주문 3→0이 3→3으로 변경). 의도된 productId/userId/회원 메모 null은 오류로 세지 않는다. [삭제 측정 원값·조건](measurements/2026-10-31-order-history-preservation.md).
 - BE02 전환: 첫 실제 1826 FK 이름/동일 ALTER 실패를 기록하고 공식 MySQL 제약을 확인해 제거/추가를 분리·새 이름으로 수정했다. 실제 재검증에서 기존 주문 3개·상세 4개·59,100원과 SET NULL을 보존했다.
-- 한계: 로컬 세 주문의 단계별 정확성 실험이며 실사용자 장애율·성능 결과가 아니다. 추가 SELECT/삭제 잠금 비용, BE03의 세션 회수·전체 동시성·Frontend 화면 연결은 별도 과제다. 과거 이미 삭제된 행을 복구했다고 주장하지 않는다.
+- 한계: 로컬 세 주문의 단계별 정확성 실험이며 실사용자 장애율·성능 결과가 아니다. 이 실험 시점 BE03 세션 회수는 후속이었으며 현재 결과는 별도 BE-CS02/측정 문서를 따른다. 추가 SELECT/삭제 잠금 비용·전체 동시성은 남아 있다. 과거 이미 삭제된 행을 복구했다고 주장하지 않는다.
 
 ### BE01 교체 결정
 
@@ -58,11 +62,22 @@ Python 도구·저장소 검사와 실제 HTTP/DB 전후·전환을 검증했다
 
 삭제 이력은 가격 스냅샷만으로 보장되지 않음을 실제 FK/HTTP에서 확인했다. soft-delete와 nullable FK의 보관/조회 비용을 비교하고, 회원 자유 입력 정리·재가입 소유권·중간 DDL 실패를 같은 업무 이력의 수명 경계로 설명할 근거가 늘었다. BE-CS04를 가격 단독 사례에서 이 이력 보존 사례로 보강하고 기존 입력 정규화·페이지 조립·인증 사례는 유지한다. 같은 주문 이력을 두 슬롯으로 늘리지 않으며 총 네 개다. BE01 가격 실험과 BE02 순차 삭제 실험은 기준 커밋과 분모가 달라 측정 원값을 따로 관리한다.
 
+### BE03 교체 결정
+
+기존 BE-CS02의 SHA-256→BCrypt 점진 전환은 원문 없는 저장 데이터의 전환 시점을 설명한 유효한
+사례이며 기준 소스 `0a3ddeec`의 README와 해시/서비스 기록에 보존한다. 이번에는 강등·삭제·
+동일 ID 재생성 뒤 구세션 접근을 실제 DB/HTTP에서 재현해 업무 영향이 더 직접적이다. 단순 ID
+확인과 전체 세션 색인을 비교하고, 잠금 안/뒤 버전 경계·공개 계약·DB 실패·수동 전환 비용까지
+연결한다. 첫 수정이 순차 HTTP를 통과해도 재발급 경합을 놓쳤음을 기록하고 제어한 인터리빙으로
+수정 범위를 좁힌 증거도 있다. 이 실제 영향·원인 분석·대안 판단·구현/재현 근거가 더 강하므로
+기존 인증 슬롯 하나만 교체한다. 해시 지원 자체는 유지하고 다른 세 사례/순서는 보존했다.
+최신성·코드량·테스트 총수로 순위를 정하거나 같은 인증 문제를 다섯 번째로 늘리지 않는다.
+
 ## 교체 후보와 개선 순서
 
 | 후보 | 확보할 근거 | 현재 사례와 비교할 기술 판단 |
 |---|---|---|
-| BE03 권한 회수 세션 반영 | 기존 세션의 접근 거부·동시 세션·계정 삭제 결과 | 해시 전환 사례와 다른 인증 상태 경계를 실제로 해결했는지 |
+| 세션·업무 경계 동시성 확장 | 실제 DB 동시 요청·자격 변경/로그아웃 순서와 권한/쓰기 결과 | BE-CS02의 제어한 인터리빙 경계를 실제 DB 재현으로 강화할 수 있는지 |
 | BE06 실제 주문 롤백·동시성 | 실제 MySQL 실패 주입·중복/동시 요청·원자성 결과 | 가짜 DAO에 한정된 BE-CS03을 더 강한 실제 데이터 근거로 교체할 수 있는지 |
 | 주문 조회 최적화 실측 | 동일 데이터·캐시·빌드·부하의 전후 원값과 분포 | BE-CS01의 구현 설명을 실제 병목 해소 근거로 강화할 수 있는지 |
 

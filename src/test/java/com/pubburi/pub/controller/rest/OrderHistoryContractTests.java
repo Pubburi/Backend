@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.auth.SessionUser;
+import com.pubburi.pub.controller.auth.SessionFixtures;
 import com.pubburi.pub.controller.response.ResponseMapper;
 import com.pubburi.pub.model.dto.OrderDetailInfo;
 import com.pubburi.pub.model.dto.OrderInfo;
@@ -37,7 +38,8 @@ class OrderHistoryContractTests {
 
 	@Test
 	void nullOwnerCanOnlyBeReadByAnAdministrator() {
-		AccessGuard guard = new AccessGuard();
+		AccessGuard guard = SessionFixtures.guard(SessionFixtures.user("same-id", "USER"),
+				SessionFixtures.user("admin", "ADMIN"));
 		MockHttpSession formerOrRecreatedUser = session("same-id", "USER");
 		assertThatThrownBy(() -> guard.requireSelfOrAdmin(formerOrRecreatedUser, null))
 				.isInstanceOfSatisfying(ResponseStatusException.class,
@@ -47,7 +49,7 @@ class OrderHistoryContractTests {
 
 	private static MockHttpSession session(String id, String role) {
 		MockHttpSession session = new MockHttpSession();
-		session.setAttribute(AccessGuard.SESSION_USER, new SessionUser(id, "회원", 0, role));
+		session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(SessionFixtures.user(id, role)));
 		return session;
 	}
 }

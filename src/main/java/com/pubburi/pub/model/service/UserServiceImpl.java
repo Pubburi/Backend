@@ -1,6 +1,7 @@
 package com.pubburi.pub.model.service;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -9,6 +10,8 @@ import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
 import com.pubburi.pub.model.dao.UserDao;
 import com.pubburi.pub.model.dto.User;
+import com.pubburi.pub.model.dto.UserUpdate;
+import com.pubburi.pub.model.dto.UserUpdateResult;
 
 @Service
 public class UserServiceImpl implements UserService {
@@ -43,6 +46,7 @@ public class UserServiceImpl implements UserService {
 			return 0;
 		}
 		user.setPass(passwordHasher.hash(user.getPass()));
+		user.setAuthEpoch(UUID.randomUUID().toString());
 		if (isBlank(user.getRole())) {
 			user.setRole("USER");
 		}
@@ -51,23 +55,30 @@ public class UserServiceImpl implements UserService {
 
 	@Override
 	@Transactional
-	public int modifyUser(User user) {
-		if (user == null || isBlank(user.getId())) {
-			return 0;
+	public UserUpdateResult modifyUser(String id, UserUpdate changes) {
+		if (isBlank(id) || changes == null) {
+			return null;
 		}
-		User existing = userDao.selectById(user.getId());
+		User existing = userDao.selectByIdForUpdate(id);
 		if (existing == null) {
-			return 0;
+			return null;
 		}
-		if (isBlank(user.getPass())) {
+		User user = new User();
+		user.setId(id);
+		user.setName(changes.name() == null ? existing.getName() : changes.name());
+		user.setStamps(changes.stamps() == null ? existing.getStamps() : changes.stamps());
+		user.setRole(isBlank(changes.role()) ? existing.getRole() : changes.role());
+		if (isBlank(changes.pass())) {
 			user.setPass(existing.getPass());
+			user.setAuthEpoch(existing.getAuthEpoch());
 		} else {
-			user.setPass(passwordHasher.hash(user.getPass()));
+			user.setPass(passwordHasher.hash(changes.pass()));
+			user.setAuthEpoch(UUID.randomUUID().toString());
 		}
-		if (isBlank(user.getRole())) {
-			user.setRole(existing.getRole());
+		if (userDao.update(user) != 1) {
+			throw new IllegalStateException("User could not be updated");
 		}
-		return userDao.update(user);
+		return new UserUpdateResult(id, existing.getAuthEpoch(), user.getAuthEpoch(), !isBlank(changes.pass()));
 	}
 
 	@Override
@@ -113,7 +124,15 @@ public class UserServiceImpl implements UserService {
 			return null;
 		}
 		if (passwordHasher.needsUpgrade(stored.getPass())) {
-			userDao.updatePassword(stored.getId(), passwordHasher.hash(user.getPass()));
+			int upgraded = userDao.upgradePassword(stored.getId(), stored.getPass(), stored.getAuthEpoch(),
+					passwordHasher.hash(user.getPass()));
+			if (upgraded != 1) {
+				// A concurrent reset/recreation must not be overwritten by an old hash upgrade.
+				stored = userDao.selectByIdForUpdate(user.getId());
+				if (stored == null || !passwordHasher.matches(user.getPass(), stored.getPass())) {
+					return null;
+				}
+			}
 		}
 		return stored.withoutPass();
 	}

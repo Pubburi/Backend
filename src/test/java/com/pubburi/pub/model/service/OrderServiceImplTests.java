@@ -322,6 +322,9 @@ class OrderServiceImplTests {
 		public User selectByIdForUpdate(String userId) { return selectById(userId); }
 
 		@Override
+		public User selectSessionIdentity(String id, String authEpoch) { return null; }
+
+		@Override
 		public List<User> selectAll() {
 			return List.of();
 		}
@@ -347,7 +350,7 @@ class OrderServiceImplTests {
 		}
 
 		@Override
-		public int updatePassword(String id, String pass) {
+		public int upgradePassword(String id, String expectedHash, String authEpoch, String pass) {
 			return 1;
 		}
 

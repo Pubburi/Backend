@@ -29,6 +29,8 @@ import com.pubburi.pub.controller.response.ProfileResponse;
 import com.pubburi.pub.controller.response.ResponseMapper;
 import com.pubburi.pub.controller.response.UserResponse;
 import com.pubburi.pub.model.dto.User;
+import com.pubburi.pub.model.dto.UserUpdate;
+import com.pubburi.pub.model.dto.UserUpdateResult;
 import com.pubburi.pub.model.service.GradeService;
 import com.pubburi.pub.model.service.OrderService;
 import com.pubburi.pub.model.service.UserService;
@@ -63,13 +65,15 @@ public class UserRestController {
 		if (user == null) {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
 		}
-		session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(user));
+		accessGuard.establishSession(session, user);
 		return ResponseEntity.ok(ApiResponse.ok(ResponseMapper.user(user)));
 	}
 
 	@PostMapping("/auth/logout")
 	public ResponseEntity<ApiResponse<Void>> logout(HttpSession session) {
-		session.invalidate();
+		synchronized (session) {
+			session.invalidate();
+		}
 		return ResponseEntity.ok(ApiResponse.message(null, "logged out"));
 	}
 
@@ -126,24 +130,16 @@ public class UserRestController {
 	public ResponseEntity<ApiResponse<Boolean>> updateUser(@PathVariable String id,
 			@Valid @RequestBody AdminUserRequest request, HttpSession session) {
 		SessionUser admin = accessGuard.requireAdmin(session);
-		User existing = userService.getUserById(id);
-		if (existing == null) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
-		}
 		if (admin.id().equals(id) && request.role() != null && !"ADMIN".equals(request.role())) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Current admin role cannot be removed");
 		}
-		User user = new User();
-		user.setId(id);
-		user.setName(request.name() == null ? existing.getName() : request.name());
-		user.setPass(request.pass());
-		user.setStamps(request.stamps() == null ? existing.getStamps() : request.stamps());
-		user.setRole(request.role() == null ? existing.getRole() : request.role());
-		if (userService.modifyUser(user) <= 0) {
+		UserUpdate changes = new UserUpdate(request.name(), request.pass(), request.stamps(), request.role());
+		UserUpdateResult updated = userService.modifyUser(id, changes);
+		if (updated == null) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
 		}
 		if (admin.id().equals(id)) {
-			session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(userService.getUserById(id)));
+			accessGuard.refreshAfterCredentialChange(session, admin, updated);
 		}
 		return ResponseEntity.ok(ApiResponse.ok(true));
 	}

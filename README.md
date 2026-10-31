@@ -34,7 +34,7 @@
 
 | 영역 | 현재 제공 기능 |
 |---|---|
-| 회원 | 회원가입, 세션 로그인·로그아웃, 본인·관리자 접근 제어 |
+| 회원 | 회원가입, 세션 로그인·로그아웃, 현재 계정·역할 기반 접근 제어, 삭제·비밀번호 변경 세션 회수 |
 | 상품 | 목록·검색·주종 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 후기 | 상품별 평점·후기 조회와 작성·수정·삭제 |
 | 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 상품·회원 삭제 후 이력 보존, 관리자 완료 처리·스탬프 |
@@ -72,7 +72,7 @@ flowchart LR
 
 ## 🧩 문제 해결
 
-데이터 조회·입력 정규화·인증 전환·주문 금액 보존에서 내린 판단을 정리했습니다.
+데이터 조회·입력 정규화·세션의 계정 수명·주문 이력 보존에서 내린 판단을 정리했습니다.
 아래 결과는 현재 구현의 동작 범위이며, 응답 시간·처리량의 전후 개선 수치는 아직 측정하지 않았습니다.
 
 ### 1. 주문 페이지를 유지하면서 상세를 일괄 조립하기
@@ -116,65 +116,77 @@ private List<OrderInfo> attachDetails(List<OrderInfo> orders) {
 
 [주문 조립 메서드](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [ID 집합으로 상세를 조회하는 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml)
 
-### 2. 기존 로그인을 유지하며 비밀번호 해시를 점진적으로 전환하기
+### 2. 같은 ID 재가입과 권한 변경에서 기존 세션을 구분하기
 
 #### 문제
 
-SHA-256으로 저장한 기존 비밀번호와 BCrypt를 사용하는 신규 비밀번호가 공존할 때, 저장 형식 전환 때문에 기존 사용자의 정상 로그인을 막지 않아야 합니다.
+관리자 권한을 내리거나 계정을 삭제해도 기존 쿠키는 계속 인증됐습니다. 삭제 중 사용하지 않은 쿠키는 같은 ID로 재가입한 새 계정의 프로필에도 접근했습니다.
 
 #### 원인
 
-저장된 해시만으로 새 BCrypt 해시를 만들 수는 없습니다. 사용자가 입력한 원문이 있는 인증 시점에 기존 형식의 일치 여부와 갱신 필요 여부를 함께 판단해야 합니다.
+Guard가 로그인 때의 역할·이름·스탬프를 신뢰했습니다. ID만 DB에서 재확인해도 삭제 후 같은 문자열 ID로 만든 계정은 구분하지 못합니다. 본인 정보 수정 뒤 계정을 다시 읽어 세션을 갱신하는 방법도 다른 관리자가 그 사이 바꾼 자격을 구세션에 부여할 수 있었습니다.
 
 #### 해결
 
-해시 형식에 맞춰 비밀번호를 확인하고, 인증에 성공한 구형 해시만 BCrypt 갱신 경로로 보냅니다. 신규 가입·비밀번호 수정은 BCrypt를 사용하고 로그인 반환 값에서는 비밀번호 필드를 제거합니다.
+가입마다 내부 `auth_epoch`를 만들고 명시적 비밀번호 변경 때 회전합니다. 보호 요청은 ID와 epoch가 모두 일치하는 현재 계정을 조회해 역할·표시 정보를 사용합니다. 본인 비밀번호 수정은 잠금 안에서 캡처한 변경 전·후 버전만 반환하고, 관측한 세션이 변경 전 버전과 같을 때만 그 수정이 만든 버전으로 갱신합니다. 일반 정보 수정은 세션 버전을 갱신하지 않습니다.
 
 #### 결과
 
-BCrypt와 기존 SHA-256을 구분하는 인증 경로, 인증 성공 후 구형 해시 갱신 경로가 구현돼 있습니다. 잘못된 비밀번호는 갱신 경로에 진입하지 않으며 로그인 응답에는 저장 해시를 담지 않습니다.
+동일 조건의 로컬 MySQL 8.4·실제 HTTP에서 권한 강등 후 관리자 API 허용, 삭제 후 인증, 같은 ID 재가입 후 구쿠키 접근, 비밀번호 변경 후 구세션 인증이 **각각 1/1→0/1**로 바뀌었습니다. 강등은 403, 나머지는 401이며 새 계정 로그인은 유지합니다. 별도 이름/스탬프 시나리오의 오래된 표시도 1/1→0/1입니다. 서로 다른 각 1회 시나리오의 정확성 결과로, 실사용자 오류율·성능 수치는 아닙니다. [원값·조건·전환 근거](docs/measurements/2026-11-01-session-authority.md)를 분리해 기록했습니다.
 
 #### 대체안/회고
 
-전체 사용자에게 비밀번호 재설정을 요구하면 구형 형식을 빠르게 종료할 수 있지만 사용자 조치가 필요합니다. 현재는 로그인 시점 전환을 선택했습니다. 구형 형식 지원 종료 정책과 실제 DB의 갱신 실패 처리, 권한 변경을 기존 세션에 반영하는 문제는 별도 개선 대상으로 남아 있습니다.
+서버의 모든 세션을 찾아 지우는 방법은 계정별 세션 색인과 수명 관리가 필요합니다. 현재는 계정 행의 버전과 요청 시점 DB 확인을 선택했습니다. 대신 Guard마다 DB 읽기 비용이 들고 이미 인증 검사를 통과한 요청 전체를 취소하지는 않습니다. DB 실패에는 저장된 권한으로 허용하거나 세션을 지우지 않습니다. 분산 세션·전체 동시성·지연 측정은 남아 있으며, 해시 형식만 바꾸는 재해시는 자격 회전과 구분합니다.
 
 #### 코드
 
 ~~~java
-public boolean matches(String raw, String hashed) {
-	if (raw == null || hashed == null) {
-		return false;
+public SessionUser currentUser(HttpSession session) {
+	Object value = value(session);
+	if (!(value instanceof SessionUser observed)) {
+		return null;
 	}
-	if (isBcrypt(hashed)) {
-		return encoder.matches(raw, hashed);
+	if (observed.id() == null || observed.authEpoch() == null || observed.authEpoch().isBlank()) {
+		clearIfCurrent(session, observed);
+		return null;
 	}
-	return hashed.equals(legacySha256(raw));
-}
-
-public boolean needsUpgrade(String hashed) {
-	return hashed != null && !isBcrypt(hashed);
+	// DB 예외는 전파한다. 저장된 역할로 대신 허용하거나 세션을 지우지 않는다.
+	User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
+	if (!sameIdentity(value(session), observed)) {
+		return null;
+	}
+	if (current == null) {
+		clearIfCurrent(session, observed);
+		return null;
+	}
+	return SessionUser.from(current);
 }
 ~~~
 
 ~~~java
-@Override
-@Transactional
-public User login(User user) {
-	if (user == null || isBlank(user.getId()) || isBlank(user.getPass())) {
-		return null;
+public void refreshAfterCredentialChange(HttpSession session, SessionUser observed, UserUpdateResult updated) {
+	if (!updated.credentialsChanged()) {
+		return;
 	}
-	User stored = userDao.selectById(user.getId());
-	if (stored == null || !passwordHasher.matches(user.getPass(), stored.getPass())) {
-		return null;
+	try {
+		synchronized (session) {
+			if (sameIdentity(value(session), observed)) {
+				if (!java.util.Objects.equals(updated.id(), observed.id())
+						|| !java.util.Objects.equals(updated.previousAuthEpoch(), observed.authEpoch())) {
+					session.removeAttribute(SESSION_USER);
+				} else {
+					session.setAttribute(SESSION_USER, new SessionUser(observed.id(), observed.name(),
+							observed.stamps(), observed.role(), updated.authEpoch()));
+				}
+			}
+		}
+	} catch (IllegalStateException invalidated) {
+		// 동시 로그아웃으로 제거된 신원을 복원하지 않는다.
 	}
-	if (passwordHasher.needsUpgrade(stored.getPass())) {
-		userDao.updatePassword(stored.getId(), passwordHasher.hash(user.getPass()));
-	}
-	return stored.withoutPass();
 }
 ~~~
 
-[해시 형식 판단](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/PasswordHasher.java) · [로그인과 갱신 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java)
+[현재 계정 확인·조건부 세션 갱신](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java) · [잠금 안의 버전 캡처](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [ID·epoch 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml) · [계약·전환](docs/SESSION-AUTHORITY.md)
 
 ### 3. 중복 상품을 정규화한 뒤 같은 수량으로 주문과 적립을 처리하기
 
@@ -248,7 +260,7 @@ DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상�
 
 #### 대체안/회고
 
-주문 스냅샷과 nullable FK로 업무 기록을 활성 참조에서 분리하고 회원 이름/비밀번호를 복제하지 않았습니다. 과거 가격은 추정임을 명시합니다. FK 전환에서 실제 MySQL 1826 오류를 만나 동일 ALTER의 제거/추가를 분리했고, 쓰기 중단·백업·중간 상태 확인이 필요해졌습니다. 상품별 가격 SELECT와 회원 삭제 잠금의 비용이 있으며, BE03 세션 회수·전체 동시성·화면 연결은 별도 과제입니다. 이미 삭제된 행을 복원한 결과로 확대하지 않습니다.
+주문 스냅샷과 nullable FK로 업무 기록을 활성 참조에서 분리하고 회원 이름/비밀번호를 복제하지 않았습니다. 과거 가격은 추정임을 명시합니다. FK 전환에서 실제 MySQL 1826 오류를 만나 동일 ALTER의 제거/추가를 분리했고, 쓰기 중단·백업·중간 상태 확인이 필요해졌습니다. 상품별 가격 SELECT와 회원 삭제 잠금의 비용은 미측정이며 전체 동시성 검증이 남아 있습니다. 삭제 계정 세션의 회수는 두 번째 사례의 별도 인증 경계로 처리합니다. 이미 삭제된 행을 복원한 결과로 확대하지 않습니다.
 
 #### 코드
 
