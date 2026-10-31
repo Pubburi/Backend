@@ -14,7 +14,7 @@ names = (
     .decode()
     .split("\0")
 )
-blocked_dirs = {".venv", "node_modules", "target", "dist", "__pycache__", ".cache"}
+blocked_dirs = {".venv", "node_modules", "target", "dist", "__pycache__", ".cache", ".pubburi"}
 patterns = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
