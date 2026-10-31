@@ -143,14 +143,14 @@ INSERT INTO t_product (name, type, price, img, abv, order_count) VALUES
 -- 주문 테이블
 CREATE TABLE t_order (
     o_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NULL,
     order_type VARCHAR(10) NOT NULL,
     order_table VARCHAR(20),
     order_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed CHAR(1) DEFAULT 'N',
     total_price INT DEFAULT NULL,
     price_basis VARCHAR(20) NOT NULL DEFAULT 'LEGACY_ESTIMATE',
-    CONSTRAINT fk_order_user FOREIGN KEY (user_id) REFERENCES t_user(id) ON DELETE CASCADE
+    CONSTRAINT fk_order_history_user FOREIGN KEY (user_id) REFERENCES t_user(id) ON DELETE SET NULL
 );
 
 INSERT INTO t_order (user_id, order_type, order_table) VALUES
@@ -162,7 +162,7 @@ INSERT INTO t_order (user_id, order_type, order_table) VALUES
 CREATE TABLE t_order_detail (
     d_id INT AUTO_INCREMENT PRIMARY KEY,
     order_id INT NOT NULL,
-    product_id INT NOT NULL,
+    product_id INT NULL,
     quantity INT NOT NULL DEFAULT 1,
     product_name VARCHAR(100) NOT NULL,
     product_type VARCHAR(20) NOT NULL,
@@ -170,7 +170,7 @@ CREATE TABLE t_order_detail (
     unit_price INT NOT NULL,
     sum_price INT NOT NULL,
     CONSTRAINT fk_order_detail_order FOREIGN KEY (order_id) REFERENCES t_order(o_id) ON DELETE CASCADE,
-    CONSTRAINT fk_order_detail_product FOREIGN KEY (product_id) REFERENCES t_product(id) ON DELETE CASCADE
+    CONSTRAINT fk_order_history_product FOREIGN KEY (product_id) REFERENCES t_product(id) ON DELETE SET NULL
 );
 
 -- Existing demo orders have no recoverable historical prices: label the estimates.

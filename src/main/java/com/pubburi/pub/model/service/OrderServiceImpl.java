@@ -183,7 +183,7 @@ public class OrderServiceImpl implements OrderService {
 	private List<OrderDetail> normalizeDetails(List<OrderDetail> details) {
 		Map<Integer, OrderDetail> byProductId = new LinkedHashMap<>();
 		for (OrderDetail detail : details) {
-			if (detail == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
+			if (detail == null || detail.getProductId() == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
 				throw new IllegalArgumentException("Invalid order detail");
 			}
 			byProductId.compute(detail.getProductId(), (productId, existing) -> {

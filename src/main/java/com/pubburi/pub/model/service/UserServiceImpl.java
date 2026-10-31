@@ -73,10 +73,15 @@ public class UserServiceImpl implements UserService {
 	@Override
 	@Transactional
 	public int removeUser(String id) {
-		if (isBlank(id)) {
+		if (isBlank(id) || userDao.selectByIdForUpdate(id) == null) {
 			return 0;
 		}
-		return userDao.delete(id);
+		// Block new order FK references until notes are cleared and the user is deleted.
+		userDao.clearOrderNotes(id);
+		if (userDao.delete(id) != 1) {
+			throw new IllegalStateException("User could not be deleted");
+		}
+		return 1;
 	}
 
 	@Override

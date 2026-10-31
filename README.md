@@ -37,7 +37,7 @@
 | 회원 | 회원가입, 세션 로그인·로그아웃, 본인·관리자 접근 제어 |
 | 상품 | 목록·검색·주종 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 후기 | 상품별 평점·후기 조회와 작성·수정·삭제 |
-| 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 관리자 완료 처리, 스탬프·등급 |
+| 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 상품·회원 삭제 후 이력 보존, 관리자 완료 처리·스탬프 |
 | 관리자 | 상품·회원·후기·매장·주문 관리 |
 
 현재 인기 상품은 누적 주문 수 정렬입니다. 개인화 추천과 추천 서버 호출은 후속 작업입니다.
@@ -196,7 +196,7 @@ DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상�
 
 #### 대체안/회고
 
-클라이언트 합산은 화면 상태를 단순하게 만들지만 다른 클라이언트나 직접 API 호출의 입력까지 보장하지는 않습니다. 서버 정규화를 공통 경계로 선택했습니다. 현재 HTTP·폐기 DB의 쓰기 후 실패 경로까지 검증하지만 모든 단계의 장애·동시성·재시도 멱등성과 상품 삭제 뒤 이력 보존은 별도 개선이 필요합니다.
+클라이언트 합산은 화면 상태를 단순하게 만들지만 다른 클라이언트나 직접 API 호출의 입력까지 보장하지는 않습니다. 서버 정규화를 공통 경계로 선택했습니다. 현재 HTTP·폐기 DB의 쓰기 후 실패 경로까지 검증하지만 모든 단계의 장애·동시성·재시도 멱등성은 별도 개선이 필요합니다.
 
 #### 코드
 
@@ -204,7 +204,7 @@ DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상�
     private List<OrderDetail> normalizeDetails(List<OrderDetail> details) {
         Map<Integer, OrderDetail> byProductId = new LinkedHashMap<>();
         for (OrderDetail detail : details) {
-            if (detail == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
+            if (detail == null || detail.getProductId() == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
                 throw new IllegalArgumentException("Invalid order detail");
             }
             byProductId.compute(detail.getProductId(), (productId, existing) -> {
@@ -228,27 +228,27 @@ DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상�
 
 [입력 정규화와 트랜잭션 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 집계 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [스탬프 증가 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml)
 
-### 4. 상품 가격이 바뀌어도 과거 주문 금액을 보존하기
+### 4. 가격 변경·참조 삭제에서 주문 이력을 분리하기
 
 #### 문제
 
-주문이 끝난 뒤 상품 가격을 바꾸자 과거 주문 내역의 금액도 달라졌습니다. 주문 당시 가격을 별도로 남기지 않아 관리자 상품 수정이 이미 만들어진 주문의 의미까지 바꾸는 문제였습니다.
+주문이 끝난 뒤 상품 가격을 바꾸면 과거 금액이 달라졌고, 상품·회원 삭제는 상세나 주문 자체를 지웠습니다. 활성 상품/계정의 수명이 이미 만들어진 주문 기록까지 바꾸는 문제였습니다.
 
 #### 원인
 
-상세 테이블에는 상품 ID와 수량만 있었고 조회할 때 현재 상품 가격을 JOIN해 합계를 계산했습니다. 과거 단가가 없는 기존 주문을 새 스키마로 옮기면서 현재 가격을 과거 실제 금액으로 표시하면 데이터의 출처도 잘못 전달됩니다.
+가격은 현재 상품 JOIN에, 행 생존은 상품·회원 FK의 CASCADE에 묶여 있었습니다. 가격 스냅샷만 추가해도 FK가 상세 행을 지우면 표현/수량이 사라집니다. 계정을 계속 남기는 방식은 이름·자격정보 보관과 모든 조회의 삭제 상태 처리를 요구합니다.
 
 #### 해결
 
-트랜잭션 안에서 상품을 FOR UPDATE로 잠금 조회하고 서버의 상품명·단가·수량별 합계와 주문 총액을 저장합니다. 이후 단건/목록 조회는 저장한 스냅샷을 읽습니다. 새 주문은 ORDER_SNAPSHOT, 과거 단가를 복구할 수 없어 전환 시 고정한 추정값은 LEGACY_ESTIMATE로 구분합니다. 기존 응답 필드를 유지하고 totalPrice·priceBasis를 추가했습니다.
+트랜잭션 안에서 상품을 FOR UPDATE로 잠금 조회하고 서버의 상품명·단가·수량별 합계와 주문 총액을 저장합니다. 이후 단건/목록 조회는 저장한 스냅샷을 읽습니다. 새 주문은 ORDER_SNAPSHOT, 과거 단가를 복구할 수 없어 전환 시 고정한 추정값은 LEGACY_ESTIMATE로 구분합니다. 상품·회원 FK는 nullable/SET NULL로 바꿔 참조만 끊고 주문을 보존합니다. 회원 삭제는 회원 잠금→자유 입력 메모 정리→계정 삭제 순서로 처리하며 null 소유자 주문은 관리자만 조회합니다.
 
 #### 결과
 
-같은 초기 데이터에서 상품 두 개의 단가를 각각 1,000원 올렸을 때 과거 금액이 변한 주문이 **3/3 → 0/3**, 관측된 최대 금액 차이는 **3,000원 → 0원**이었습니다. 신규 주문의 단건·목록 응답과 저장 총액/상세 합계도 일치했습니다. 이는 로컬 데모의 금액 정합성 결과이며 외부 실사용자의 장애율이나 응답 성능 수치가 아닙니다. [입력·원값·재현 조건](docs/measurements/2026-10-31-order-price-invariance.md)을 함께 기록했습니다.
+가격 변경 실험의 금액 불변 위반은 **3/3 → 0/3**이었습니다. 별도로 같은 초기 데이터의 세 주문에 상품 삭제→회원 삭제를 적용하자 상세 보존 위반은 **2/3 → 0/3**, 회원 삭제 뒤 주문 유실은 **3/3 → 0/3**으로 바뀌었습니다. 삭제 후에도 66,000/217,800/178,200원의 금액과 상세가 남고 참조는 null이 됩니다. 이는 로컬 데모의 정확성 결과이며 실사용자 장애율·응답 성능 수치가 아닙니다. [가격 원값](docs/measurements/2026-10-31-order-price-invariance.md) · [삭제 흐름의 분모·원값·재현](docs/measurements/2026-10-31-order-history-preservation.md)을 구분해 기록했습니다.
 
 #### 대체안/회고
 
-현재 상품 JOIN을 유지하면 과거 금액 불변을 보장할 수 없어 주문 시점 스냅샷을 선택했습니다. 단가만 저장하는 방법보다 표시 정보와 확정 합계까지 보존하되, 상품별 잠금 SELECT가 추가되는 비용이 있습니다. 과거 자료는 추정임을 명시하고 수동 비파괴 전환 절차를 마련했습니다. 상품 삭제 이력 보존(BE02), 가격 출처를 보여주는 Frontend UI, 동시 요청·락 대기의 추가 검증은 남아 있습니다.
+주문 스냅샷과 nullable FK로 업무 기록을 활성 참조에서 분리하고 회원 이름/비밀번호를 복제하지 않았습니다. 과거 가격은 추정임을 명시합니다. FK 전환에서 실제 MySQL 1826 오류를 만나 동일 ALTER의 제거/추가를 분리했고, 쓰기 중단·백업·중간 상태 확인이 필요해졌습니다. 상품별 가격 SELECT와 회원 삭제 잠금의 비용이 있으며, BE03 세션 회수·전체 동시성·화면 연결은 별도 과제입니다. 이미 삭제된 행을 복원한 결과로 확대하지 않습니다.
 
 #### 코드
 
@@ -303,7 +303,39 @@ WHERE d.order_id = #{orderId}
 ORDER BY d.d_id ASC
 ~~~
 
-[가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [이전 자료 전환](docs/ORDER-PRICE-SNAPSHOT.md)
+참조 삭제와 회원 자유 입력 정리는 다음 경계로 처리합니다.
+
+~~~sql
+ALTER TABLE t_order DROP FOREIGN KEY fk_order_user;
+ALTER TABLE t_order
+    MODIFY COLUMN user_id VARCHAR(100) NULL,
+    ADD CONSTRAINT fk_order_history_user FOREIGN KEY (user_id)
+        REFERENCES t_user(id) ON DELETE SET NULL;
+
+ALTER TABLE t_order_detail DROP FOREIGN KEY fk_order_detail_product;
+ALTER TABLE t_order_detail
+    MODIFY COLUMN product_id INT NULL,
+    ADD CONSTRAINT fk_order_history_product FOREIGN KEY (product_id)
+        REFERENCES t_product(id) ON DELETE SET NULL;
+~~~
+
+~~~java
+@Override
+@Transactional
+public int removeUser(String id) {
+    if (isBlank(id) || userDao.selectByIdForUpdate(id) == null) {
+        return 0;
+    }
+    // Block new order FK references until notes are cleared and the user is deleted.
+    userDao.clearOrderNotes(id);
+    if (userDao.delete(id) != 1) {
+        throw new IllegalStateException("User could not be deleted");
+    }
+    return 1;
+}
+~~~
+
+[가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [회원 삭제 트랜잭션](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [삭제 정책·FK 전환](docs/ORDER-HISTORY-PRESERVATION.md)
 
 <a id="development"></a>
 

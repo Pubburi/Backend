@@ -47,6 +47,10 @@
         DELETE FROM t_user WHERE id = #{id}
     </delete>
 
+    <update id="clearOrderNotes" parameterType="string">
+        UPDATE t_order SET order_table = NULL WHERE user_id = #{id}
+    </update>
+
     <update id="updateStamp" parameterType="User">
         UPDATE t_user
         SET stamps = #{stamps}
@@ -63,5 +67,10 @@
         SELECT id, name, password_hash AS pass, stamps, role
         FROM t_user
         WHERE id = #{id}
+    </select>
+
+    <select id="selectByIdForUpdate" parameterType="string" resultType="User">
+        SELECT id, name, password_hash AS pass, role, stamps FROM t_user
+        WHERE id = #{userId} FOR UPDATE
     </select>
 </mapper>

@@ -1,8 +1,9 @@
 # Backend 문제 해결 사례 등록부
 
-이전 사례 기준 소스는 main `defb45a`, 이번 BE01 수정 기준은 `a563c369`다. README에는 실제 현재 구현에 근거한 대표 사례 **4개**를 유지한다.
-이번에는 주문 시점 스냅샷을 구현하고 Java 검증·패키징, Python 도구·저장소 검사를 실행했다.
-실제 DB 전후·마이그레이션 검증은 [BE01 계획](plans/2026-10-31-order-price-snapshot.md)에 상태와 근거를 구분해 기록한다.
+이전 사례 기준 소스는 main `defb45a`, BE01 수정 기준은 `a563c369`, BE02 수정 기준은 `56a76d1`이다. README에는 실제 현재 구현에 근거한 대표 사례 **4개**를 유지한다.
+BE01 가격 스냅샷에 이어 BE02의 삭제 이력 분리와 개인정보 정리를 구현하고 Java 검증·패키징,
+Python 도구·저장소 검사와 실제 HTTP/DB 전후·전환을 검증했다. [BE01 계획](plans/2026-10-31-order-price-snapshot.md)과
+[BE02 계획](plans/2026-10-31-order-history-preservation.md)에 각 기준·범위·근거를 구분한다.
 개인별 구현 기여나 관측하지 않은 과거 장애를 추정하지 않는다. 소스 출처 기록은 PROVENANCE.md에 보존한다.
 
 ## 현재 선정
@@ -12,7 +13,7 @@
 | BE-CS01 | 주문 페이지와 상세 일괄 조립 | 일대다 조회에서 페이지 경계·DB 왕복·메모리 조립의 선택을 설명한다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
 | BE-CS02 | 로그인 시 해시 점진 전환 | 원문이 없는 저장 데이터의 전환 시점과 인증 응답 경계를 다룬다. | 해시·서비스 및 기존 로그인 검증 | 미측정·성능 향상 주장 없음 |
 | BE-CS03 | 중복 주문 상품 정규화 | 입력 단위와 저장·집계 단위의 차이, 여러 쓰기의 책임 경계를 드러낸다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
-| BE-CS04 | 주문 시점 가격·총액과 추정 자료 구분 | 핵심 업무 데이터의 시간 경계·잠금·서버 가격 신뢰·비파괴 전환과 API 호환성을 실제 원인/결과로 설명한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·이전 스키마 전환 | 금액 불변 위반 3/3→0/3은 정확성; 지연 성능 미측정 |
+| BE-CS04 | 가격·참조 삭제에서 주문 이력 분리 | 업무 기록과 활성 상품/회원의 수명·잠금·스냅샷·nullable/권한·개인정보·FK 전환 판단을 연결한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·기존 스키마 전환 | 가격 3/3→0/3, 상세 2/3→0/3·주문 유실 3/3→0/3은 각 실험의 정확성; 성능 미측정 |
 
 주문 읽기(BE-CS01)와 쓰기(BE-CS03)는 같은 클래스 안에 있지만 각각 페이지 단위의 관계 조립과 입력/쓰기 경계라는 독립 문제다. 단순히 변경 줄 수를 나눠 사례 수를 채우지 않는다.
 
@@ -38,24 +39,29 @@
 - 기존 근거: [OrderServiceImplTests](../src/test/java/com/pubburi/pub/model/service/OrderServiceImplTests.java)의 `makeOrderAggregatesDuplicateProductsAndIncrementsStampsAtomically`, `missingProductStopsOrderBeforeDetailsAndRewardsAreCreated`. 중복 수량·DAO 전달 값·예외 이후 진행 중단을 확인한다.
 - 경계: 메서드 이름의 Atomically와 가짜 DAO 증가 결과는 실제 DB 원자성·롤백·동시성 실증이 아니다. `@Transactional` 선언과 SQL 증가식은 구현 사실로만 설명한다.
 - 추가 근거: [실제 HTTP 검증](../scripts/api_smoke.py)에서 폐기용 MySQL의 성공 주문과 헤더/첫 상품 쓰기 후 없는 상품 오류의 롤백을 확인했다. 이 경로에서 주문 목록·상품 주문수·회원 스탬프가 변경 전과 같은지 검증한다. 상세 결과는 테스트 계획/PR에 기록하며 새 성능 수치나 별도 README 사례로 집계하지 않는다.
-- 미완료: 스탬프 저장 이후를 포함한 나머지 단계 실패/롤백·동시·중복 재시도(BE06), 상품 삭제 뒤 이력 보존(BE02). 부분 검증을 전체 과제 완료로 확대하지 않는다.
+- 미완료: 스탬프 저장 이후를 포함한 나머지 단계 실패/롤백·동시·중복 재시도(BE06). 부분 검증을 전체 과제 완료로 확대하지 않는다.
 
 ### BE-CS04
 
-- 구현: [OrderServiceImpl.makeOrder](../src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java), [FOR UPDATE](../src/main/resources/mappers/product.xml), [저장 스냅샷 조회](../src/main/resources/mappers/order.xml), [전환 SQL](migrations/001-order-price-snapshot.sql).
+- 구현: [OrderServiceImpl.makeOrder](../src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java), [FOR UPDATE](../src/main/resources/mappers/product.xml), [저장 스냅샷 조회](../src/main/resources/mappers/order.xml), [가격 전환](migrations/001-order-price-snapshot.sql), [삭제 FK 전환](migrations/002-order-history-preservation.sql), [회원 메모 정리·삭제](../src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java).
 - 확인한 결과: 같은 초기 데이터의 두 상품 가격을 각각 1,000원 올리는 세 주문 시나리오에서 금액 불변 위반 3/3→0/3, 최대 금액 차이 3,000원→0원. 신규 단건/목록 DTO와 헤더/라인 합계 일치. [측정 원값·재현·무효 시도](measurements/2026-10-31-order-price-invariance.md)를 참고한다.
 - 전환: 주문 6개·상세 8개 보존, 기존 주문은 LEGACY_ESTIMATE. 파일 전체 재실행은 중복 컬럼 오류로 중단되고 행 수/총액 추가 변화 없음. 자동 멱등 마이그레이션으로 포장하지 않는다.
-- 한계: 세 로컬 데모 주문의 정확성 실험이며 실사용자 장애율·성능 결과가 아니다. 추가 SELECT의 비용, BE02 삭제 이력과 Frontend 가격 출처 표시, 전체 동시 요청 검증은 남는다.
+- BE02 결과: 기준 56a76d의 동일 세 주문에서 상품 A 삭제→회원 삭제를 순차 관찰했다. 상품 상세 보존 위반 2/3→0/3(상세 4→2가 4→4로 변경), 이어 회원 삭제의 주문 유실 3/3→0/3(주문 3→0이 3→3으로 변경). 의도된 productId/userId/회원 메모 null은 오류로 세지 않는다. [삭제 측정 원값·조건](measurements/2026-10-31-order-history-preservation.md).
+- BE02 전환: 첫 실제 1826 FK 이름/동일 ALTER 실패를 기록하고 공식 MySQL 제약을 확인해 제거/추가를 분리·새 이름으로 수정했다. 실제 재검증에서 기존 주문 3개·상세 4개·59,100원과 SET NULL을 보존했다.
+- 한계: 로컬 세 주문의 단계별 정확성 실험이며 실사용자 장애율·성능 결과가 아니다. 추가 SELECT/삭제 잠금 비용, BE03의 세션 회수·전체 동시성·Frontend 화면 연결은 별도 과제다. 과거 이미 삭제된 행을 복구했다고 주장하지 않는다.
 
-### 이번 교체 결정
+### BE01 교체 결정
 
 기존 BE-CS04 로컬 실행기 소유권은 프로세스 수명/TOCTOU를 다룬 유효한 사례이며 [이전 작업 기록](plans/2026-10-31-local-automation.md)과 [PR #2](https://github.com/Pubburi/Backend/pull/2)에 보존한다. 이번 가격 사례는 상품 수정이 과거 업무 금액을 바꾸는 실제 결함을 DB/HTTP로 재현하고, 잠금·스냅샷·추정 자료의 의미·비파괴 전환과 원값 비교까지 연결했다. 프로젝트의 DB/거래 포트폴리오 우선 기준에서 더 직접적인 업무 영향을 설명하므로 이 한 항목을 교체한다. 최신성·줄 수·테스트 총수로 선정하지 않았다. 페이지 조립·인증 전환·입력 정규화의 세 사례는 서로 다른 문제이므로 유지해 총 네 개다.
+
+### BE02 보강 비교
+
+삭제 이력은 가격 스냅샷만으로 보장되지 않음을 실제 FK/HTTP에서 확인했다. soft-delete와 nullable FK의 보관/조회 비용을 비교하고, 회원 자유 입력 정리·재가입 소유권·중간 DDL 실패를 같은 업무 이력의 수명 경계로 설명할 근거가 늘었다. BE-CS04를 가격 단독 사례에서 이 이력 보존 사례로 보강하고 기존 입력 정규화·페이지 조립·인증 사례는 유지한다. 같은 주문 이력을 두 슬롯으로 늘리지 않으며 총 네 개다. BE01 가격 실험과 BE02 순차 삭제 실험은 기준 커밋과 분모가 달라 측정 원값을 따로 관리한다.
 
 ## 교체 후보와 개선 순서
 
 | 후보 | 확보할 근거 | 현재 사례와 비교할 기술 판단 |
 |---|---|---|
-| BE02 상품 삭제 뒤 이력 보존 | 실제 FK·삭제/중지·조회·마이그레이션 보존 결과 | 현재 주문 읽기/쓰기 사례보다 이력 경계의 난도와 대안 판단 근거가 충분한지 |
 | BE03 권한 회수 세션 반영 | 기존 세션의 접근 거부·동시 세션·계정 삭제 결과 | 해시 전환 사례와 다른 인증 상태 경계를 실제로 해결했는지 |
 | BE06 실제 주문 롤백·동시성 | 실제 MySQL 실패 주입·중복/동시 요청·원자성 결과 | 가짜 DAO에 한정된 BE-CS03을 더 강한 실제 데이터 근거로 교체할 수 있는지 |
 | 주문 조회 최적화 실측 | 동일 데이터·캐시·빌드·부하의 전후 원값과 분포 | BE-CS01의 구현 설명을 실제 병목 해소 근거로 강화할 수 있는지 |

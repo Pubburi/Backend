@@ -3,7 +3,7 @@ package com.pubburi.pub.model.dto;
 public class OrderDetail {
     private int dId;
     private int orderId;
-    private int productId;
+    private Integer productId;
     private int quantity;
     private String productName;
     private String productType;
@@ -48,11 +48,11 @@ public class OrderDetail {
 		this.orderId = orderId;
 	}
 
-	public int getProductId() {
+	public Integer getProductId() {
 		return productId;
 	}
 
-	public void setProductId(int productId) {
+	public void setProductId(Integer productId) {
 		this.productId = productId;
 	}
 

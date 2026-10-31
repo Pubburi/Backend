@@ -8,7 +8,7 @@ import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
-from api_smoke import ApiClient, change_ci_product, require_disposable_database
+from api_smoke import ApiClient, change_ci_product, promote_ci_fixture_admin, require_disposable_database
 
 
 class DisposableDatabaseGuardTests(unittest.TestCase):
@@ -65,6 +65,16 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             self.assertIn(name.encode("utf-8").hex(), statement)
             self.assertNotIn("DELETE", statement)
             self.assertNotIn(self.environ["PUBBURI_DB_PASSWORD"], str(run.call_args.args))
+
+    def test_fixture_admin_promotion_is_guarded_and_rejects_existing_account_names(self):
+        with patch("api_smoke.subprocess.run") as run:
+            with self.assertRaises(RuntimeError):
+                promote_ci_fixture_admin(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"), "ci_admin_" + "a" * 32)
+            run.assert_not_called()
+        with patch("api_smoke.require_disposable_database"), patch("api_smoke.subprocess.run") as run:
+            with self.assertRaises(ValueError):
+                promote_ci_fixture_admin(self.environ, "admin")
+            run.assert_not_called()
 
     def test_missing_marker_is_rejected(self):
         run = Mock(side_effect=[self.inspect, subprocess.CompletedProcess([], 0, "")])

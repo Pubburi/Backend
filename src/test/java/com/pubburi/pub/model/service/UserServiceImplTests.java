@@ -38,9 +38,26 @@ class UserServiceImplTests {
 		assertThat(userDao.updatedPassword).startsWith("$2");
 	}
 
+	@Test
+	void removingUserClearsFreeTextBeforeDeletingTheAccount() {
+		userDao.saved = new User("id01", "회원", "stored", 0, "USER");
+		assertThat(userService.removeUser("id01")).isEqualTo(1);
+		assertThat(userDao.clearedOrderNotesFor).isEqualTo("id01");
+		assertThat(userDao.notesWereClearedBeforeDelete).isTrue();
+		assertThat(userDao.saved).isNull();
+	}
+
+	@Test
+	void missingUserDoesNotClearUnrelatedOrderNotes() {
+		assertThat(userService.removeUser("missing")).isZero();
+		assertThat(userDao.clearedOrderNotesFor).isNull();
+	}
+
 	private static class FakeUserDao implements UserDao {
 		private User saved;
 		private String updatedPassword;
+		private String clearedOrderNotesFor;
+		private boolean notesWereClearedBeforeDelete;
 
 		@Override
 		public List<User> selectAll() {
@@ -78,7 +95,14 @@ class UserServiceImplTests {
 
 		@Override
 		public int delete(String id) {
+			notesWereClearedBeforeDelete = id.equals(clearedOrderNotesFor);
 			saved = null;
+			return 1;
+		}
+
+		@Override
+		public int clearOrderNotes(String id) {
+			clearedOrderNotesFor = id;
 			return 1;
 		}
 
@@ -98,5 +122,8 @@ class UserServiceImplTests {
 		public User selectById(String userId) {
 			return saved != null && saved.getId().equals(userId) ? saved : null;
 		}
+
+		@Override
+		public User selectByIdForUpdate(String userId) { return selectById(userId); }
 	}
 }
