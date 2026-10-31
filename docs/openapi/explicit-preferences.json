@@ -1,0 +1,602 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pubburi private explicit preferences increment",
+    "version": "1.0.0",
+    "description": "Current-account-only storage. Administrators have no private-by-ID access. Explicit input only; no inferred profile, user learning or recommendation execution."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:9987"
+    }
+  ],
+  "paths": {
+    "/api/users/me/preferences": {
+      "get": {
+        "operationId": "getOwnPreferences",
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current account private values. Active account with no stored survey is NOT_STARTED; expired identity is never disguised as unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: no current account incarnation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "NOT_ACCEPTABLE JSON error envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_SERVER_ERROR; do not treat DB failures as unknown or success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "replaceOwnPreferences",
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "description": "Full replacement with required status. Omitted/null groups and fields are unknown. Skip/reset requires all values unknown, while COMPLETED all-unknown is allowed. Owner is session-bound; body/query userId/authEpoch cannot choose another account. Last locked full replacement wins; no revision conflict detection.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current account private values. Active account with no stored survey is NOT_STARTED; expired identity is never disguised as unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED for JSON/field/state/range errors, BAD_REQUEST for normalized duplicates or unknown categories. Existing values remain unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: no current account incarnation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "NOT_ACCEPTABLE JSON error envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "UNSUPPORTED_MEDIA_TYPE JSON error envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_SERVER_ERROR; do not treat DB failures as unknown or success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "Session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "JSESSIONID"
+      }
+    },
+    "schemas": {
+      "SoftInput": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "categories": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "enum": [
+                "탁주",
+                "약 · 청주",
+                "과실주",
+                "증류주",
+                "위스키",
+                "양주",
+                "맥주",
+                "사케"
+              ]
+            },
+            "description": "Soft category preference, never an automatic hard category filter."
+          },
+          "tasteTags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "description": "null=unknown; []=explicitly no preference. Strip/lowercase/sort; reject normalized duplicates and non-string items."
+          },
+          "aromaTags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "description": "null=unknown; []=explicitly no preference. Strip/lowercase/sort; reject normalized duplicates and non-string items."
+          },
+          "targetAbvPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Strict JSON number; at most two fractional digits. Strings/booleans rejected. Soft target; may be outside hard range without widening it."
+          }
+        }
+      },
+      "HardInput": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "minPriceKrw": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2147483647,
+            "description": "Strict JSON integer; zero is a real bound and null means unset."
+          },
+          "maxPriceKrw": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2147483647,
+            "description": "Strict JSON integer; zero is a real bound and null means unset."
+          },
+          "minAbvPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Strict JSON number; at most two fractional digits. Strings/booleans rejected."
+          },
+          "maxAbvPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Strict JSON number; at most two fractional digits. Strings/booleans rejected."
+          }
+        },
+        "description": "Inclusive hard bounds; lower must not exceed upper. No automatic relaxation."
+      },
+      "SoftResponse": {
+        "type": "object",
+        "required": [
+          "categories",
+          "tasteTags",
+          "aromaTags",
+          "targetAbvPercent"
+        ],
+        "properties": {
+          "categories": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "enum": [
+                "탁주",
+                "약 · 청주",
+                "과실주",
+                "증류주",
+                "위스키",
+                "양주",
+                "맥주",
+                "사케"
+              ]
+            },
+            "description": "Soft category preference, never an automatic hard category filter."
+          },
+          "tasteTags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "description": "null=unknown; []=explicitly no preference. Strip/lowercase/sort; reject normalized duplicates and non-string items."
+          },
+          "aromaTags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "description": "null=unknown; []=explicitly no preference. Strip/lowercase/sort; reject normalized duplicates and non-string items."
+          },
+          "targetAbvPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Strict JSON number; at most two fractional digits. Strings/booleans rejected. Soft target; may be outside hard range without widening it."
+          }
+        }
+      },
+      "HardResponse": {
+        "type": "object",
+        "required": [
+          "minPriceKrw",
+          "maxPriceKrw",
+          "minAbvPercent",
+          "maxAbvPercent"
+        ],
+        "properties": {
+          "minPriceKrw": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2147483647,
+            "description": "Strict JSON integer; zero is a real bound and null means unset."
+          },
+          "maxPriceKrw": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2147483647,
+            "description": "Strict JSON integer; zero is a real bound and null means unset."
+          },
+          "minAbvPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Strict JSON number; at most two fractional digits. Strings/booleans rejected."
+          },
+          "maxAbvPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Strict JSON number; at most two fractional digits. Strings/booleans rejected."
+          }
+        }
+      },
+      "Input": {
+        "type": "object",
+        "required": [
+          "surveyStatus"
+        ],
+        "properties": {
+          "surveyStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_STARTED",
+              "SKIPPED",
+              "COMPLETED"
+            ]
+          },
+          "softPreferences": {
+            "$ref": "#/components/schemas/SoftInput"
+          },
+          "hardConstraints": {
+            "$ref": "#/components/schemas/HardInput"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "surveyStatus": {
+                  "enum": [
+                    "NOT_STARTED",
+                    "SKIPPED"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "softPreferences": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "categories": {
+                      "type": "null"
+                    },
+                    "tasteTags": {
+                      "type": "null"
+                    },
+                    "aromaTags": {
+                      "type": "null"
+                    },
+                    "targetAbvPercent": {
+                      "type": "null"
+                    }
+                  }
+                },
+                "hardConstraints": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "minPriceKrw": {
+                      "type": "null"
+                    },
+                    "maxPriceKrw": {
+                      "type": "null"
+                    },
+                    "minAbvPercent": {
+                      "type": "null"
+                    },
+                    "maxAbvPercent": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Preferences": {
+        "type": "object",
+        "required": [
+          "surveyStatus",
+          "softPreferences",
+          "hardConstraints"
+        ],
+        "properties": {
+          "surveyStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_STARTED",
+              "SKIPPED",
+              "COMPLETED"
+            ]
+          },
+          "softPreferences": {
+            "$ref": "#/components/schemas/SoftResponse"
+          },
+          "hardConstraints": {
+            "$ref": "#/components/schemas/HardResponse"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "surveyStatus": {
+                  "enum": [
+                    "NOT_STARTED",
+                    "SKIPPED"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "softPreferences": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "categories": {
+                      "type": "null"
+                    },
+                    "tasteTags": {
+                      "type": "null"
+                    },
+                    "aromaTags": {
+                      "type": "null"
+                    },
+                    "targetAbvPercent": {
+                      "type": "null"
+                    }
+                  }
+                },
+                "hardConstraints": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "minPriceKrw": {
+                      "type": "null"
+                    },
+                    "maxPriceKrw": {
+                      "type": "null"
+                    },
+                    "minAbvPercent": {
+                      "type": "null"
+                    },
+                    "maxAbvPercent": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Envelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Preferences"
+          },
+          "message": {
+            "type": "string",
+            "const": "ok"
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "type": "null"
+          },
+          "message": {
+            "type": "null"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "fields"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
