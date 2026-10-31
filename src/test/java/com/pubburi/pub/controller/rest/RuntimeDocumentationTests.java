@@ -78,6 +78,37 @@ class RuntimeDocumentationTests {
 		return schema;
 	}
 
+	@Test
+	void privatePreferenceDocumentSeparatesSoftTargetsFromHardBoundsAndUnknowns() throws Exception {
+		JsonNode document = mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString());
+		JsonNode paths = document.path("paths");
+		JsonNode operations = paths.path("/api/users/me/preferences");
+		assertThat(operations.has("get") && operations.has("put")).isTrue();
+		assertThat(paths.has("/api/users/{id}/preferences")).isFalse();
+		JsonNode envelope = resolve(document, operations.path("get").path("responses").path("200")
+				.path("content").path("application/json").path("schema"));
+		JsonNode response = resolve(document, envelope.path("properties").path("data"));
+		assertThat(fieldNames(response.path("properties"))).isEqualTo(Set.of("surveyStatus", "softPreferences", "hardConstraints"));
+		for (String group : Set.of("softPreferences", "hardConstraints")) {
+			JsonNode values = resolve(document, response.path("properties").path(group)).path("properties");
+			assertThat(values.size()).isEqualTo(4);
+			values.fields().forEachRemaining(field -> assertThat(allowsNull(resolve(document, field.getValue())))
+					.as("nullable private preference %s", field.getKey()).isTrue());
+		}
+		JsonNode input = resolve(document, operations.path("put").path("requestBody").path("content")
+				.path("application/json").path("schema"));
+		assertThat(fieldNames(input.path("properties"))).isEqualTo(Set.of("surveyStatus", "softPreferences", "hardConstraints"));
+		assertThat(allowsNull(resolve(document, input.path("properties").path("softPreferences")))).isTrue();
+		assertThat(allowsNull(resolve(document, input.path("properties").path("hardConstraints")))).isTrue();
+	}
+
+	private boolean allowsNull(JsonNode schema) {
+		if (schema.path("nullable").asBoolean(false)) return true;
+		for (JsonNode type : schema.path("type")) if ("null".equals(type.asText())) return true;
+		return false;
+	}
+
 	private Set<String> fieldNames(JsonNode object) {
 		Set<String> names = new HashSet<>();
 		object.fieldNames().forEachRemaining(names::add);

@@ -123,9 +123,43 @@ def documentation_contract(port):
         document = json.load(response)
     assert document["openapi"].startswith("3."), "Expected an OpenAPI v3 document"
     verify_feature_openapi(document)
+    verify_preference_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
         assert "swagger-ui" in response.read().decode("utf-8").lower(), "Swagger UI entry is absent"
+
+
+def verify_preference_openapi(document):
+    def resolve(schema):
+        while "$ref" in schema:
+            target = document
+            for part in schema["$ref"].removeprefix("#/").split("/"):
+                target = target[part.replace("~1", "/").replace("~0", "~")]
+            schema = target
+        return schema
+
+    def nullable(schema):
+        schema = resolve(schema)
+        return schema.get("nullable") is True or "null" in schema.get("type", [])
+
+    operations = document["paths"]["/api/users/me/preferences"]
+    assert "/api/users/{id}/preferences" not in document["paths"], "Unexpected private-by-ID endpoint"
+    envelope = resolve(operations["get"]["responses"]["200"]["content"]["application/json"]["schema"])
+    response = resolve(envelope["properties"]["data"])
+    request = resolve(operations["put"]["requestBody"]["content"]["application/json"]["schema"])
+    expected = {"surveyStatus", "softPreferences", "hardConstraints"}
+    assert set(response["properties"]) == set(request["properties"]) == expected
+    statuses = {"NOT_STARTED", "SKIPPED", "COMPLETED"}
+    assert set(response["properties"]["surveyStatus"]["enum"]) == statuses
+    assert set(request["properties"]["surveyStatus"]["enum"]) == statuses
+    for group, fields in (
+        ("softPreferences", {"categories", "tasteTags", "aromaTags", "targetAbvPercent"}),
+        ("hardConstraints", {"minPriceKrw", "maxPriceKrw", "minAbvPercent", "maxAbvPercent"}),
+    ):
+        values = resolve(response["properties"][group])["properties"]
+        assert set(values) == fields, "Soft targets and hard bounds were mixed"
+        assert all(nullable(value) for value in values.values()), "Unknown preference fields lost null"
+        assert nullable(request["properties"][group]), "Omitted/null input groups must mean unknown"
 
 
 def change_ci_product(environ, product_id, price, name):
@@ -437,6 +471,115 @@ def product_feature_contract(environ):
     assert count_ci_product_features(environ, product_id) == (0, 0)
 
 
+def count_ci_preferences(environ, user_id):
+    require_disposable_database(environ)
+    if not isinstance(user_id, str) or not re.fullmatch(r"ci_pref_[0-9a-f]{32}", user_id):
+        raise ValueError("Only generated private-preference fixture IDs are supported")
+    user_hex = user_id.encode("utf-8").hex()
+    predicate = f"CAST(user_id AS BINARY)=UNHEX('{user_hex}')"
+    statement = (f"SELECT (SELECT COUNT(*) FROM t_user_preference WHERE {predicate}), "
+                 f"(SELECT COUNT(*) FROM t_user_preference_value WHERE {predicate})")
+    result = subprocess.run([
+        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+        "mysql", "-u" + environ["PUBBURI_DB_USER"], "--batch", "--skip-column-names",
+        environ["PUBBURI_DB_NAME"], "--execute", statement,
+    ], capture_output=True, text=True, check=True,
+        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
+    counts = tuple(int(value) for value in result.stdout.split())
+    assert len(counts) == 2, "Unexpected private-preference count result"
+    return counts
+
+
+def private_preference_contract(environ):
+    """Synthetic declarations test storage/privacy, never inferred preferences or user quality."""
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+    path = "/users/me/preferences"
+    public = ApiClient(port)
+
+    def account(admin=False):
+        user_id = ("ci_admin_" if admin else "ci_pref_") + uuid.uuid4().hex
+        password = uuid.uuid4().hex
+        public.request("POST", "/users", 201, {"id": user_id, "name": "CI explicit preference", "pass": password})
+        if admin:
+            promote_ci_fixture_admin(environ, user_id)
+        client = ApiClient(port)
+        client.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
+        return client, user_id, password
+
+    public.request("GET", path, 401, error_code="UNAUTHORIZED")
+    public.request("PUT", path, 401, {"surveyStatus": "SKIPPED"}, "UNAUTHORIZED")
+    owner, user_id, password = account()
+    other, _, _ = account()
+    admin, _, _ = account(True)
+    soft_null = {"categories": None, "tasteTags": None, "aromaTags": None, "targetAbvPercent": None}
+    hard_null = {"minPriceKrw": None, "maxPriceKrw": None, "minAbvPercent": None, "maxAbvPercent": None}
+
+    def empty(status="NOT_STARTED"):
+        return {"surveyStatus": status, "softPreferences": dict(soft_null), "hardConstraints": dict(hard_null)}
+
+    assert owner.request("GET", path, 200)["data"] == empty()
+    declared = {"surveyStatus": "COMPLETED", "softPreferences": {
+        "categories": [" 탁주 "], "tasteTags": [" Sweet ", "DRY"], "aromaTags": None, "targetAbvPercent": 80.25,
+    }, "hardConstraints": {"minPriceKrw": 0, "maxPriceKrw": 15000, "minAbvPercent": 0, "maxAbvPercent": 10.5}}
+    saved = owner.request("PUT", path, 200, declared)["data"]
+    assert saved["softPreferences"] == dict(declared["softPreferences"], categories=["탁주"], tasteTags=["dry", "sweet"])
+    assert saved["hardConstraints"] == declared["hardConstraints"]
+    assert owner.request("GET", path, 200)["data"] == saved
+    assert owner.request("PUT", path, 200, declared)["data"] == saved
+    assert other.request("GET", path, 200)["data"] == empty()
+    assert admin.request("GET", path + "?userId=" + user_id, 200)["data"] == empty()
+    admin.request("PUT", path, 200, {"surveyStatus": "COMPLETED", "userId": user_id,
+                                   "softPreferences": {"tasteTags": ["admin-own"]}})
+    assert owner.request("GET", path, 200)["data"] == saved
+    assert admin.request("GET", path, 200)["data"]["softPreferences"]["tasteTags"] == ["admin-own"]
+    owner.request("PUT", path, 415, {"surveyStatus": "SKIPPED"}, "UNSUPPORTED_MEDIA_TYPE", content_type="text/plain")
+    owner.request("GET", path, 406, error_code="NOT_ACCEPTABLE", accept="text/plain")
+    invalids = [
+        ({}, "VALIDATION_FAILED"), ({"surveyStatus": True}, "VALIDATION_FAILED"),
+        ({"surveyStatus": "UNKNOWN"}, "VALIDATION_FAILED"),
+        ({"surveyStatus": "SKIPPED", "softPreferences": {"tasteTags": []}}, "VALIDATION_FAILED"),
+        ({"surveyStatus": "NOT_STARTED", "hardConstraints": {"maxPriceKrw": 0}}, "VALIDATION_FAILED"),
+    ]
+    for value in ("12.5", True, -1, 100.01, 10.123):
+        invalids.append(({"surveyStatus": "COMPLETED", "softPreferences": {"targetAbvPercent": value}}, "VALIDATION_FAILED"))
+    for value in ("100", True, 1.5, -1, 2147483648):
+        invalids.append(({"surveyStatus": "COMPLETED", "hardConstraints": {"maxPriceKrw": value}}, "VALIDATION_FAILED"))
+    for tags in ([1], [True], [None], [{}], [" "]):
+        invalids.append(({"surveyStatus": "COMPLETED", "softPreferences": {"tasteTags": tags}}, "VALIDATION_FAILED"))
+    invalids.extend([
+        ({"surveyStatus": "COMPLETED", "softPreferences": {"tasteTags": ["SWEET", " sweet "]}}, "BAD_REQUEST"),
+        ({"surveyStatus": "COMPLETED", "softPreferences": {"categories": ["invented"]}}, "BAD_REQUEST"),
+        ({"surveyStatus": "COMPLETED", "hardConstraints": {"minPriceKrw": 2, "maxPriceKrw": 1}}, "VALIDATION_FAILED"),
+        ({"surveyStatus": "COMPLETED", "hardConstraints": {"minAbvPercent": 2, "maxAbvPercent": 1}}, "VALIDATION_FAILED"),
+    ])
+    for value, code in invalids:
+        owner.request("PUT", path, 400, value, code)
+    assert owner.request("GET", path, 200)["data"] == saved
+    zeros = {"surveyStatus": "COMPLETED", "softPreferences": {
+        "categories": [], "tasteTags": [], "aromaTags": [], "targetAbvPercent": 0,
+    }, "hardConstraints": {"minPriceKrw": 0, "maxPriceKrw": 0, "minAbvPercent": 0, "maxAbvPercent": 0}}
+    assert owner.request("PUT", path, 200, zeros)["data"] == zeros
+    assert owner.request("GET", path, 200)["data"] == zeros
+    for status in ("SKIPPED", "NOT_STARTED", "COMPLETED"):
+        assert owner.request("PUT", path, 200, {"surveyStatus": status})["data"] == empty(status)
+        assert owner.request("GET", path, 200)["data"] == empty(status)
+    owner.request("PUT", path, 200, declared)
+    dormant = ApiClient(port)
+    dormant.request("POST", "/auth/login", 200, {"id": user_id, "pass": password})
+    admin.request("DELETE", f"/admin/users/{user_id}", 200)
+    assert count_ci_preferences(environ, user_id) == (0, 0)
+    owner.request("GET", path, 401, error_code="UNAUTHORIZED")
+    replacement_password = uuid.uuid4().hex
+    public.request("POST", "/users", 201, {"id": user_id, "name": "Fresh private fixture", "pass": replacement_password})
+    fresh = ApiClient(port)
+    fresh.request("POST", "/auth/login", 200, {"id": user_id, "pass": replacement_password})
+    assert fresh.request("GET", path, 200)["data"] == empty()
+    dormant.request("GET", path, 401, error_code="UNAUTHORIZED")
+    dormant.request("PUT", path, 401, {"surveyStatus": "SKIPPED"}, "UNAUTHORIZED")
+    assert fresh.request("GET", path, 200)["data"] == empty()
+
+
 def main():
     mutating = os.environ.get("PUBBURI_SMOKE_MUTATING") == "1"
     report = {"status": "failed", "mode": "disposable-db" if mutating else "read-only", "completed": []}
@@ -455,6 +598,8 @@ def main():
             report["completed"].append("live roles, account incarnation, password revocation and profile freshness")
             product_feature_contract(os.environ)
             report["completed"].append("product attributes, unknown/empty semantics, source validation and deletion")
+            private_preference_contract(os.environ)
+            report["completed"].append("private explicit preferences, soft/hard separation, account isolation and lifecycle")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")

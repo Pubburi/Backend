@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pubburi.pub.model.dao.UserPreferenceDao">
+    <select id="selectOwned" resultType="UserPreferences">
+        SELECT u.id AS user_id, COALESCE(p.survey_status, 'NOT_STARTED') AS survey_status,
+               COALESCE(p.categories_known, FALSE) AS categories_known,
+               COALESCE(p.taste_known, FALSE) AS taste_known, COALESCE(p.aroma_known, FALSE) AS aroma_known,
+               p.target_abv_percent, p.min_price_krw, p.max_price_krw, p.min_abv_percent, p.max_abv_percent
+        FROM t_user u LEFT JOIN t_user_preference p ON p.user_id = u.id
+        WHERE u.id = #{userId} AND u.auth_epoch = #{authEpoch}
+    </select>
+    <select id="selectOwnedValues" resultType="UserPreferenceValue">
+        SELECT v.kind, v.value_text AS `value` FROM t_user_preference_value v
+        JOIN t_user u ON u.id = v.user_id
+        WHERE u.id = #{userId} AND u.auth_epoch = #{authEpoch}
+    </select>
+    <insert id="upsert" parameterType="UserPreferences">
+        INSERT INTO t_user_preference (user_id, survey_status, categories_known, taste_known, aroma_known,
+            target_abv_percent, min_price_krw, max_price_krw, min_abv_percent, max_abv_percent)
+        VALUES (#{userId}, #{surveyStatus}, #{categoriesKnown}, #{tasteKnown}, #{aromaKnown},
+            #{targetAbvPercent}, #{minPriceKrw}, #{maxPriceKrw}, #{minAbvPercent}, #{maxAbvPercent}) AS incoming
+        ON DUPLICATE KEY UPDATE survey_status = incoming.survey_status,
+            categories_known = incoming.categories_known, taste_known = incoming.taste_known,
+            aroma_known = incoming.aroma_known, target_abv_percent = incoming.target_abv_percent,
+            min_price_krw = incoming.min_price_krw, max_price_krw = incoming.max_price_krw,
+            min_abv_percent = incoming.min_abv_percent, max_abv_percent = incoming.max_abv_percent
+    </insert>
+    <delete id="deleteValues">DELETE FROM t_user_preference_value WHERE user_id = #{userId}</delete>
+    <insert id="insertValues">
+        INSERT INTO t_user_preference_value (user_id, kind, value_text) VALUES
+        <foreach collection="values" item="item" separator=",">(#{userId}, #{item.kind}, #{item.value})</foreach>
+    </insert>
+</mapper>

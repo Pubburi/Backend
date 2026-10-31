@@ -28,6 +28,8 @@
 - `POST /api/auth/login`: 로그인
 - `POST /api/auth/logout`: 로그아웃
 - `GET /api/auth/me`: 현재 session 사용자 조회
+- `GET /api/users/me/preferences`: 현재 계정만의 명시취향·설문 상태 조회
+- `PUT /api/users/me/preferences`: 현재 계정만의 명시취향 전체 교체
 - `POST /api/users`: 회원가입
 - `GET /api/users/id-available?id={id}`: 아이디 중복 확인
 - `GET /api/users/{id}/profile`: 사용자 프로필과 최근 주문 요약
@@ -36,6 +38,10 @@
 - `DELETE /api/admin/users/{id}`: 관리자 사용자 삭제
 
 현재 로그인한 관리자는 자기 계정을 삭제하거나 자신의 `ADMIN` 역할을 제거할 수 없다. 관리자 수정의 `role`은 `USER` 또는 `ADMIN`만 허용한다.
+
+명시취향은 관리자도 본인만 접근한다. soft 주종/태그/목표 도수와 hard 예산/허용 도수를 분리하고
+NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약](EXPLICIT-PREFERENCES.md)과
+[OpenAPI](openapi/explicit-preferences.json)를 따르며 기존 타인 profile/관리자 회원 응답에는 포함하지 않는다.
 
 ## Products
 
