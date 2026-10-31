@@ -60,11 +60,12 @@ class ApiClient:
             urllib.request.ProxyHandler({}),
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def request(self, method, path, expected_status, payload=None, error_code=None):
+    def request(self, method, path, expected_status, payload=None, error_code=None, *,
+                content_type="application/json", accept="application/json"):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.base + path, data=data, method=method,
-            headers={"Content-Type": "application/json", "Accept": "application/json"})
+            headers={"Content-Type": content_type, "Accept": accept})
         try:
             response = self.opener.open(request, timeout=10)
         except urllib.error.HTTPError as error:
@@ -412,6 +413,9 @@ def product_feature_contract(environ):
     assert admin.request("PUT", write_path, 200, values)["data"] == saved
     assert public.request("GET", f"/products/{product_id}", 200)["data"] == created
     assert count_ci_product_features(environ, product_id) == (1, 2)
+    admin.request("PUT", write_path, 415, {}, "UNSUPPORTED_MEDIA_TYPE", content_type="text/plain")
+    public.request("GET", path, 406, error_code="NOT_ACCEPTABLE", accept="text/plain")
+    assert public.request("GET", path, 200)["data"] == saved
     for invalid in ({"tasteTags": []}, {"volumeMl": 0, "sourceName": "Fixture"},
                     {"volumeMl": 750.5, "sourceName": "Fixture"},
                     {"sourceUrl": "file:///invalid"}, {"tasteTags": [None], "sourceName": "Fixture"},

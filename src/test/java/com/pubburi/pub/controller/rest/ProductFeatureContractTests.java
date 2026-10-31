@@ -140,6 +140,23 @@ class ProductFeatureContractTests {
 		assertThat(fixture.replacements).isZero();
 	}
 
+	@Test
+	void unsupportedRequestMediaReturns415WithoutCallingTheService() throws Exception {
+		Fixture fixture = new Fixture();
+		fixture.mvc().perform(put("/api/admin/products/7/features").session(session("admin", "ADMIN"))
+				.contentType(MediaType.TEXT_PLAIN).accept(MediaType.APPLICATION_JSON).content("{}"))
+				.andExpect(status().isUnsupportedMediaType())
+				.andExpect(jsonPath("$.error.code").value("UNSUPPORTED_MEDIA_TYPE"));
+		assertThat(fixture.replacements).isZero();
+	}
+
+	@Test
+	void unsupportedResponseMediaReturns406UsingTheApiErrorEnvelope() throws Exception {
+		Fixture fixture = new Fixture();
+		fixture.mvc().perform(get("/api/products/7/features").accept(MediaType.TEXT_PLAIN))
+				.andExpect(status().isNotAcceptable()).andExpect(jsonPath("$.error.code").value("NOT_ACCEPTABLE"));
+	}
+
 	private static MockHttpSession session(String id, String role) {
 		MockHttpSession session = new MockHttpSession();
 		session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(SessionFixtures.user(id, role)));

@@ -62,6 +62,8 @@ C03/BE04/F03의 **상품 특성 저장·조회 증가분**이다. 기존 상품�
 
 Bean Validation 실패와 JSON 타입/형식 오류는 400 `VALIDATION_FAILED`, 정규화 후 중복 태그는
 400 `BAD_REQUEST`다. 실패 입력이 기존 저장 특성을 부분적으로 바꾸지 않아야 한다.
+지원하지 않는 요청 Content-Type은 415 `UNSUPPORTED_MEDIA_TYPE`, 제공할 수 없는 Accept는
+406 `NOT_ACCEPTABLE`이다. 두 응답도 JSON ApiResponse를 사용하고 업무 저장 로직을 실행하지 않는다.
 
 ## 출처와 권리의 구분
 

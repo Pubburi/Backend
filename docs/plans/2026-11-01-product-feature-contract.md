@@ -96,6 +96,10 @@ marker·빈 포트 설정 뒤 `PUBBURI_SMOKE_MUTATING=1 ./scripts/smoke.sh`로 �
 구분과 수동 004 절차는 [상품 특성 계약](../PRODUCT-FEATURES.md)을 따른다. 기존 DB를 테스트 대상으로
 넣거나 data.sql로 초기화하지 않는다. PR 최신 head CI·완료된 리뷰·병합/main CI는 조정자 게이트로 남긴다.
 
+그 뒤 추가한 text/plain Content-Type/Accept 검증에서 발견한 오류 분류/envelope 결함은
+[별도 미디어 fix 기록](2026-11-01-product-feature-media.md)을 따른다. 최초 기능·문서 smoke 통과를
+지원하지 않는 모든 프로토콜 입력까지 확인한 성과로 확대하지 않는다.
+
 ## 사례 비교·후속
 
 이것은 없던 상품 특성 API를 추가한 기능이다. 기존 404→200을 결함 감소/성능 개선으로 세지 않는다.
