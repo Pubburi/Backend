@@ -1,0 +1,104 @@
+package com.pubburi.pub.controller.rest;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.lang.reflect.Proxy;
+import java.sql.SQLException;
+import java.util.HashSet;
+import java.util.Set;
+
+import javax.sql.DataSource;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestExecutionListeners;
+import org.springframework.test.context.support.DependencyInjectionTestExecutionListener;
+import org.springframework.test.context.web.ServletTestExecutionListener;
+import org.springframework.test.web.servlet.MockMvc;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@SpringBootTest(properties = "spring.sql.init.mode=never")
+@AutoConfigureMockMvc
+@Import(RuntimeDocumentationTests.NoDatabase.class)
+// No Mockito mocks: do not attach an instrumentation agent merely to reset beans.
+@TestExecutionListeners(listeners = {ServletTestExecutionListener.class, DependencyInjectionTestExecutionListener.class},
+		mergeMode = TestExecutionListeners.MergeMode.REPLACE_DEFAULTS)
+class RuntimeDocumentationTests {
+	@Autowired private MockMvc mvc;
+	@Autowired private ObjectMapper mapper;
+
+	@Test
+	void applicationMvcMappingsGenerateFeaturesAndServeSwaggerWithoutDatabaseQueries() throws Exception {
+		String body = mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+		JsonNode document = mapper.readTree(body);
+		JsonNode paths = document.path("paths");
+		assertThat(paths.path("/api/products/{id}/features").has("get")).isTrue();
+		assertThat(paths.path("/api/admin/products/{id}/features").has("put")).isTrue();
+		JsonNode responseContent = paths.path("/api/products/{id}/features").path("get")
+				.path("responses").path("200").path("content");
+		assertThat(responseContent.has("application/json")).isTrue();
+		JsonNode envelope = resolve(document, responseContent.path("application/json").path("schema"));
+		JsonNode features = resolve(document, envelope.path("properties").path("data"));
+		Set<String> expected = Set.of("volumeMl", "description", "tasteTags", "aromaTags", "sourceName", "sourceUrl", "sourceNote");
+		Set<String> responseFields = fieldNames(features.path("properties"));
+		assertThat(responseFields).containsAll(expected).contains("productId").hasSize(8);
+		for (String name : expected) {
+			JsonNode schema = resolve(document, features.path("properties").path(name));
+			boolean nullable = schema.path("nullable").asBoolean(false);
+			if (schema.path("type").isArray()) {
+				for (JsonNode type : schema.path("type")) nullable |= "null".equals(type.asText());
+			}
+			assertThat(nullable).as("nullable %s: %s", name, schema).isTrue();
+		}
+		JsonNode requestContent = paths.path("/api/admin/products/{id}/features").path("put")
+				.path("requestBody").path("content");
+		assertThat(requestContent.has("application/json")).isTrue();
+		JsonNode request = resolve(document, requestContent.path("application/json").path("schema"));
+		assertThat(fieldNames(request.path("properties"))).isEqualTo(expected);
+		mvc.perform(get("/docs")).andExpect(status().is3xxRedirection());
+		String ui = mvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+		assertThat(ui).contains("swagger-ui");
+	}
+
+	private JsonNode resolve(JsonNode document, JsonNode schema) {
+		while (schema.has("$ref")) {
+			schema = document.at(schema.path("$ref").asText().substring(1));
+		}
+		return schema;
+	}
+
+	private Set<String> fieldNames(JsonNode object) {
+		Set<String> names = new HashSet<>();
+		object.fieldNames().forEachRemaining(names::add);
+		return names;
+	}
+
+	@TestConfiguration(proxyBeanMethods = false)
+	static class NoDatabase {
+		@Bean
+		DataSource documentationDataSource() {
+			return (DataSource) Proxy.newProxyInstance(DataSource.class.getClassLoader(),
+					new Class<?>[] {DataSource.class}, (proxy, method, args) -> switch (method.getName()) {
+						case "getConnection" -> throw new AssertionError("Documentation must not query any database");
+						case "isWrapperFor" -> false;
+						case "unwrap" -> throw new SQLException("No underlying database in documentation test");
+						case "toString" -> "Documentation-only DataSource";
+						case "hashCode" -> System.identityHashCode(proxy);
+						case "equals" -> proxy == args[0];
+						case "getLoginTimeout" -> 0;
+						default -> null;
+					});
+		}
+	}
+}

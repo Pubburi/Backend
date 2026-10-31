@@ -1,0 +1,338 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pubburi product features API increment",
+    "version": "1.0.0",
+    "description": "Existing ProductResponse unchanged. Source metadata does not grant usage rights. Unknown differs from reviewed empty tags."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:9987"
+    }
+  ],
+  "paths": {
+    "/api/products/{id}/features": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": "Positive existing product ID; nonpositive/nonexistent IDs return 404."
+        }
+      ],
+      "get": {
+        "operationId": "getProductFeatures",
+        "summary": "Read active product attributes",
+        "description": "An existing product without reviewed attributes returns nullable fields as null. No inferred taste/aroma.",
+        "responses": {
+          "200": {
+            "description": "Current attributes with explicit unknown nulls.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: product does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_SERVER_ERROR: failed operation, never successful replacement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/products/{id}/features": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": "Positive existing product ID; nonpositive/nonexistent IDs return 404."
+        }
+      ],
+      "put": {
+        "operationId": "replaceProductFeatures",
+        "summary": "Replace all attributes as current ADMIN",
+        "description": "Full replacement: omitted/null fields become unknown; {} clears. Non-null tag arrays, including [], require sourceName. Tags strip/lowercase(Locale.ROOT)/sort and must remain unique. Source URL stored only. No revision/ETag check; last complete replacement wins.",
+        "security": [
+          {
+            "Session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureValues"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current attributes with explicit unknown nulls.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED for field/JSON errors; BAD_REQUEST for normalized duplicate tags. Stored attributes remain unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: no current valid account/credential session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: current account is not ADMIN.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: product does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: database integrity prevented the write.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_SERVER_ERROR: failed operation, never successful replacement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "Session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "JSESSIONID"
+      }
+    },
+    "schemas": {
+      "FeatureValues": {
+        "type": "object",
+        "properties": {
+          "volumeMl": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "Strict JSON integer; strings/fractions rejected. Technical bulk-container limit."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000,
+            "description": "Trimmed; blank becomes unknown."
+          },
+          "tasteTags": {
+            "$ref": "#/components/schemas/Tags"
+          },
+          "aromaTags": {
+            "$ref": "#/components/schemas/Tags"
+          },
+          "sourceName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "Nonblank source label required for any known value or non-null tag array, including []. Not usage-rights approval."
+          },
+          "sourceUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1000,
+            "description": "Optional absolute HTTP(S) URL with host and no userinfo. Blank becomes null. Stored only; never fetched."
+          },
+          "sourceNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1000,
+            "description": "Public provenance scope/review note, not a private admin memo."
+          }
+        }
+      },
+      "Tags": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "maxItems": 20,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "description": "null=unknown; []=reviewed with no declared tags. Nonblank items, stripped/lowercased/sorted; normalized duplicates rejected."
+      },
+      "ProductFeatures": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FeatureValues"
+          },
+          {
+            "type": "object",
+            "required": [
+              "productId",
+              "volumeMl",
+              "description",
+              "tasteTags",
+              "aromaTags",
+              "sourceName",
+              "sourceUrl",
+              "sourceNote"
+            ],
+            "properties": {
+              "productId": {
+                "type": "integer",
+                "minimum": 1,
+                "format": "int32"
+              }
+            }
+          }
+        ]
+      },
+      "FeatureEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProductFeatures"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "type": "null"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "fields"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

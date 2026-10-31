@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.pubburi.pub.model.dao.ProductFeatureDao">
+    <select id="selectByProductId" resultType="ProductFeatures">
+        SELECT p.id AS product_id, f.volume_ml, f.description, f.source_name, f.source_url, f.source_note,
+               COALESCE(f.taste_known, FALSE) AS taste_known, COALESCE(f.aroma_known, FALSE) AS aroma_known
+        FROM t_product p LEFT JOIN t_product_feature f ON f.product_id = p.id
+        WHERE p.id = #{productId}
+    </select>
+
+    <select id="selectTags" resultType="ProductFeatureTag">
+        SELECT kind, tag FROM t_product_feature_tag WHERE product_id = #{productId}
+    </select>
+
+    <insert id="upsert" parameterType="ProductFeatures">
+        INSERT INTO t_product_feature
+            (product_id, volume_ml, description, taste_known, aroma_known, source_name, source_url, source_note)
+        VALUES (#{productId}, #{volumeMl}, #{description}, #{tasteKnown}, #{aromaKnown},
+                #{sourceName}, #{sourceUrl}, #{sourceNote}) AS incoming
+        ON DUPLICATE KEY UPDATE volume_ml = incoming.volume_ml, description = incoming.description,
+            taste_known = incoming.taste_known, aroma_known = incoming.aroma_known,
+            source_name = incoming.source_name, source_url = incoming.source_url, source_note = incoming.source_note
+    </insert>
+
+    <delete id="deleteTags">
+        DELETE FROM t_product_feature_tag WHERE product_id = #{productId}
+    </delete>
+
+    <insert id="insertTags">
+        INSERT INTO t_product_feature_tag (product_id, kind, tag) VALUES
+        <foreach collection="tags" item="item" separator=",">
+            (#{productId}, #{item.kind}, #{item.tag})
+        </foreach>
+    </insert>
+</mapper>

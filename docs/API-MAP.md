@@ -42,11 +42,17 @@
 - `GET /api/products?page=1&size=12&type=&q=&sort=popular`: 상품 목록, 검색, 카테고리, 정렬
 - `GET /api/products/popular`: 인기 상품
 - `GET /api/products/{id}`: 상품 상세
+- `GET /api/products/{id}/features`: 출처가 기록된 상품 특성. 미확인 필드는 null
 - `POST /api/admin/products`: 관리자 상품 등록
 - `PUT /api/admin/products/{id}`: 관리자 상품 수정
+- `PUT /api/admin/products/{id}/features`: 관리자 특성 전체 교체. 누락/null은 unknown, {}는 초기화
 - `DELETE /api/admin/products/{id}`: 관리자 상품 삭제
 
 고객 상품 화면의 공식 query contract는 `type`, `q`, `sort(popular|priceAsc|priceDesc|name)`, `page`이며 frontend router가 잘못된 값을 기본값으로 정규화한다.
+
+기존 ProductResponse의 7필드/주종은 유지한다. 별도 특성의 volumeMl·설명·맛/향 태그·출처와
+null/빈 배열·검증·삭제/원자 교체는 [특성 계약](PRODUCT-FEATURES.md)과 [OpenAPI](openapi/product-features.json)를 따른다.
+sourceName은 알려진 값/빈 배열 검수에도 필요하지만 권리 승인을 뜻하지 않으며 sourceUrl을 fetch하지 않는다.
 
 ## Comments
 
