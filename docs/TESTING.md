@@ -10,6 +10,14 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 
 ## HTTP 계약과 DB 검증
 
+Maven의 MultipartParserSecurityTests는 실제 embedded Tomcat 라이브러리로 정상 part header와
+2,111B header의 512B 기본 상한 거부를 검사한다. 포트·DB·대량 메모리 부하 없이 파싱 경계만
+검증하며 실제 HTTP의 전후 오류율이나 전체 DoS 방어 완료로 표현하지 않는다.
+[의존성 점검 범위](DEPENDENCY-SECURITY.md)의 jar/실행 smoke 호환성과 함께 확인한다.
+추가 MockMvc는 일반 MultipartException의 고정 JSON 400·크기 초과 하위 타입의 413·원인 상세
+비노출·기존 미지원 Content-Type 415를 확인한다. 폐기 환경의 필수 HTTP smoke에도 2KB 수준의
+소량 multipart header 초과의 실제 크기 예외 413과 정상 형태의 미지원 미디어 415를 포함한다.
+
 기본 `./scripts/smoke.sh`는 카탈로그 크기와 무관한 페이지 불변식·응답 필드, 없는 상품 404, 비인증 401,
 입력 검증 400과 ApiResponse/오류 필드를 확인한다. 계정·주문을 생성하지 않는다.
 

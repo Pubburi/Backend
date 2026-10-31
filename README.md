@@ -53,7 +53,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 영역 | 기술 |
 |---|---|
 | 언어·런타임 | Java 17 |
-| 서버 | Spring Boot 3.5.0, Bean Validation |
+| 서버 | Spring Boot 3.5.0, Tomcat 10.1.61, Bean Validation |
 | 저장 | MyBatis 3.0.3, MySQL 8.4 |
 | API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |

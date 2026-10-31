@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from api_smoke import (
     ApiClient, change_ci_product, count_ci_favorites, count_ci_preferences, count_ci_product_features,
-    favorite_contract, private_preference_contract, product_feature_contract,
+    favorite_contract, multipart_security_contract, private_preference_contract, product_feature_contract,
     promote_ci_fixture_admin, require_disposable_database, session_authority_contract,
     verify_feature_openapi,
 )
@@ -103,6 +103,12 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
         with patch("api_smoke.ApiClient") as client:
             with self.assertRaises(RuntimeError):
                 favorite_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
+            client.assert_not_called()
+
+    def test_multipart_probes_require_the_disposable_database_before_any_http(self):
+        with patch("api_smoke.ApiClient") as client:
+            with self.assertRaises(RuntimeError):
+                multipart_security_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
             client.assert_not_called()
 
     def test_favorite_counts_are_guarded_and_reject_nonfixture_accounts(self):
