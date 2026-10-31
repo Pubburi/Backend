@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.pubburi.pub.model.dao.UserDao">
+
+    <select id="selectAll" resultType="User">
+        SELECT id, name, password_hash AS pass, stamps, role
+        FROM t_user
+        ORDER BY id
+    </select>
+
+    <select id="selectPaged" resultType="User">
+        SELECT id, name, password_hash AS pass, stamps, role
+        FROM t_user
+        ORDER BY id
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAll" resultType="int">
+        SELECT COUNT(*)
+        FROM t_user
+    </select>
+
+    <insert id="insert" parameterType="User">
+        INSERT INTO t_user (id, name, password_hash, stamps, role)
+        VALUES (#{id}, #{name}, #{pass}, COALESCE(#{stamps}, 0), #{role})
+    </insert>
+
+    <update id="update" parameterType="User">
+        UPDATE t_user
+        SET name = #{name},
+            password_hash = #{pass},
+            stamps = #{stamps},
+            role = #{role}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updatePassword">
+        UPDATE t_user
+        SET password_hash = #{pass}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete" parameterType="string">
+        DELETE FROM t_user WHERE id = #{id}
+    </delete>
+
+    <update id="updateStamp" parameterType="User">
+        UPDATE t_user
+        SET stamps = #{stamps}
+        WHERE id = #{id}
+    </update>
+
+    <update id="incrementStamps">
+        UPDATE t_user
+        SET stamps = stamps + #{quantity}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectById" parameterType="string" resultType="User">
+        SELECT id, name, password_hash AS pass, stamps, role
+        FROM t_user
+        WHERE id = #{id}
+    </select>
+</mapper>

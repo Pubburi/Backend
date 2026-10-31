@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.pubburi.pub.model.dao.OrderDao">
+
+    <insert id="insert" parameterType="Order" useGeneratedKeys="true" keyProperty="oId" keyColumn="o_id">
+        INSERT INTO t_order (user_id, order_type, order_table, completed)
+        VALUES (#{userId}, #{orderType}, #{orderTable}, #{completed})
+    </insert>
+
+    <update id="update" parameterType="Order">
+        UPDATE t_order
+        SET completed = #{completed}
+        WHERE o_id = #{oId}
+    </update>
+
+    <delete id="delete" parameterType="int">
+        DELETE FROM t_order
+        WHERE o_id = #{oId}
+    </delete>
+
+    <select id="selectByUserId" parameterType="string" resultType="Order">
+        SELECT o_id, user_id, order_type, order_table, completed, order_time
+        FROM t_order
+        WHERE user_id = #{userId}
+        ORDER BY o_id DESC
+    </select>
+
+    <select id="selectById" parameterType="int" resultMap="orderMap">
+        SELECT o_id, user_id, order_type, order_table, completed, order_time
+        FROM t_order
+        WHERE o_id = #{oId}
+    </select>
+
+    <select id="selectOrderInfo" parameterType="int" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        WHERE o_id = #{oId}
+    </select>
+
+    <select id="getOrderDetailInfo" parameterType="int" resultType="OrderDetailInfo">
+        SELECT
+            d.d_id AS id,
+            d.order_id AS orderId,
+            d.product_id AS productId,
+            d.quantity,
+            p.name,
+            p.type,
+            p.price AS unitPrice,
+            (p.price * d.quantity) AS sumPrice,
+            p.img
+        FROM t_order_detail d
+        JOIN t_product p ON d.product_id = p.id
+        WHERE d.order_id = #{orderId}
+        ORDER BY d.d_id ASC
+    </select>
+
+    <select id="getOrderDetailInfoByOrderIds" resultType="OrderDetailInfo">
+        SELECT
+            d.d_id AS id,
+            d.order_id AS orderId,
+            d.product_id AS productId,
+            d.quantity,
+            p.name,
+            p.type,
+            p.price AS unitPrice,
+            (p.price * d.quantity) AS sumPrice,
+            p.img
+        FROM t_order_detail d
+        JOIN t_product p ON d.product_id = p.id
+        WHERE d.order_id IN
+        <foreach collection="orderIds" item="orderId" open="(" separator="," close=")">
+            #{orderId}
+        </foreach>
+        ORDER BY d.order_id DESC, d.d_id ASC
+    </select>
+
+    <select id="selectOrderInfoListByUserId" parameterType="string" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        WHERE user_id = #{userId}
+        ORDER BY o_id DESC
+    </select>
+
+    <select id="selectOrderInfoPageByUserId" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        WHERE user_id = #{userId}
+        ORDER BY o_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countOrderInfoByUserId" parameterType="string" resultType="int">
+        SELECT COUNT(*)
+        FROM t_order
+        WHERE user_id = #{userId}
+    </select>
+
+    <select id="selectAllOrderInfo" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        ORDER BY o_id DESC
+    </select>
+
+    <select id="selectAllOrderInfoPaged" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        ORDER BY o_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAllOrderInfo" resultType="int">
+        SELECT COUNT(*)
+        FROM t_order
+    </select>
+
+	<select id="getLastMonthOrder" parameterType="string" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        WHERE user_id = #{id}
+          AND order_time > DATE_ADD(NOW(), INTERVAL -1 MONTH)
+        ORDER BY o_id DESC
+    </select>
+
+    <select id="getLast6MonthOrder" parameterType="string" resultMap="orderInfoMap">
+        SELECT o_id, user_id, order_type, order_table, order_time, completed
+        FROM t_order
+        WHERE user_id = #{id}
+          AND order_time > DATE_ADD(NOW(), INTERVAL -6 MONTH)
+        ORDER BY o_id DESC
+    </select>
+
+    <resultMap id="orderMap" type="Order">
+        <id property="oId" column="o_id" />
+        <result property="userId" column="user_id" />
+        <result property="orderType" column="order_type" />
+        <result property="orderTable" column="order_table" />
+        <result property="completed" column="completed" />
+        <result property="orderTime" column="order_time" />
+    </resultMap>
+
+    <resultMap id="orderInfoMap" type="OrderInfo">
+	    <id property="oId" column="o_id" />
+	    <result property="userId" column="user_id" />
+	    <result property="orderType" column="order_type" />
+	    <result property="orderTable" column="order_table" />
+	    <result property="orderTime" column="order_time" />
+	    <result property="completed" column="completed" />
+	</resultMap>
+</mapper>

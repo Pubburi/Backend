@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-ci:
+    name: backend-ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: pubburi_ci
+          MYSQL_USER: ci_user
+          MYSQL_PASSWORD: ci_test_only
+          MYSQL_ROOT_PASSWORD: ci_root_only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -pci_root_only --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      # Disposable CI database settings, never production credentials.
+      PUBBURI_DB_NAME: pubburi_ci
+      PUBBURI_DB_USER: ci_user
+      PUBBURI_DB_PASSWORD: ci_test_only
+      PUBBURI_DB_ROOT_PASSWORD: ci_root_only
+      PUBBURI_DB_URL: jdbc:mysql://127.0.0.1:3306/pubburi_ci
+      PUBBURI_SERVER_PORT: '9987'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Check repository contents
+        run: python3 scripts/check_repository.py
+      - name: Initialize disposable database
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: >-
+          docker exec -i -e MYSQL_PWD="$PUBBURI_DB_ROOT_PASSWORD"
+          "$MYSQL_CONTAINER_ID" mysql -uroot "$PUBBURI_DB_NAME"
+          < data.sql > /dev/null
+      - name: Validate local database configuration
+        run: docker compose config --quiet
+      - name: Test and package
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+      - name: Verify schema and API startup
+        run: ./scripts/smoke.sh

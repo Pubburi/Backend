@@ -1,0 +1,23 @@
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${PUBBURI_DB_NAME:?Set PUBBURI_DB_NAME in .env}
+      MYSQL_USER: ${PUBBURI_DB_USER:?Set PUBBURI_DB_USER in .env}
+      MYSQL_PASSWORD: ${PUBBURI_DB_PASSWORD:?Set PUBBURI_DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${PUBBURI_DB_ROOT_PASSWORD:?Set PUBBURI_DB_ROOT_PASSWORD in .env}
+      TZ: Asia/Seoul
+    ports:
+      - "${PUBBURI_DB_PORT:-3306}:3306"
+    volumes:
+      - pubburi-db-data:/var/lib/mysql
+      - ./data.sql:/docker-entrypoint-initdb.d/01-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pubburi-db-data:
