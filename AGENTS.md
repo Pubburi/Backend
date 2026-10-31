@@ -9,7 +9,9 @@
 
 ## Delivery and automation
 
-- Follow the approved delivery contract in Backend docs/DELIVERY-PLAN.md (the sibling checkout or its GitHub main). Deadline: 2027-02-05 inclusive Asia/Seoul; no new implementation, commits or merges from 2027-02-06 00:00.
+- Backend owns business APIs, MySQL, auth/session, search indexing/API integration, backend tests and backend docs/PRs. Frontend owns UI/routes/state/API consumption/browser tests/assets and its docs/PRs. Recommendation owns source ingestion/curation, features, model training/scoring/reasons/evaluation and its docs/PRs.
+- Recommendation/docs/DATA-AND-MODEL-PLAN.md is the data/model/evaluation canonical plan (sibling checkout or GitHub main). Backend owns docs/SEARCH-PLAN.md and integration contracts. Reference other owners rather than copying detailed plans or mixing their implementation into Backend PRs; coordinate shared contracts in approved planning.
+- Follow approved planning referenced by this chat/private context and this repo's docs/DELIVERY-PLAN.md for Backend work. Frontend and Recommendation own their role plans. Deadline: 2027-02-05 inclusive Asia/Seoul; no new implementation, commits or merges from 2027-02-06 00:00.
 - All R01–R08 and F01–F12 are required; P1/P2 determines order only. Keep chatbot, mobile implementation, real payments/shipping and AWS resource creation outside this work. AWS requires a later user instruction.
 - Resume the current chat every two hours. Read latest planning, docs/plans, Git, PR reviews and CI. Prefer finishing verifiable product work over repeated audits.
 - Check active task ownership and acquire this repo's ignored .pubburi/automation-lease using Backend/scripts/automation_lease.py. Never steal a live lease or overwrite user work. Preserve .pubburi/ and private context; never commit or print their sensitive contents.
