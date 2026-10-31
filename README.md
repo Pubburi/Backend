@@ -2,7 +2,7 @@
   <img src="docs/brand/pubburi.webp" alt="주점부리" width="96" />
   <h1>주점부리 · Backend</h1>
   <p><strong>취향에 맞는 한 잔을 발견하고 기록하는 주류 큐레이션</strong></p>
-  <p>기존 주점부리 API를 독립 실행 가능한 Spring Boot 레포로 이전했습니다.</p>
+  <p>회원·상품·후기·데모 주문을 제공하는 Spring Boot API</p>
   <a href="https://github.com/Pubburi/Backend/actions/workflows/ci.yml"><img src="https://github.com/Pubburi/Backend/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <img src="https://img.shields.io/badge/Java-17-437291" alt="Java 17" /> <img src="https://img.shields.io/badge/Spring_Boot-3.5-6DB33F" alt="Spring Boot 3.5" /> <img src="https://img.shields.io/badge/MySQL-8.4-4479A1" alt="MySQL 8.4" />
 </div>
@@ -26,7 +26,7 @@
 
 ## ✍ 프로젝트 개요
 
-주류 탐색·후기·데모 주문을 제공하는 공통 API입니다. 이번 단계는 기존 기능을 유지한 레포 분리와 로컬 실행·CI 구성입니다. 실제 결제·배송 및 AWS 배포는 포함하지 않습니다.
+주류 탐색·후기·데모 주문과 관리자 기능을 제공하는 공통 API입니다. Java 17·Spring Boot·MyBatis·MySQL로 구성하며 세션 인증을 사용합니다.
 
 <a id="features"></a>
 
@@ -41,7 +41,7 @@
 | 관리자 | 상품·회원·후기·매장·주문 관리 |
 
 현재 인기 상품은 누적 주문 수 정렬입니다. 개인화 추천과 추천 서버 호출은 후속 작업입니다.
-API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요. 스크린샷은 새 웹 화면이 준비된 뒤 추가합니다.
+API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 
 <a id="technology"></a>
 
@@ -74,6 +74,16 @@ flowchart LR
 
 Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니다.
 
+웹·추천 서버까지 함께 실행하려면 [로컬 통합 실행](docs/LOCAL-DEVELOPMENT.md)을 따릅니다. AWS 계정이나 외부 AI 키 없이 사용할 수 있습니다.
+
+~~~bash
+./scripts/local-stack.sh init
+./scripts/local-stack.sh install
+./scripts/local-stack.sh up
+~~~
+
+백엔드만 개별 실행할 때는 아래 설정을 사용합니다.
+
 macOS에서 여러 JDK를 사용하는 경우 먼저 export JAVA_HOME=$(/usr/libexec/java_home -v 17)로 Java 17을 선택합니다.
 
 ~~~bash
@@ -105,9 +115,13 @@ docker compose up -d db
 
 main은 PR·backend-ci 성공·최신 main 반영·대화 해결을 요구합니다. 필수 승인은 0명이고 관리자에게도 적용합니다. Squash merge 뒤 작업 브랜치를 정리합니다.
 
+자동화 PR은 최신 커밋의 Codex 리뷰와 관련 검증까지 통과해야 병합합니다. [개발·운영 기준](docs/DELIVERY-PLAN.md)을 함께 적용합니다.
+
 <a id="roadmap"></a>
 
 ## 🗺️ 개발 계획
+
+기한은 **2027년 2월 5일**이며 P1·P2 기능 모두 필수 목표입니다. [전체 기능·일정](docs/DELIVERY-PLAN.md)을 기준으로 진행합니다.
 
 - [ ] 상품 맛·향 특성과 출처 관리
 - [ ] 취향·찜·추천 피드백·이벤트 API
@@ -131,6 +145,5 @@ main은 PR·backend-ci 성공·최신 main 반영·대화 해결을 요구합니
 |---|---|
 | [오인성](https://github.com/ois0886) | 백엔드 구조·데이터·API·테스트 |
 
-초기 웹·백엔드는 SSAFY 13기 주점부리 프로젝트(오인성·박상윤)를 기반으로 합니다.
-[이전 기준 소스](https://github.com/ois0886/Pubburi-Refactor/tree/b993b4c8f3ba8e5d11e98a3cc76c98b3e661bfdf)를 기록하고 각 신규 레포의 기존 이력 위에 초기 세팅을 추가했습니다.
+[소스 출처](docs/PROVENANCE.md)
 프로젝트에는 별도 담당자의 모바일 앱도 포함되며, 이 레포는 공통 API 연동 범위를 다룹니다.
