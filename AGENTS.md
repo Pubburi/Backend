@@ -5,6 +5,9 @@
 - Root commands: ./scripts/check.sh and ./scripts/dev.sh. MySQL Compose mounts root data.sql.
 - Do not commit .env, credentials, target/ or real database settings. Update docs with changes.
 - Branches use PRs and Conventional Commits. CI must pass before squash merging.
+- 커밋 제목은 `type: 한국어 변경 요약` 또는 `type(scope): 한국어 변경 요약`으로 쓰고 필요한 본문도 한국어로 작성한다. 유형은 feat/fix/refactor/perf/test/ci/build/docs/chore/revert이며 식별자는 원문을 유지할 수 있다.
+- 커밋은 하나의 검토 가능한 목적별로 나누고 구현·필수 테스트/문서는 함께 묶는다. 독립 기능/수정/리팩터링/의존성 변경은 분리하며 각 커밋을 빌드·검증 가능하게 남긴다. 파일별 억지 분할·WIP·빈 커밋은 만들지 않는다.
+- PR 제목·최종 Squash 제목은 한국어 Conventional Commit 형식, 필요한 Squash 본문은 한국어로 작성한다. 기존 Squash 방식을 유지하므로 main에서도 독립 보존할 목적은 PR부터 분리한다. 언어 변경을 위해 병합 이력을 다시 쓰지 않는다. 자세한 기준은 CONTRIBUTING.md를 따른다.
 - Implement the approved recommendation and integrity roadmap; keep AWS disconnected until a later user instruction. Mobile is separately owned.
 
 ## Delivery and automation
