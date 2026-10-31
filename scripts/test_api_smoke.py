@@ -9,8 +9,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from api_smoke import (
-    ApiClient, change_ci_product, count_ci_preferences, count_ci_product_features,
-    private_preference_contract, product_feature_contract,
+    ApiClient, change_ci_product, count_ci_favorites, count_ci_preferences, count_ci_product_features,
+    favorite_contract, private_preference_contract, product_feature_contract,
     promote_ci_fixture_admin, require_disposable_database, session_authority_contract,
     verify_feature_openapi,
 )
@@ -98,6 +98,23 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 private_preference_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
             client.assert_not_called()
+
+    def test_favorites_require_the_disposable_database_before_any_http(self):
+        with patch("api_smoke.ApiClient") as client:
+            with self.assertRaises(RuntimeError):
+                favorite_contract(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"))
+            client.assert_not_called()
+
+    def test_favorite_counts_are_guarded_and_reject_nonfixture_accounts(self):
+        with patch("api_smoke.subprocess.run") as run:
+            with self.assertRaises(RuntimeError):
+                count_ci_favorites(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"), "ci_favorite_" + "a" * 32)
+            run.assert_not_called()
+        for user_id in ("admin", "ci_favorite_' OR 1=1", None):
+            with patch("api_smoke.require_disposable_database"), patch("api_smoke.subprocess.run") as run:
+                with self.assertRaises(ValueError):
+                    count_ci_favorites(self.environ, user_id)
+                run.assert_not_called()
 
     def test_private_preference_counts_reject_existing_or_injected_account_ids(self):
         with patch("api_smoke.subprocess.run") as run:

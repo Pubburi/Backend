@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pubburi.pub.model.dao.FavoriteDao">
+    <select id="selectOwnedPage" resultType="Product">
+        SELECT p.id, p.name, p.type, p.price, p.img, p.abv, p.order_count
+        FROM t_user_favorite f JOIN t_user u ON u.id = f.user_id JOIN t_product p ON p.id = f.product_id
+        WHERE u.id = #{userId} AND u.auth_epoch = #{authEpoch}
+        ORDER BY f.created_at DESC, f.product_id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="countOwned" resultType="int">
+        SELECT COUNT(*) FROM t_user_favorite f
+        JOIN t_user u ON u.id = f.user_id JOIN t_product p ON p.id = f.product_id
+        WHERE u.id = #{userId} AND u.auth_epoch = #{authEpoch}
+    </select>
+    <insert id="ensurePresent">
+        INSERT INTO t_user_favorite (user_id, product_id) VALUES (#{userId}, #{productId}) AS incoming
+        ON DUPLICATE KEY UPDATE product_id = incoming.product_id
+    </insert>
+    <delete id="deleteOwned">
+        DELETE FROM t_user_favorite WHERE user_id = #{userId} AND product_id = #{productId}
+    </delete>
+</mapper>
