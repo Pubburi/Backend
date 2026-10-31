@@ -28,6 +28,8 @@ public interface ProductDao {
 	 */
 	Product selectById(int id);
 
+	Product selectByIdForUpdate(int id);
+
 	/**
 	 * 인기순으로 상품정보를 조회한다.
 	 *

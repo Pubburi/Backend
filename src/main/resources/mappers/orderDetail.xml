@@ -7,15 +7,15 @@
 
     <!-- 상세 주문 추가 -->
     <insert id="insert" parameterType="OrderDetail" useGeneratedKeys="true" keyProperty="dId">
-        INSERT INTO t_order_detail (order_id, product_id, quantity)
-        VALUES (#{orderId}, #{productId}, #{quantity})
+        INSERT INTO t_order_detail (order_id, product_id, quantity, product_name, product_type, product_img, unit_price, sum_price)
+        VALUES (#{orderId}, #{productId}, #{quantity}, #{productName}, #{productType}, #{productImg}, #{unitPrice}, #{sumPrice})
     </insert>
 
     <insert id="insertAll">
-        INSERT INTO t_order_detail (order_id, product_id, quantity)
+        INSERT INTO t_order_detail (order_id, product_id, quantity, product_name, product_type, product_img, unit_price, sum_price)
         VALUES
         <foreach collection="details" item="detail" separator=",">
-            (#{detail.orderId}, #{detail.productId}, #{detail.quantity})
+            (#{detail.orderId}, #{detail.productId}, #{detail.quantity}, #{detail.productName}, #{detail.productType}, #{detail.productImg}, #{detail.unitPrice}, #{detail.sumPrice})
         </foreach>
     </insert>
 

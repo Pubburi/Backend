@@ -6,9 +6,9 @@ from pathlib import Path
 import socket
 import subprocess
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from api_smoke import ApiClient, require_disposable_database
+from api_smoke import ApiClient, change_ci_product, require_disposable_database
 
 
 class DisposableDatabaseGuardTests(unittest.TestCase):
@@ -48,6 +48,23 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             require_disposable_database(dict(
                 self.environ, PUBBURI_DB_URL="jdbc:mysql://127.0.0.1:3306/pubburi_ci"), run=run)
         self.assertEqual(run.call_count, 1)
+
+    def test_price_mutation_rechecks_safety_before_any_write(self):
+        with patch("api_smoke.subprocess.run") as run:
+            with self.assertRaises(RuntimeError):
+                change_ci_product(dict(self.environ, PUBBURI_SMOKE_MUTATING="0"), 1, 1000, "name")
+            run.assert_not_called()
+
+    def test_price_mutation_encodes_names_and_keeps_password_out_of_arguments(self):
+        name = "상품 ' ; DELETE FROM t_order; --"
+        with patch("api_smoke.require_disposable_database") as guard, \
+                patch("api_smoke.subprocess.run") as run:
+            change_ci_product(self.environ, 1, 1000, name)
+            guard.assert_called_once_with(self.environ)
+            statement = run.call_args.args[0][-1]
+            self.assertIn(name.encode("utf-8").hex(), statement)
+            self.assertNotIn("DELETE", statement)
+            self.assertNotIn(self.environ["PUBBURI_DB_PASSWORD"], str(run.call_args.args))
 
     def test_missing_marker_is_rejected(self):
         run = Mock(side_effect=[self.inspect, subprocess.CompletedProcess([], 0, "")])

@@ -148,6 +148,8 @@ CREATE TABLE t_order (
     order_table VARCHAR(20),
     order_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed CHAR(1) DEFAULT 'N',
+    total_price INT DEFAULT NULL,
+    price_basis VARCHAR(20) NOT NULL DEFAULT 'LEGACY_ESTIMATE',
     CONSTRAINT fk_order_user FOREIGN KEY (user_id) REFERENCES t_user(id) ON DELETE CASCADE
 );
 
@@ -162,15 +164,27 @@ CREATE TABLE t_order_detail (
     order_id INT NOT NULL,
     product_id INT NOT NULL,
     quantity INT NOT NULL DEFAULT 1,
+    product_name VARCHAR(100) NOT NULL,
+    product_type VARCHAR(20) NOT NULL,
+    product_img VARCHAR(100) NOT NULL,
+    unit_price INT NOT NULL,
+    sum_price INT NOT NULL,
     CONSTRAINT fk_order_detail_order FOREIGN KEY (order_id) REFERENCES t_order(o_id) ON DELETE CASCADE,
     CONSTRAINT fk_order_detail_product FOREIGN KEY (product_id) REFERENCES t_product(id) ON DELETE CASCADE
 );
 
-INSERT INTO t_order_detail (order_id, product_id, quantity) VALUES
-(1, 1, 2),
-(1, 4, 1),
-(2, 2, 1),
-(3, 5, 1);
+-- Existing demo orders have no recoverable historical prices: label the estimates.
+INSERT INTO t_order_detail (order_id, product_id, quantity, product_name, product_type, product_img, unit_price, sum_price)
+SELECT seed.order_id, seed.product_id, seed.quantity, p.name, p.type, p.img, p.price, p.price * seed.quantity
+FROM (
+    SELECT 1 AS order_id, 1 AS product_id, 2 AS quantity
+    UNION ALL SELECT 1, 4, 1
+    UNION ALL SELECT 2, 2, 1
+    UNION ALL SELECT 3, 5, 1
+) seed JOIN t_product p ON p.id = seed.product_id;
+UPDATE t_order o JOIN (
+    SELECT order_id, SUM(sum_price) AS total_price FROM t_order_detail GROUP BY order_id
+) totals ON totals.order_id = o.o_id SET o.total_price = totals.total_price;
 
 -- 리뷰 테이블
 CREATE TABLE t_comment (

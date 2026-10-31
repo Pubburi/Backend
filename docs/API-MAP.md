@@ -64,6 +64,13 @@
 
 주문 응답의 `details`는 상품명, 타입, 이미지, 단가, 합계를 포함한다. 목록/상세 API 모두 같은 `OrderResponse` 형태를 유지한다.
 
+상품명/타입/이미지·`unitPrice`/`sumPrice`는 현재 상품 JOIN 대신 주문 시점 스냅샷이다.
+주문에 `totalPrice`와 `priceBasis`가 추가된다. `ORDER_SNAPSHOT`은 신규 서버 확정값이고
+`LEGACY_ESTIMATE`는 과거 단가를 복구할 수 없어 전환 시 고정한 추정값이다. 상세가 사라진
+과거 주문 총액은 `null`로 표시한다. 기존 DB는 [전환 안내](ORDER-PRICE-SNAPSHOT.md)에 따라
+마이그레이션해야 하며 초기화 SQL을 재실행하지 않는다. 가격 합계/수량이 정수 범위를 넘으면
+`BAD_REQUEST`로 거부한다. 실제 결제·상품 삭제 이력 보존은 별도 범위다.
+
 ## Markets
 
 - `GET /api/markets?page=1&size=12`: 매장 목록

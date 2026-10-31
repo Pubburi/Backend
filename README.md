@@ -37,7 +37,7 @@
 | 회원 | 회원가입, 세션 로그인·로그아웃, 본인·관리자 접근 제어 |
 | 상품 | 목록·검색·주종 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 후기 | 상품별 평점·후기 조회와 작성·수정·삭제 |
-| 데모 주문 | 주문 생성·내역·상세, 관리자 완료 처리, 스탬프·등급 |
+| 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 관리자 완료 처리, 스탬프·등급 |
 | 관리자 | 상품·회원·후기·매장·주문 관리 |
 
 현재 인기 상품은 누적 주문 수 정렬입니다. 개인화 추천과 추천 서버 호출은 후속 작업입니다.
@@ -72,7 +72,7 @@ flowchart LR
 
 ## 🧩 문제 해결
 
-데이터 조회·입력 정규화·인증 전환·실행 소유권에서 내린 판단을 정리했습니다.
+데이터 조회·입력 정규화·인증 전환·주문 금액 보존에서 내린 판단을 정리했습니다.
 아래 결과는 현재 구현의 동작 범위이며, 응답 시간·처리량의 전후 개선 수치는 아직 측정하지 않았습니다.
 
 ### 1. 주문 페이지를 유지하면서 상세를 일괄 조립하기
@@ -196,167 +196,121 @@ DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상�
 
 #### 대체안/회고
 
-클라이언트 합산은 화면 상태를 단순하게 만들지만 다른 클라이언트나 직접 API 호출의 입력까지 보장하지는 않습니다. 서버 정규화를 공통 경계로 선택했습니다. 트랜잭션 선언만으로 실제 DB 롤백·동시성·재시도 멱등성을 실증한 것은 아니며, 주문 당시 단가와 상품 삭제 뒤 이력 보존도 추가 개선이 필요합니다.
+클라이언트 합산은 화면 상태를 단순하게 만들지만 다른 클라이언트나 직접 API 호출의 입력까지 보장하지는 않습니다. 서버 정규화를 공통 경계로 선택했습니다. 현재 HTTP·폐기 DB의 쓰기 후 실패 경로까지 검증하지만 모든 단계의 장애·동시성·재시도 멱등성과 상품 삭제 뒤 이력 보존은 별도 개선이 필요합니다.
 
 #### 코드
 
 ~~~java
-private List<OrderDetail> normalizeDetails(List<OrderDetail> details) {
-	Map<Integer, OrderDetail> byProductId = new LinkedHashMap<>();
-	for (OrderDetail detail : details) {
-		if (detail == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
-			throw new IllegalArgumentException("Invalid order detail");
-		}
-		byProductId.compute(detail.getProductId(), (productId, existing) -> {
-			if (existing == null) {
-				OrderDetail normalized = new OrderDetail();
-				normalized.setProductId(productId);
-				normalized.setQuantity(detail.getQuantity());
-				return normalized;
-			}
-			existing.setQuantity(existing.getQuantity() + detail.getQuantity());
-			return existing;
-		});
-	}
-	return List.copyOf(byProductId.values());
-}
+    private List<OrderDetail> normalizeDetails(List<OrderDetail> details) {
+        Map<Integer, OrderDetail> byProductId = new LinkedHashMap<>();
+        for (OrderDetail detail : details) {
+            if (detail == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
+                throw new IllegalArgumentException("Invalid order detail");
+            }
+            byProductId.compute(detail.getProductId(), (productId, existing) -> {
+                if (existing == null) {
+                    OrderDetail normalized = new OrderDetail();
+                    normalized.setProductId(productId);
+                    normalized.setQuantity(detail.getQuantity());
+                    return normalized;
+                }
+                try {
+                    existing.setQuantity(Math.addExact(existing.getQuantity(), detail.getQuantity()));
+                } catch (ArithmeticException ex) {
+                    throw new IllegalArgumentException("Order quantity is out of range", ex);
+                }
+                return existing;
+            });
+        }
+        return List.copyOf(byProductId.values());
+    }
 ~~~
 
-~~~java
-@Override
-@Transactional
-public int makeOrder(Order order, List<OrderDetail> details) {
-	if (order == null || isBlank(order.getUserId()) || details == null || details.isEmpty()) {
-		return 0;
-	}
-	List<OrderDetail> normalizedDetails = normalizeDetails(details);
-	if (isBlank(order.getCompleted())) {
-		order.setCompleted("N");
-	}
-	int result = orderDao.insert(order);
-	if (result <= 0) {
-		return 0;
-	}
-	int totalQuantity = 0;
-	for (OrderDetail detail : normalizedDetails) {
-		detail.setOrderId(order.getoId());
-		if (productDao.incrementOrderCount(detail.getProductId(), detail.getQuantity()) <= 0) {
-			throw new IllegalArgumentException("Product not found: " + detail.getProductId());
-		}
-		totalQuantity += detail.getQuantity();
-	}
-	if (orderDetailDao.insertAll(normalizedDetails) != normalizedDetails.size()) {
-		throw new IllegalStateException("Order details could not be created");
-	}
-	Stamp stamp = new Stamp();
-	stamp.setUserId(order.getUserId());
-	stamp.setOrderId(order.getoId());
-	stamp.setQuantity(totalQuantity);
-	if (stampDao.insert(stamp) <= 0) {
-		throw new IllegalStateException("Stamp could not be created");
-	}
+[입력 정규화와 트랜잭션 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 집계 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [스탬프 증가 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml)
 
-	if (userDao.incrementStamps(order.getUserId(), totalQuantity) <= 0) {
-		throw new IllegalArgumentException("User not found: " + order.getUserId());
-	}
-	return result;
-}
-~~~
-
-[정규화와 주문 쓰기 흐름](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 집계 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [스탬프 증가 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml)
-
-### 4. 실행기와 자식 서버의 수명을 분리해 로컬 작업 소유권 지키기
+### 4. 상품 가격이 바뀌어도 과거 주문 금액을 보존하기
 
 #### 문제
 
-실행기가 자식 서버보다 먼저 종료되거나 자식이 종료 신호를 무시하면 서버가 포트를 점유한 채 남을 수 있습니다. 동시에 다른 명령이 DB를 종료·초기화하면 실행 중인 작업의 상태도 훼손할 수 있습니다.
+주문이 끝난 뒤 상품 가격을 바꾸자 과거 주문 내역의 금액도 달라졌습니다. 주문 당시 가격을 별도로 남기지 않아 관리자 상품 수정이 이미 만들어진 주문의 의미까지 바꾸는 문제였습니다.
 
 #### 원인
 
-실행기 PID의 종료 여부는 전체 서버의 종료 여부가 아닙니다. 시작 명령만 잠그고 종료 명령은 잠금 존재만 확인하면 확인 직후 다른 시작이 끼어드는 경쟁도 생깁니다.
+상세 테이블에는 상품 ID와 수량만 있었고 조회할 때 현재 상품 가격을 JOIN해 합계를 계산했습니다. 과거 단가가 없는 기존 주문을 새 스키마로 옮기면서 현재 가격을 과거 실제 금액으로 표시하면 데이터의 출처도 잘못 전달됩니다.
 
 #### 해결
 
-이번 실행을 새 세션의 프로세스 그룹으로 만들고 실행기 종료와 별개로 그 그룹을 정리합니다. 종료를 확인할 수 없으면 잠금을 보존합니다. 시작·종료·DB 초기화는 같은 디렉터리 잠금을 원자적으로 획득하며, 정리 완료 후에만 다음 작업이 진입합니다.
+트랜잭션 안에서 상품을 FOR UPDATE로 잠금 조회하고 서버의 상품명·단가·수량별 합계와 주문 총액을 저장합니다. 이후 단건/목록 조회는 저장한 스냅샷을 읽습니다. 새 주문은 ORDER_SNAPSHOT, 과거 단가를 복구할 수 없어 전환 시 고정한 추정값은 LEGACY_ESTIMATE로 구분합니다. 기존 응답 필드를 유지하고 totalPrice·priceBasis를 추가했습니다.
 
 #### 결과
 
-실행기가 먼저 끝나는 경우와 종료 신호를 무시한 자식에 대해 소유한 그룹을 정리하는 경로를 갖췄습니다. DB 작업은 동일한 소유권 경계로 직렬화하고, 일반 종료에서는 전용 DB 볼륨을 보존합니다.
+같은 초기 데이터에서 상품 두 개의 단가를 각각 1,000원 올렸을 때 과거 금액이 변한 주문이 **3/3 → 0/3**, 관측된 최대 금액 차이는 **3,000원 → 0원**이었습니다. 신규 주문의 단건·목록 응답과 저장 총액/상세 합계도 일치했습니다. 이는 로컬 데모의 금액 정합성 결과이며 외부 실사용자의 장애율이나 응답 성능 수치가 아닙니다. [입력·원값·재현 조건](docs/measurements/2026-10-31-order-price-invariance.md)을 함께 기록했습니다.
 
 #### 대체안/회고
 
-런타임별 PID 파일은 여러 자식과 재시작을 각각 추적해야 하고, 별도 프로세스 관리자는 추가 운영 의존성이 됩니다. 현재 로컬 도구는 POSIX 프로세스 그룹과 원자적 잠금을 선택했습니다. macOS의 종료 직후 권한 오류와 zombie 상태를 구분하며, 이 구현을 Windows 동작이나 운영 배포의 성과로 확대하지 않습니다.
+현재 상품 JOIN을 유지하면 과거 금액 불변을 보장할 수 없어 주문 시점 스냅샷을 선택했습니다. 단가만 저장하는 방법보다 표시 정보와 확정 합계까지 보존하되, 상품별 잠금 SELECT가 추가되는 비용이 있습니다. 과거 자료는 추정임을 명시하고 수동 비파괴 전환 절차를 마련했습니다. 상품 삭제 이력 보존(BE02), 가격 출처를 보여주는 Frontend UI, 동시 요청·락 대기의 추가 검증은 남아 있습니다.
 
 #### 코드
 
-~~~python
-def group_exists(group):
-    try:
-        os.killpg(group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # macOS can reject killpg(0) after the last member exits. Confirm the
-        # group using process metadata instead of assuming permission means death.
-        pass
-    rows = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True)
-    return any(int(fields[0]) == group and not fields[1].startswith("Z")
-               for row in rows.splitlines() if len(fields := row.split()) == 2)
+서비스의 트랜잭션 안에서 가격을 캡처하고 저장하는 부분입니다.
 
-
-def stop(child, grace=15):
-    # The launcher can exit before its descendants. Its PID is the PGID created
-    # by start_new_session, so inspect and signal the group independently.
-    try:
-        if group_exists(child.pid):
-            os.killpg(child.pid, signal.SIGTERM)
-        deadline = time.monotonic() + grace
-        while group_exists(child.pid) and time.monotonic() < deadline:
-            child.poll()  # Reap the launcher, even if descendants are still running.
-            time.sleep(0.05)
-        if group_exists(child.pid):
-            os.killpg(child.pid, signal.SIGKILL)
-        child.wait()
-        deadline = time.monotonic() + 5
-        while group_exists(child.pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if group_exists(child.pid):
-            raise ProcessCleanupError("Owned process group remains; preserve the local-stack lock and inspect it.")
-    except ProcessLookupError:
-        child.wait()
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ProcessCleanupError("Cannot stop owned processes; preserve the local-stack lock.") from error
-    except KeyboardInterrupt as error:
-        raise ProcessCleanupError("Process cleanup interrupted; preserve the local-stack lock.") from error
-
-
-@contextmanager
-def operation_lock():
-    STATE.mkdir(mode=0o700, exist_ok=True)
-    lock = STATE / "local-stack-lock"
-    try:
-        lock.mkdir(mode=0o700)
-    except FileExistsError:
-        raise RuntimeError("Local stack is already owned. Inspect its terminal before retrying.")
-    try:
-        yield
-    except ProcessCleanupError:
-        # Do not let another command stop/reset the DB while app ownership is uncertain.
-        raise
-    except BaseException:
-        lock.rmdir()
-        raise
-    else:
-        lock.rmdir()
+~~~java
+        int totalQuantity = 0;
+        int totalPrice = 0;
+        for (OrderDetail detail : normalizedDetails) {
+            detail.setOrderId(order.getoId());
+            Product product = productDao.selectByIdForUpdate(detail.getProductId());
+            if (product == null) {
+                throw new IllegalArgumentException("Product not found: " + detail.getProductId());
+            }
+            // Capture server prices under a row lock before any amount-dependent write.
+            if (product.getPrice() < 0) {
+                throw new IllegalArgumentException("Invalid product price: " + detail.getProductId());
+            }
+            detail.setProductName(product.getName());
+            detail.setProductType(product.getType());
+            detail.setProductImg(product.getImg());
+            detail.setUnitPrice(product.getPrice());
+            try {
+                detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
+                totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
+                totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
+            } catch (ArithmeticException ex) {
+                throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
+            }
+            if (productDao.incrementOrderCount(detail.getProductId(), detail.getQuantity()) <= 0) {
+                throw new IllegalArgumentException("Product not found: " + detail.getProductId());
+            }
+        }
+        if (orderDetailDao.insertAll(normalizedDetails) != normalizedDetails.size()) {
+            throw new IllegalStateException("Order details could not be created");
+        }
+        if (orderDao.updateTotalPrice(order.getoId(), totalPrice) != 1) {
+            throw new IllegalStateException("Order total could not be captured");
+        }
+        order.setTotalPrice(totalPrice);
 ~~~
 
-[프로세스 그룹과 동작 잠금](https://github.com/Pubburi/Backend/blob/main/scripts/local_stack.py)
+조회는 현재 상품 가격 대신 저장된 상세를 사용합니다.
+
+~~~sql
+SELECT d.d_id AS id, d.order_id AS orderId, d.product_id AS productId,
+       d.quantity, d.product_name AS name, d.product_type AS type,
+       d.unit_price AS unitPrice, d.sum_price AS sumPrice,
+       d.product_img AS img
+FROM t_order_detail d
+WHERE d.order_id = #{orderId}
+ORDER BY d.d_id ASC
+~~~
+
+[가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [이전 자료 전환](docs/ORDER-PRICE-SNAPSHOT.md)
 
 <a id="development"></a>
 
 ## 🚀 로컬 실행
 
 Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니다.
+기존 DB는 [주문 가격 스냅샷 전환](docs/ORDER-PRICE-SNAPSHOT.md)을 먼저 확인하세요. 초기화 SQL을 다시 실행하지 않습니다.
 
 웹·추천 서버까지 함께 실행하려면 [로컬 통합 실행](docs/LOCAL-DEVELOPMENT.md)을 따릅니다. AWS 계정이나 외부 AI 키 없이 사용할 수 있습니다.
 
