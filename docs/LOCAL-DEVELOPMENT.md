@@ -5,6 +5,9 @@ Java 17, Node.js 24, Python 3.12, uv 0.13.6, 실행 중인 Docker Compose가 필
 macOS에서는 `JAVA_HOME`이 비어 있을 때 실행 스크립트가 설치된 JDK 17을 선택한다.
 이미 다른 JDK를 지정했다면 `JAVA_HOME`과 `PATH`를 직접 Java 17로 맞춘다.
 Node 24는 사용 중인 버전 관리 도구로 선택한다. 전역 셸 설정은 수정하지 않는다.
+설치된 도구를 이 프로젝트에서만 선택하려면 ignored `.pubburi/runtime.env`에
+`JAVA_HOME`, `PATH`, `UV_PYTHON` 등을 지정할 수 있다. 이 파일은 본인이 관리하는
+셸 설정으로만 사용하며 공유·커밋하지 않는다. `init`은 이 파일을 덮어쓰지 않는다.
 
 Backend 루트에서:
 
