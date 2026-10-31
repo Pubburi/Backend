@@ -33,7 +33,7 @@ public class AccessGuard {
 
 	public SessionUser requireSelfOrAdmin(HttpSession session, String userId) {
 		SessionUser user = requireLogin(session);
-		if (!user.admin() && !user.id().equals(userId)) {
+		if (!user.admin() && (userId == null || !userId.equals(user.id()))) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed");
 		}
 		return user;

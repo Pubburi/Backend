@@ -316,6 +316,12 @@ class OrderServiceImplTests {
 		private int incrementedQuantity;
 
 		@Override
+		public int clearOrderNotes(String id) { return 0; }
+
+		@Override
+		public User selectByIdForUpdate(String userId) { return selectById(userId); }
+
+		@Override
 		public List<User> selectAll() {
 			return List.of();
 		}

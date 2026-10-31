@@ -21,9 +21,13 @@ public interface UserDao {
 
 	int delete(String id);
 
+	int clearOrderNotes(@Param("id") String id);
+
 	int updateStamp(User user);
 
 	int incrementStamps(@Param("id") String id, @Param("quantity") int quantity);
 
 	User selectById(String userId);
+
+	User selectByIdForUpdate(@Param("userId") String userId);
 }

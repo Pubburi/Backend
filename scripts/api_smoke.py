@@ -99,6 +99,22 @@ def change_ci_product(environ, product_id, price, name):
         env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
 
 
+def promote_ci_fixture_admin(environ, user_id):
+    """Grant only a newly generated smoke fixture access to admin HTTP tests."""
+    require_disposable_database(environ)
+    if not re.fullmatch(r"ci_admin_[0-9a-f]{32}", user_id):
+        raise ValueError("Only generated CI fixture accounts may be promoted")
+    user_hex = user_id.encode("utf-8").hex()
+    statement = ("UPDATE t_user SET role = 'ADMIN' WHERE id = "
+                 f"CONVERT(UNHEX('{user_hex}') USING utf8mb4)")
+    subprocess.run([
+        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+        "mysql", "-u" + environ["PUBBURI_DB_USER"], environ["PUBBURI_DB_NAME"],
+        "--execute", statement,
+    ], capture_output=True, text=True, check=True,
+        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
+
+
 def read_only_contract(client):
     page = client.request("GET", "/products?page=1&size=1", 200)["data"]
     assert page["page"] == 1 and page["size"] == 1
@@ -183,6 +199,54 @@ def mutating_contract(client, product, environ):
     client.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
 
 
+def history_preservation_contract(environ):
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+    admin = ApiClient(port)
+    admin_id, admin_password = "ci_admin_" + uuid.uuid4().hex, uuid.uuid4().hex
+    admin.request("POST", "/users", 201, {"id": admin_id, "name": "CI admin", "pass": admin_password})
+    promote_ci_fixture_admin(environ, admin_id)
+    assert admin.request("POST", "/auth/login", 200, {
+        "id": admin_id, "pass": admin_password})["data"]["role"] == "ADMIN"
+    product = admin.request("POST", "/admin/products", 201, {
+        "name": "CI history product", "type": "탁주", "price": 1234,
+        "img": "ci-history.png", "abv": 6, "orderCount": 0,
+    })["data"]
+    buyer = ApiClient(port)
+    buyer_id, buyer_password = "ci_history_" + uuid.uuid4().hex, uuid.uuid4().hex
+    buyer.request("POST", "/users", 201, {"id": buyer_id, "name": "CI buyer", "pass": buyer_password})
+    buyer.request("POST", "/auth/login", 200, {"id": buyer_id, "pass": buyer_password})
+    created = buyer.request("POST", "/orders", 201, {
+        "orderType": "TAKEOUT", "orderTable": "CI private note",
+        "details": [{"productId": product["id"], "quantity": 2}],
+    })["data"]
+    order_path = f"/orders/{created['oId']}"
+    before_total = admin.request("GET", "/admin/orders?page=1&size=100", 200)["data"]["total"]
+    admin.request("DELETE", f"/admin/products/{product['id']}", 200)
+    buyer.request("GET", f"/products/{product['id']}", 404, error_code="NOT_FOUND")
+    expected = json.loads(json.dumps(created))
+    expected["details"][0]["productId"] = None
+    assert buyer.request("GET", order_path, 200)["data"] == expected, "Product deletion changed order history"
+    buyer.request("POST", "/orders", 400, {
+        "details": [{"productId": product["id"], "quantity": 1}],
+    }, "BAD_REQUEST")
+    admin.request("DELETE", f"/admin/users/{buyer_id}", 200)
+    expected["userId"], expected["orderTable"] = None, None
+    assert admin.request("GET", order_path, 200)["data"] == expected, "Account deletion changed order snapshots"
+    buyer.request("GET", order_path, 403, error_code="FORBIDDEN")
+    admin_orders = admin.request("GET", "/admin/orders?page=1&size=100", 200)["data"]
+    assert admin_orders["total"] == before_total, "Deletion removed an order from pagination"
+    assert next(o for o in admin_orders["items"] if o["oId"] == created["oId"]) == expected
+    replacement = ApiClient(port)
+    replacement_password = uuid.uuid4().hex
+    replacement.request("POST", "/users", 201, {
+        "id": buyer_id, "name": "New account with reused ID", "pass": replacement_password,
+    })
+    replacement.request("POST", "/auth/login", 200, {"id": buyer_id, "pass": replacement_password})
+    assert replacement.request("GET", f"/users/{buyer_id}/orders", 200)["data"]["total"] == 0
+    replacement.request("GET", order_path, 403, error_code="FORBIDDEN")
+
+
 def main():
     mutating = os.environ.get("PUBBURI_SMOKE_MUTATING") == "1"
     report = {"status": "failed", "mode": "disposable-db" if mutating else "read-only", "completed": []}
@@ -193,6 +257,8 @@ def main():
         if mutating:
             mutating_contract(client, product, os.environ)
             report["completed"].append("session, authorization, order price snapshots and rollback")
+            history_preservation_contract(os.environ)
+            report["completed"].append("deleted references, anonymized owner and preserved order snapshots")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")
