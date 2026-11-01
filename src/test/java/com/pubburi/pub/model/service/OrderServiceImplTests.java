@@ -390,12 +390,12 @@ class OrderServiceImplTests {
 		}
 
 		@Override
-		public List<Product> selectFiltered(String type, String q, String sort, int limit, int offset) {
+		public List<Product> selectFiltered(String type, String q, String sort, com.pubburi.pub.controller.api.ProductSearchFilters filters, int limit, int offset) {
 			return List.of();
 		}
 
 		@Override
-		public int countFiltered(String type, String q) {
+		public int countFiltered(String type, String q, com.pubburi.pub.controller.api.ProductSearchFilters filters) {
 			return 0;
 		}
 

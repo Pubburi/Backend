@@ -5,6 +5,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.controller.api.ProductSearchFilters;
 
 public interface ProductDao {
 
@@ -19,9 +20,9 @@ public interface ProductDao {
 	List<Product> selectCurrentByIds(@Param("ids") List<Integer> ids);
 
 	List<Product> selectFiltered(@Param("type") String type, @Param("q") String q, @Param("sort") String sort,
-			@Param("limit") int limit, @Param("offset") int offset);
+			@Param("filters") ProductSearchFilters filters, @Param("limit") int limit, @Param("offset") int offset);
 
-	int countFiltered(@Param("type") String type, @Param("q") String q);
+	int countFiltered(@Param("type") String type, @Param("q") String q, @Param("filters") ProductSearchFilters filters);
 
 	/**
 	 * 주어진 ID에 해당하는 상품을 조회한다.

@@ -30,37 +30,47 @@
 		<foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
 	</select>
 
-	<select id="selectFiltered" resultMap="ProductResult">
-		SELECT id, name, type, price, img, abv, order_count
-		FROM t_product
+	<sql id="SearchPredicates">
 		<where>
-			<if test="type != null">
-				type = #{type}
+			<if test="type != null">p.type = #{type}</if>
+			<if test="q != null">AND (p.name LIKE CONCAT('%', #{q}, '%') OR p.type LIKE CONCAT('%', #{q}, '%'))</if>
+			<if test="filters.minPriceKrw != null">AND p.price &gt;= #{filters.minPriceKrw}</if>
+			<if test="filters.maxPriceKrw != null">AND p.price &lt;= #{filters.maxPriceKrw}</if>
+			<!-- Match the existing FLOAT storage domain; never round the product column to two decimals. -->
+			<if test="filters.minAbvPercent != null">AND p.abv &gt;= CAST(#{filters.minAbvPercent} AS FLOAT)</if>
+			<if test="filters.maxAbvPercent != null">AND p.abv &lt;= CAST(#{filters.maxAbvPercent} AS FLOAT)</if>
+			<if test="!filters.tasteTags.isEmpty()">
+				AND EXISTS (SELECT 1 FROM t_product_feature pf WHERE pf.product_id = p.id AND pf.taste_known = TRUE)
+				<foreach collection="filters.tasteTags" item="tag">
+					AND EXISTS (SELECT 1 FROM t_product_feature_tag ft
+					WHERE ft.product_id = p.id AND ft.kind = 'TASTE' AND ft.tag = #{tag})
+				</foreach>
 			</if>
-			<if test="q != null">
-				AND (name LIKE CONCAT('%', #{q}, '%') OR type LIKE CONCAT('%', #{q}, '%'))
+			<if test="!filters.aromaTags.isEmpty()">
+				AND EXISTS (SELECT 1 FROM t_product_feature pf WHERE pf.product_id = p.id AND pf.aroma_known = TRUE)
+				<foreach collection="filters.aromaTags" item="tag">
+					AND EXISTS (SELECT 1 FROM t_product_feature_tag ft
+					WHERE ft.product_id = p.id AND ft.kind = 'AROMA' AND ft.tag = #{tag})
+				</foreach>
 			</if>
 		</where>
+	</sql>
+
+	<select id="selectFiltered" resultMap="ProductResult">
+		SELECT p.id, p.name, p.type, p.price, p.img, p.abv, p.order_count FROM t_product p
+		<include refid="SearchPredicates" />
 		<choose>
-			<when test="sort == 'priceAsc'">ORDER BY price ASC, id ASC</when>
-			<when test="sort == 'priceDesc'">ORDER BY price DESC, id ASC</when>
-			<when test="sort == 'name'">ORDER BY name ASC, id ASC</when>
-			<otherwise>ORDER BY order_count DESC, id ASC</otherwise>
+			<when test="sort == 'priceAsc'">ORDER BY p.price ASC, p.id ASC</when>
+			<when test="sort == 'priceDesc'">ORDER BY p.price DESC, p.id ASC</when>
+			<when test="sort == 'name'">ORDER BY p.name ASC, p.id ASC</when>
+			<otherwise>ORDER BY p.order_count DESC, p.id ASC</otherwise>
 		</choose>
 		LIMIT #{limit} OFFSET #{offset}
 	</select>
 
 	<select id="countFiltered" resultType="int">
-		SELECT COUNT(*)
-		FROM t_product
-		<where>
-			<if test="type != null">
-				type = #{type}
-			</if>
-			<if test="q != null">
-				AND (name LIKE CONCAT('%', #{q}, '%') OR type LIKE CONCAT('%', #{q}, '%'))
-			</if>
-		</where>
+		SELECT COUNT(*) FROM t_product p
+		<include refid="SearchPredicates" />
 	</select>
 
 	<select id="selectById" parameterType="int" resultMap="ProductResult">

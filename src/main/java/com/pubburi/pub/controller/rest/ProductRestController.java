@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pubburi.pub.controller.api.ApiResponse;
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
+import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.request.ProductRequest;
 import com.pubburi.pub.controller.response.ProductResponse;
@@ -26,7 +28,15 @@ import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.service.ProductService;
 
 import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.enums.ParameterStyle;
+import io.swagger.v3.oas.annotations.enums.Explode;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 @RestController
 @RequestMapping("/api")
@@ -40,11 +50,21 @@ public class ProductRestController {
 		this.accessGuard = accessGuard;
 	}
 
-	@GetMapping("/products")
+	@GetMapping(value = "/products", produces = MediaType.APPLICATION_JSON_VALUE)
+	@Operation(summary = "Search current products with mandatory filters", parameters = {
+		@Parameter(name = "tasteTag", in = ParameterIn.QUERY, style = ParameterStyle.FORM, explode = Explode.TRUE, description = "Repeat for all required taste tags; commas stay literal. Unknown/empty tags cannot match.", array = @ArraySchema(maxItems = 20, schema = @Schema(type = "string", maxLength = 40))),
+		@Parameter(name = "aromaTag", in = ParameterIn.QUERY, style = ParameterStyle.FORM, explode = Explode.TRUE, description = "Repeat for all required aroma tags; commas stay literal. Unknown/empty tags cannot match.", array = @ArraySchema(maxItems = 20, schema = @Schema(type = "string", maxLength = 40)))})
 	public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> products(@RequestParam(required = false) String type,
 			@RequestParam(required = false) String q, @RequestParam(defaultValue = "popular") String sort,
-			@RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
-		PageResponse<ProductResponse> products = productService.searchProducts(type, q, sort,
+			@RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
+			@Parameter(schema = @Schema(type = "integer", minimum = "0", maximum = "2147483647")) @RequestParam(required = false) String minPriceKrw,
+			@Parameter(schema = @Schema(type = "integer", minimum = "0", maximum = "2147483647")) @RequestParam(required = false) String maxPriceKrw,
+			@Parameter(schema = @Schema(type = "number", minimum = "0", maximum = "100", multipleOf = 0.01)) @RequestParam(required = false) String minAbvPercent,
+			@Parameter(schema = @Schema(type = "number", minimum = "0", maximum = "100", multipleOf = 0.01)) @RequestParam(required = false) String maxAbvPercent,
+			HttpServletRequest request) {
+		ProductSearchFilters filters = ProductSearchFilters.fromQuery(minPriceKrw, maxPriceKrw, minAbvPercent, maxAbvPercent,
+				request.getParameterValues("tasteTag"), request.getParameterValues("aromaTag"));
+		PageResponse<ProductResponse> products = productService.searchProducts(type, q, sort, filters,
 				PageCriteria.of(page, size, 12)).map(ResponseMapper::product);
 		return ResponseEntity.ok(ApiResponse.ok(products));
 	}

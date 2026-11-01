@@ -194,6 +194,7 @@ def documentation_contract(port):
     verify_preference_openapi(document)
     verify_favorite_openapi(document)
     verify_default_recommendation_openapi(document)
+    verify_product_filter_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
         assert "swagger-ui" in response.read().decode("utf-8").lower(), "Swagger UI entry is absent"
@@ -274,6 +275,21 @@ def verify_default_recommendation_openapi(document):
     assert set(resolve(data["properties"]["source"])["enum"]) == {"BASELINE", "FALLBACK"}
     product = resolve(data["properties"]["items"]["items"])
     assert set(product["properties"]) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
+
+
+
+def verify_product_filter_openapi(document):
+    operation = document["paths"]["/api/products"]["get"]
+    assert "application/json" in operation["responses"]["200"]["content"]
+    parameters = {item["name"]: item for item in operation["parameters"]}
+    assert {"type", "q", "sort", "page", "size", "minPriceKrw", "maxPriceKrw",
+            "minAbvPercent", "maxAbvPercent", "tasteTag", "aromaTag"} <= set(parameters)
+    for name in ("tasteTag", "aromaTag"):
+        value = parameters[name]
+        assert value["style"] == "form" and value["explode"] is True
+        assert value["schema"]["type"] == "array" and value["schema"]["maxItems"] == 20
+    assert parameters["minPriceKrw"]["schema"]["type"] == "integer"
+    assert parameters["maxAbvPercent"]["schema"]["maximum"] == 100
 
 
 def default_recommendation_contract(client, expected_source=None):
@@ -603,6 +619,86 @@ def product_feature_contract(environ):
     assert count_ci_product_features(environ, product_id) == (0, 0)
 
 
+
+def product_filter_contract(environ):
+    """Mandatory search filters over synthetic, disposable product facts only."""
+    require_disposable_database(environ)
+    public = ApiClient(environ.get("PUBBURI_SERVER_PORT", "9987"))
+    admin_id, password = "ci_admin_" + uuid.uuid4().hex, uuid.uuid4().hex
+    public.request("POST", "/users", 201, {"id": admin_id, "name": "CI filters", "pass": password})
+    promote_ci_fixture_admin(environ, admin_id)
+    admin = ApiClient(environ.get("PUBBURI_SERVER_PORT", "9987"))
+    admin.request("POST", "/auth/login", 200, {"id": admin_id, "pass": password})
+    prefix = "ci_filter_" + uuid.uuid4().hex
+    products = []
+    for index, (price, abv, taste, aroma) in enumerate((
+        (1000, 5.1, ["sweet", "dry", "dry,fruit"], ["floral"]),
+        (2000, 5.55, ["sweet"], []),
+        (2000, 5.555, None, None),
+        (3000, 0, [], ["floral"]),
+        (2000, 5.1, ["sweet"], ["floral"]),
+    )):
+        product = admin.request("POST", "/admin/products", 201, {
+            "name": prefix + str(index), "type": "맥주" if index == 4 else "탁주", "price": price,
+            "img": "ci-filter.png", "abv": abv, "orderCount": 0,
+        })["data"]
+        products.append(product)
+        if taste is not None:
+            admin.request("PUT", f"/admin/products/{product['id']}/features", 200, {
+                "tasteTags": taste, "aromaTags": aroma, "sourceName": "Synthetic search fixture",
+                "sourceNote": "Validation input, not product facts or rights approval",
+            })
+    a, b, c, d, e = [product["id"] for product in products]
+
+    def search(expected, values=(), *, sort="priceAsc", page=1, size=100, total=None):
+        query = urllib.parse.urlencode([("q", prefix), ("sort", sort), ("page", page), ("size", size), *values])
+        data = public.request("GET", "/products?" + query, 200)["data"]
+        expected_total = len(expected) if total is None else total
+        assert set(data) == {"items", "page", "size", "total", "totalPages", "hasNext"}
+        assert [row["id"] for row in data["items"]] == expected
+        assert data["total"] == expected_total and data["page"] == page and data["size"] == size
+        assert data["totalPages"] == (expected_total + size - 1) // size
+        assert data["hasNext"] == (page < data["totalPages"])
+        for row in data["items"]:
+            assert set(row) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
+        return data
+
+    search([a, b, c, e, d])
+    search([a, b, c, e], [("minPriceKrw", "1000"), ("maxPriceKrw", "2000")])
+    search([], [("maxPriceKrw", "0")])
+    search([a, e], [("minAbvPercent", "5.10"), ("maxAbvPercent", "5.10")])
+    search([a, b, e, d], [("maxAbvPercent", "5.55")])
+    search([], [("minAbvPercent", "5.56")])
+    search([d], [("minAbvPercent", "0"), ("maxAbvPercent", "0")])
+    search([a], [("tasteTag", " SWEET "), ("tasteTag", "dry")])
+    search([a], [("tasteTag", "dry,fruit")])
+    search([a, b, e], [("tasteTag", "sweet")])  # unknown c and reviewed-empty d do not match.
+    both = [("tasteTag", "sweet"), ("aromaTag", "floral")]
+    search([a], both, size=1, total=2)
+    search([e], both, page=2, size=1, total=2)
+    search([a], [*both, ("type", "탁주"), ("minPriceKrw", "1000"), ("maxAbvPercent", "5.10")])
+    search([], [("tasteTag", "x' OR 1=1 --")])
+    search([d, b, c, e, a], sort="priceDesc")
+    search([a, b, c, d, e], sort="name")
+    search([a, b, c, d, e], sort="popular")
+    search([a, b, c, d, e], sort="unsupported")  # Existing fallback remains popular.
+    for values in ([('minPriceKrw', '-1')], [('maxPriceKrw', '2147483648')],
+                   [('minPriceKrw', '1.1')], [('minPriceKrw', '')],
+                   [('minPriceKrw', '2'), ('maxPriceKrw', '1')],
+                   [('minAbvPercent', '5.555')], [('maxAbvPercent', 'NaN')],
+                   [('minAbvPercent', '100.01')], [('minAbvPercent', '1e1')],
+                   [('minAbvPercent', '5.2'), ('maxAbvPercent', '5.1')],
+                   [('tasteTag', '')], [('aromaTag', 'floral'), ('aromaTag', ' FLORAL ')],
+                   [('tasteTag', 'x' * 41)], [('tasteTag', str(i)) for i in range(21)]):
+        public.request("GET", "/products?" + urllib.parse.urlencode([("q", prefix), *values]),
+                       400, error_code="BAD_REQUEST")
+    search([a, b, c, e, d])
+    for product in products:
+        assert public.request("GET", f"/products/{product['id']}", 200)["data"] == product
+        admin.request("DELETE", f"/admin/products/{product['id']}", 200)
+    search([])
+
+
 def count_ci_preferences(environ, user_id):
     require_disposable_database(environ)
     if not isinstance(user_id, str) or not re.fullmatch(r"ci_pref_[0-9a-f]{32}", user_id):
@@ -850,6 +946,8 @@ def main():
             session_authority_contract(os.environ)
             report["completed"].append("live roles, account incarnation, password revocation and profile freshness")
             product_feature_contract(os.environ)
+            product_filter_contract(os.environ)
+            report["completed"].append("mandatory current-MySQL price/ABV/reviewed-tag filters and unchanged paging")
             report["completed"].append("product attributes, unknown/empty semantics, source validation and deletion")
             private_preference_contract(os.environ)
             report["completed"].append("private explicit preferences, soft/hard separation, account isolation and lifecycle")

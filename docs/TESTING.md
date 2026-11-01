@@ -10,6 +10,13 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 
 ## HTTP 계약과 DB 검증
 
+상품 목록의 필수 필터는 잘못된 가격/도수 범위·숫자 표기·태그 중복/빈/개수를 SQL 전에 거절한다.
+MVC는 literal comma와 단위형 파라미터·기존 페이지/응답을, MyBatis BoundSql은 목록/COUNT의
+동일 AND 조건·값 바인딩을 확인한다. 표준 폐기 HTTP는 합성 상품5개에서 도수5.1/5.55/5.555·0,
+가격0경계·unknown/검수[]·태그all-match·정렬/페이지/total·잘못된 입력과 삭제를 검사한다.
+실행 OpenAPI의 숫자 범위·반복 태그 form/explode·JSON 응답도 필수다. 실제 DB 결과·제한은
+[필터 작업 계획](plans/2026-11-01-product-search-filters.md)에 구분하며 OpenSearch/성능 인수로 확대하지 않는다.
+
 기본 추천 연결은 private loopback ephemeral upstream에서 정상 B0 계약·비정상/중복/추가 JSON·
 잘못된 ID/algorithm·비JSON/503/redirect·연결 거부·본문32KiB 초과를 검사한다. 헤더 뒤 끝나지 않는
 chunked body도 전체 완료 deadline으로 종료하고 소유 subscription 취소를 확인한다. 이 소량

@@ -1,0 +1,340 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pubburi current product search filters",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:9987"
+    }
+  ],
+  "paths": {
+    "/api/products": {
+      "get": {
+        "operationId": "searchCurrentProducts",
+        "security": [],
+        "description": "Public non-personal MySQL filtering. All requested conditions and tags are AND. No stock/sales guarantee, OpenSearch or model scoring.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Existing category equality",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Existing MySQL LIKE name/category search; wildcard semantics preserved",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "popular(default), priceAsc, priceDesc, name; unsupported values retain popular fallback",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Existing defaults/clamping; no global pagination policy change",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "description": "Existing defaults/clamping; no global pagination policy change",
+            "schema": {
+              "type": "integer",
+              "default": 12
+            }
+          },
+          {
+            "name": "minPriceKrw",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive KRW range. Omitted=unconstrained; zero is a numeric bound. Blank, exponent, fractions, reverse ranges rejected.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "maxPriceKrw",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive KRW range. Omitted=unconstrained; zero is a numeric bound. Blank, exponent, fractions, reverse ranges rejected.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "minAbvPercent",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive FLOAT-domain bound, no rounding of product values; plain decimal with up to two fractional digits.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "multipleOf": 0.01
+            }
+          },
+          {
+            "name": "maxAbvPercent",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive FLOAT-domain bound, no rounding of product values; plain decimal with up to two fractional digits.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "multipleOf": 0.01
+            }
+          },
+          {
+            "name": "tasteTag",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "description": "Repeat for ALL required known tags. Trim/lowercase and reject duplicates. Commas remain literal. Unknown and reviewed-empty cannot satisfy a positive tag.",
+            "schema": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            }
+          },
+          {
+            "name": "aromaTag",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "description": "Repeat for ALL required known tags. Trim/lowercase and reject duplicates. Commas remain literal. Unknown and reviewed-empty cannot satisfy a positive tag.",
+            "schema": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current MySQL page and total under the same mandatory conditions. Empty result is a normal page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BAD_REQUEST: invalid new filter syntax/range/tag values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "NOT_ACCEPTABLE fixed JSON error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal/DB failure; never an empty successful page. Extreme existing page offset overflow is tracked separately.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Product": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "price",
+          "img",
+          "abv",
+          "orderCount"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "img": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "abv": {
+            "type": "number",
+            "format": "float"
+          },
+          "orderCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "type": "null"
+          },
+          "message": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "fields"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Page": {
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "size",
+          "total",
+          "totalPages",
+          "hasNext"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          },
+          "hasNext": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Envelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Page"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  }
+}

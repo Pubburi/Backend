@@ -4,9 +4,11 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
+import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dao.ProductDao;
 import com.pubburi.pub.model.dto.Product;
 
@@ -25,12 +27,13 @@ public class ProductServiceImpl implements ProductService {
 	}
 
 	@Override
-	public PageResponse<Product> searchProducts(String type, String q, String sort, PageCriteria criteria) {
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+	public PageResponse<Product> searchProducts(String type, String q, String sort, ProductSearchFilters filters, PageCriteria criteria) {
 		String safeType = blankToNull(type);
 		String safeQ = blankToNull(q);
-		List<Product> products = productDao.selectFiltered(safeType, safeQ, blankToNull(sort), criteria.size(),
+		List<Product> products = productDao.selectFiltered(safeType, safeQ, blankToNull(sort), filters, criteria.size(),
 				criteria.offset());
-		return PageResponse.of(products, criteria, productDao.countFiltered(safeType, safeQ));
+		return PageResponse.of(products, criteria, productDao.countFiltered(safeType, safeQ, filters));
 	}
 
 	@Override
