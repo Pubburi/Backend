@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
+import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dto.Product;
 
 public interface ProductService {
@@ -15,7 +16,11 @@ public interface ProductService {
 	 */
 	List<Product> getProductList();
 
-	PageResponse<Product> searchProducts(String type, String q, String sort, PageCriteria criteria);
+	default PageResponse<Product> searchProducts(String type, String q, String sort, PageCriteria criteria) {
+		return searchProducts(type, q, sort, ProductSearchFilters.none(), criteria);
+	}
+
+	PageResponse<Product> searchProducts(String type, String q, String sort, ProductSearchFilters filters, PageCriteria criteria);
 
 	/**
 	 * 주어진 ID에 해당하는 상품을 조회한다.

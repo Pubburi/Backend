@@ -60,7 +60,7 @@ class ControllerBehaviorTests {
 
 	private static class MissingProductService implements ProductService {
 		@Override public List<Product> getProductList() { return List.of(); }
-		@Override public PageResponse<Product> searchProducts(String type, String q, String sort, PageCriteria criteria) {
+		@Override public PageResponse<Product> searchProducts(String type, String q, String sort, com.pubburi.pub.controller.api.ProductSearchFilters filters, PageCriteria criteria) {
 			return PageResponse.of(List.of(), criteria, 0);
 		}
 		@Override public Product getProductById(int id) { return null; }

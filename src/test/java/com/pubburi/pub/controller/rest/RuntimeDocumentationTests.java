@@ -79,6 +79,28 @@ class RuntimeDocumentationTests {
 	}
 
 	@Test
+	void productSearchDocumentKeepsUnitsRepeatedTagsAndExistingPageResponse() throws Exception {
+		JsonNode document = mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString());
+		JsonNode operation = document.path("paths").path("/api/products").path("get");
+		var parameters = new java.util.HashMap<String, JsonNode>();
+		operation.path("parameters").forEach(parameter -> parameters.put(parameter.path("name").asText(), parameter));
+		assertThat(parameters.keySet()).contains("type", "q", "sort", "page", "size", "minPriceKrw", "maxPriceKrw", "minAbvPercent", "maxAbvPercent", "tasteTag", "aromaTag");
+		for (String tag : Set.of("tasteTag", "aromaTag")) {
+			JsonNode parameter = parameters.get(tag);
+			assertThat(parameter.path("style").asText()).isEqualTo("form"); assertThat(parameter.path("explode").booleanValue()).isTrue();
+			assertThat(parameter.path("schema").path("type").asText()).isEqualTo("array");
+			assertThat(parameter.path("schema").path("maxItems").intValue()).isEqualTo(20);
+		}
+		assertThat(parameters.get("minPriceKrw").path("schema").path("type").asText()).isEqualTo("integer");
+		assertThat(parameters.get("maxAbvPercent").path("schema").path("maximum").decimalValue()).isEqualByComparingTo("100");
+		JsonNode page = resolve(document, resolve(document, operation.path("responses").path("200")
+				.path("content").path("application/json").path("schema")).path("properties").path("data"));
+		assertThat(fieldNames(page.path("properties"))).isEqualTo(Set.of("items", "page", "size", "total", "totalPages", "hasNext"));
+		assertThat(fieldNames(resolve(document, page.path("properties").path("items").path("items")).path("properties"))).hasSize(7);
+	}
+
+	@Test
 	void privatePreferenceDocumentSeparatesSoftTargetsFromHardBoundsAndUnknowns() throws Exception {
 		JsonNode document = mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
 				.andReturn().getResponse().getContentAsString());

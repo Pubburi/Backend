@@ -66,7 +66,10 @@ NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약]
 - `PUT /api/admin/products/{id}/features`: 관리자 특성 전체 교체. 누락/null은 unknown, {}는 초기화
 - `DELETE /api/admin/products/{id}`: 관리자 상품 삭제
 
-고객 상품 화면의 공식 query contract는 `type`, `q`, `sort(popular|priceAsc|priceDesc|name)`, `page`이며 frontend router가 잘못된 값을 기본값으로 정규화한다.
+고객 상품 화면의 기존 query contract는 `type`, `q`, `sort(popular|priceAsc|priceDesc|name)`, `page`다.
+Backend는 `minPriceKrw/maxPriceKrw`, `minAbvPercent/maxAbvPercent`, 반복 `tasteTag/aromaTag`의
+필수 AND 필터도 제공한다. [단위·검수/unknown·페이지 계약](PRODUCT-SEARCH.md)과
+[부분 OpenAPI](openapi/product-search.json)를 따른다. 현재 웹 필터 UI 전체 연결과 OpenSearch는 별도다.
 
 기존 ProductResponse의 7필드/주종은 유지한다. 별도 특성의 volumeMl·설명·맛/향 태그·출처와
 null/빈 배열·검증·삭제/원자 교체는 [특성 계약](PRODUCT-FEATURES.md)과 [OpenAPI](openapi/product-features.json)를 따른다.
