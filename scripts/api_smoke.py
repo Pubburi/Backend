@@ -938,6 +938,92 @@ def favorite_contract(environ):
     admin.request("DELETE", f"/admin/products/{second['id']}", 200)
 
 
+def ci_search_outbox(environ, product_id, *, failing_trigger=None):
+    """Only the owned CI fixture: inspect durable events or inject one scoped failure."""
+    require_disposable_database(environ)
+    if type(product_id) is not int or not 1 <= product_id <= 2147483647:
+        raise ValueError("Invalid fixture product ID")
+    trigger = "ci_search_outbox_fail_" + str(product_id)
+    if failing_trigger is True:
+        statement = (f"CREATE TRIGGER {trigger} BEFORE INSERT ON t_product_search_outbox "
+                     f"FOR EACH ROW SET NEW.source_version = IF(NEW.product_id={product_id}, 0, NEW.source_version)")
+    elif failing_trigger is False:
+        statement = f"DROP TRIGGER {trigger}"
+    else:
+        statement = ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ; START TRANSACTION READ ONLY; "
+                     f"SELECT source_version FROM t_product_search_version WHERE product_id={product_id}; "
+                     f"SELECT payload FROM t_product_search_outbox WHERE product_id={product_id} ORDER BY source_version; COMMIT;")
+    result = subprocess.run([
+        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+        "mysql", "-u" + environ["PUBBURI_DB_USER"], "--default-character-set=utf8mb4",
+        "--batch", "--raw", "--skip-column-names", environ["PUBBURI_DB_NAME"], "--execute", statement,
+    ], capture_output=True, text=True, check=True,
+        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
+    if failing_trigger is not None:
+        return None
+    rows = result.stdout.splitlines()
+    return {"version": int(rows[0]) if rows else None, "events": [json.loads(row) for row in rows[1:]]}
+
+
+def search_outbox_contract(environ):
+    require_disposable_database(environ)
+    admin = ApiClient(environ.get("PUBBURI_SERVER_PORT", "9987"))
+    admin_id, password = "ci_admin_" + uuid.uuid4().hex, uuid.uuid4().hex
+    admin.request("POST", "/users", 201, {"id": admin_id, "name": "CI outbox admin", "pass": password})
+    promote_ci_fixture_admin(environ, admin_id)
+    admin.request("POST", "/auth/login", 200, {"id": admin_id, "pass": password})
+    values = {"name": "Authored outbox fixture", "type": "탁주", "price": 1200,
+              "img": "ci-outbox.png", "abv": 5.555, "orderCount": 0}
+    product = admin.request("POST", "/admin/products", 201, values)["data"]
+    product_id = product["id"]
+    def state(): return ci_search_outbox(environ, product_id)
+    first = state()
+    assert first["version"] == 1 and len(first["events"]) == 1
+    document = first["events"][0]["document"]
+    assert document == {"name": values["name"], "type": values["type"], "priceKrw": 1200,
+                        "abvPercent": 5.555, "orderCount": 0, "tasteTags": None, "aromaTags": None}
+    feature_path = f"/admin/products/{product_id}/features"
+    features = {"tasteTags": [" Sweet ", "DRY"], "aromaTags": [], "sourceName": "Authored fixture"}
+    admin.request("PUT", feature_path, 200, features)
+    feature_state = state()
+    assert feature_state["version"] == 2
+    assert feature_state["events"][-1]["document"]["tasteTags"] == ["dry", "sweet"]
+    assert feature_state["events"][-1]["document"]["aromaTags"] == []
+    changed = dict(values, name="Changed outbox fixture", price=1500)
+    assert admin.request("PUT", f"/admin/products/{product_id}", 200, changed)["data"] is True
+    updated = admin.request("GET", f"/products/{product_id}", 200)["data"]
+    before_failure = state()
+    ci_search_outbox(environ, product_id, failing_trigger=True)
+    try:
+        admin.request("PUT", f"/admin/products/{product_id}", 500, dict(changed, price=9999), "INTERNAL_SERVER_ERROR")
+        assert admin.request("GET", f"/products/{product_id}", 200)["data"] == updated
+        assert state() == before_failure
+        admin.request("PUT", feature_path, 500, {}, "INTERNAL_SERVER_ERROR")
+        assert admin.request("GET", f"/products/{product_id}/features", 200)["data"]["tasteTags"] == ["dry", "sweet"]
+        assert state() == before_failure
+    finally:
+        ci_search_outbox(environ, product_id, failing_trigger=False)
+    admin.request("POST", "/orders", 201, {"orderType": "TAKEOUT", "details": [{"productId": product_id, "quantity": 2}]})
+    after_order = state()
+    assert after_order["version"] == 4 and after_order["events"][-1]["document"]["orderCount"] == 2
+    admin.request("POST", "/orders", 400, {"orderType": "TAKEOUT", "details": [
+        {"productId": product_id, "quantity": 1}, {"productId": 2147483647, "quantity": 1}]}, "BAD_REQUEST")
+    assert state() == after_order
+    admin.request("DELETE", f"/admin/products/{product_id}", 200)
+    final = state()
+    assert final["version"] == 5 and len(final["events"]) == 5
+    assert final["events"][-1] == {"productId": product_id, "sourceVersion": 5, "deleted": True, "document": None}
+    assert final["events"][:4] == after_order["events"], "Earlier event projections changed"
+    admin.request("PUT", f"/admin/products/{product_id}", 404, changed, "NOT_FOUND")
+    assert state() == final
+    from search_index import batch
+    wire = json.dumps({"schemaVersion": 1, "dataKind": "backend_product_events", "events": final["events"]})
+    batch(wire.encode())
+    # Authored disposable product projection only; never upload this input as a CI artifact.
+    private = Path(".pubburi"); private.mkdir(exist_ok=True)
+    (private / "search-outbox-smoke-events.json").write_text(wire, encoding="utf-8")
+
+
 def main():
     mutating = os.environ.get("PUBBURI_SMOKE_MUTATING") == "1"
     report = {"status": "failed", "mode": "disposable-db" if mutating else "read-only", "completed": []}
@@ -970,6 +1056,8 @@ def main():
             report["completed"].append("private explicit preferences, soft/hard separation, account isolation and lifecycle")
             favorite_contract(os.environ)
             report["completed"].append("account favorites, idempotent membership, current products and ownership lifecycle")
+            search_outbox_contract(os.environ)
+            report["completed"].append("transactional product search versions, immutable projections, rollback and retained tombstones")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
         else:
             print("Read-only packaged HTTP contract checks passed; mutating checks not enabled.")

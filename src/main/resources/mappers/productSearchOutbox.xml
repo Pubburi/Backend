@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pubburi.pub.model.dao.ProductSearchOutboxDao">
+    <!-- Locking reads observe the current committed feature values, even after an earlier RR snapshot. -->
+    <select id="selectFeaturesForUpdate" resultType="ProductFeatures">
+        SELECT product_id, taste_known, aroma_known FROM t_product_feature
+        WHERE product_id = #{productId} FOR UPDATE
+    </select>
+    <select id="selectTagsForUpdate" resultType="ProductFeatureTag">
+        SELECT kind, tag FROM t_product_feature_tag WHERE product_id = #{productId} FOR UPDATE
+    </select>
+    <insert id="ensureVersion">
+        INSERT INTO t_product_search_version (product_id, source_version) VALUES (#{productId}, 0)
+        ON DUPLICATE KEY UPDATE product_id = t_product_search_version.product_id
+    </insert>
+    <update id="advanceVersion">
+        UPDATE t_product_search_version SET source_version = source_version + 1
+        WHERE product_id = #{productId} AND source_version &lt; 9223372036854775807
+    </update>
+    <select id="selectVersionForUpdate" resultType="long">
+        SELECT source_version FROM t_product_search_version WHERE product_id = #{productId} FOR UPDATE
+    </select>
+    <insert id="append">
+        INSERT INTO t_product_search_outbox (product_id, source_version, deleted, payload)
+        VALUES (#{productId}, #{sourceVersion}, #{deleted}, CAST(#{payload} AS JSON))
+    </insert>
+</mapper>

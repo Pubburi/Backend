@@ -40,6 +40,7 @@ class ProductFeatureServiceTests {
 		ProductFeatures result = fixture.service().replaceProductFeatures(7, changes);
 
 		assertThat(fixture.events).containsExactly("lock-product", "upsert-header", "delete-tags", "insert-tags");
+		org.mockito.Mockito.verify(fixture.searchOutbox).recordCurrent(7);
 		assertThat(result.getProductId()).isEqualTo(7);
 		assertThat(result.getTasteTags()).containsExactly("dry", "sweet");
 		assertThat(result.getAromaTags()).containsExactly("citrus");
@@ -96,6 +97,7 @@ class ProductFeatureServiceTests {
 				.isInstanceOf(IllegalStateException.class);
 		// The fake observes control flow only; actual rollback is tested against disposable MySQL.
 		assertThat(fixture.events).containsExactly("lock-product", "upsert-header", "delete-tags", "insert-tags");
+		org.mockito.Mockito.verifyNoInteractions(fixture.searchOutbox);
 	}
 
 	private static ProductFeatures features(List<String> taste, List<String> aroma) {
@@ -112,6 +114,7 @@ class ProductFeatureServiceTests {
 		ProductFeatures stored;
 		List<ProductFeatureTag> tags = new ArrayList<>();
 		List<String> events = new ArrayList<>();
+		ProductSearchOutbox searchOutbox = org.mockito.Mockito.mock(ProductSearchOutbox.class);
 
 		ProductFeatureServiceImpl service() {
 			ProductDao productDao = (ProductDao) Proxy.newProxyInstance(ProductDao.class.getClassLoader(),
@@ -122,7 +125,7 @@ class ProductFeatureServiceTests {
 						}
 						throw new AssertionError("Unexpected product operation: " + method.getName());
 					});
-			return new ProductFeatureServiceImpl(productDao, this);
+			return new ProductFeatureServiceImpl(productDao, this, searchOutbox);
 		}
 
 		@Override public ProductFeatures selectByProductId(int id) {

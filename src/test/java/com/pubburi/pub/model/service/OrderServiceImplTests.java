@@ -34,8 +34,9 @@ class OrderServiceImplTests {
 	private final FakeStampDao stampDao = new FakeStampDao();
 	private final FakeUserDao userDao = new FakeUserDao();
 	private final FakeProductDao productDao = new FakeProductDao();
+	private final ProductSearchOutbox searchOutbox = org.mockito.Mockito.mock(ProductSearchOutbox.class);
 	private final OrderServiceImpl orderService = new OrderServiceImpl(orderDao, orderDetailDao, stampDao, userDao,
-			productDao);
+			productDao, searchOutbox);
 
 	@Test
 	void makeOrderCapturesServerPriceRatherThanMutableCatalogOrClientValues() {
@@ -48,6 +49,7 @@ class OrderServiceImplTests {
 		assertThat(saved.path("productName").asText()).isEqualTo("상품 1");
 		assertThat(order.getTotalPrice()).isEqualTo(2000);
 		assertThat(order.getPriceBasis()).isEqualTo("ORDER_SNAPSHOT");
+		org.mockito.Mockito.verify(searchOutbox).recordCurrent(1);
 		productDao.price = 5000;
 		assertThat(orderDetailDao.insertedDetails.get(0).getUnitPrice()).isEqualTo(1000);
 		assertThat(order.getTotalPrice()).isEqualTo(2000);
@@ -77,6 +79,7 @@ class OrderServiceImplTests {
 		assertThat(orderDetailDao.insertedDetails).isEmpty();
 		assertThat(stampDao.saved).isNull();
 		assertThat(productDao.orderCountIncrements).isEmpty();
+		org.mockito.Mockito.verifyNoInteractions(searchOutbox);
 	}
 
 	@Test

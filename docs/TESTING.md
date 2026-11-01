@@ -10,6 +10,15 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 
 ## HTTP 계약과 DB 검증
 
+상품 검색 outbox는 [생산 계약](SEARCH-OUTBOX.md)의 업무 TX와 카운터/불변 payload를 검증한다.
+단위는 현재 투영의 승인 필드·null/[]/태그 정렬·삭제/상한/저장 실패를 검사하고, 폐기 HTTP는 실제
+생성·수정·특성·주문수·삭제 버전과 DB trigger 실패의 상품/특성/주문 rollback을 확인한다.
+관리 CLI의 backend_product_events 입력을 소비할 수 있는지도 검사하며 자동 전송·검색 품질로
+확대하지 않는다. 수동007의 기존 전체 데이터 보존·현재상태 backfill은 별도 전용 DB에서 확인한다.
+CI의 다음 엔진 단계는 `PUBBURI_SEARCH_OUTBOX_INPUT`으로 이 HTTP가 만든 private 가상 batch를
+받는다. 실제 CLI 재생·삭제 뒤 old version 차단·재시작 뒤 유지가 필수 성공 조건이다. 원문 입력은
+artifact에 넣지 않으며 입력은 검증용 private 복사본으로 고정한다.
+
 로컬 색인은 `python3 scripts/smoke_search.py`로 고유 label/새 volume·동적 loopback 포트의
 전용 엔진을 만들고 검증/재시작/정지·정리한다. 먼저 `docker build -t pubburi-search:3.9.0-nori-v1 search`로
 pinned base/nori를 준비한다. 기존 서버·DB/볼륨을 채택하지 않으며 결과는 target/search-smoke-report.json,

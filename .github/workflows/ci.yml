@@ -84,6 +84,7 @@ jobs:
       - name: Verify disposable search replay and restart
         env:
           PUBBURI_SEARCH_VALIDATION_RUN: search-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          PUBBURI_SEARCH_OUTBOX_INPUT: .pubburi/search-outbox-smoke-events.json
         run: python3 scripts/smoke_search.py
       - name: Preserve validation reports
         if: always()

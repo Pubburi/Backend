@@ -40,7 +40,7 @@
 | 기본 주류 목록 | 비개인 ID순 B0 연결, 전체 응답 대기·크기 제한, 현재 DB 재조회와 장애 대체 |
 | 상품 | 목록·이름/주종 검색, 가격·도수·명시 맛/향 AND 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 상품 특성 | 별도 조회·관리자 전체 교체 API, 용량·설명·맛/향 태그·출처, 미확인/검수된 빈 태그 구분 |
-| 색인 관리 | 선택적 로컬 OpenSearch·nori, 명시 ID/버전 이벤트 재생·중복/역전 처리·삭제 표식. 업무 outbox 연동은 진행 예정 |
+| 색인 관리 | 업무 트랜잭션의 상품 버전·변경 기록, 선택적 로컬 OpenSearch·nori와 명시 재생·중복/역전 처리·삭제 표식. 자동 전달은 후속 |
 | 후기 | 상품별 평점·후기 조회와 작성·수정·삭제 |
 | 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 상품·회원 삭제 후 이력 보존, 관리자 완료 처리·스탬프 |
 | 관리자 | 상품·회원·후기·매장·주문 관리 |
@@ -84,49 +84,70 @@ flowchart LR
 
 ## 🧩 문제 해결
 
-데이터 조회·입력 정규화·세션의 계정 수명·주문 이력 보존에서 내린 판단을 정리했습니다.
+업무와 검색의 상태 경계·입력 정규화·세션의 계정 수명·주문 이력 보존에서 내린 판단을 정리했습니다.
 아래 결과는 현재 구현의 동작 범위이며, 응답 시간·처리량의 전후 개선 수치는 아직 측정하지 않았습니다.
 
-### 1. 주문 페이지를 유지하면서 상세를 일괄 조립하기
+### 1. 상품 변경과 검색 변경 기록을 같은 트랜잭션에 남기기
 
 #### 문제
 
-주문 내역은 주문 단위로 페이지를 나누지만, 각 주문에는 여러 상품 상세가 붙습니다. 주문마다 상세를 따로 조회하는 구조는 페이지의 주문 수에 따라 DB 왕복을 늘립니다.
+검색 색인을 준비하면서 상품만 바뀌고 전달할 기록은 없는 틈, 삭제 뒤 오래된 갱신이 상품을 부활시키는 조건을 다뤄야 했습니다. 과거 운영 장애를 주장하는 사례가 아니라, 실제 업무 쓰기에 재생 가능한 변경 기록을 연결한 설계 사례입니다.
 
 #### 원인
 
-주문과 상세의 일대다 관계를 그대로 순회하면 상세 조회가 반복됩니다. 반대로 상세까지 펼친 JOIN 결과에 바로 페이지를 적용하면 한 주문의 상품 행이 페이지 경계를 차지해 주문 단위 페이지와 맞지 않을 수 있습니다.
+현재 구성에서 MySQL commit과 별도 엔진 HTTP 전송은 같은 DB 트랜잭션이 아닙니다. 상품 행과 함께 버전까지 삭제하면 뒤늦은 입력의 순서를 판단할 기준도 잃습니다. 전역 auto-increment ID 역시 서로 다른 상품의 commit 순서를 뜻하지 않습니다.
 
 #### 해결
 
-주문 페이지를 먼저 조회하고 그 주문 ID들을 한 번에 전달해 상세를 가져옵니다. 상세를 주문 ID로 묶은 뒤 원래 주문 목록에 연결하며, 빈 페이지는 상세 조회 전에 반환합니다.
+생성·수정·특성 교체·주문 수 증가·삭제를 기존 업무 트랜잭션 안의 MANDATORY producer에 연결했습니다. 현재 상품·특성을 잠금 조회한 뒤 영속 상품별 버전과 불변 투영을 함께 기록합니다. 삭제는 더 높은 버전의 tombstone이며 카운터와 이력은 상품 삭제로 없어지지 않습니다. 엔진 전송은 업무 트랜잭션에 넣지 않았습니다.
 
 #### 결과
 
-페이지의 주문 순서와 경계를 유지한 채 각 주문에 해당하는 상세가 연결됩니다. 상세가 없는 주문에는 빈 목록을 부여하고, 사용자·관리자·기간별 주문 조회가 같은 조립 경로를 사용합니다.
+실제 MySQL에서 기록 저장 실패 시 상품·특성·주문·스탬프가 함께 롤백되고, 같은 상품의 동시 수정은 서로 다른 버전을 남겼습니다. 기존 80개 상품의 초기 기록을 만들면서 기존 업무 데이터는 보존했습니다. 실제 API가 만든 가상 상품 이력을 CLI로 재생한 뒤에도 삭제 표식과 오래된 입력 차단이 엔진 재시작 후 유지됐습니다. [원자성·전환·재생 조건과 한계](docs/plans/2026-11-01-product-search-outbox.md)를 함께 남겼습니다.
 
 #### 대체안/회고
 
-단일 JOIN은 단건 상세에는 단순하지만 목록 페이지의 기준을 별도로 처리해야 합니다. 현재 방식은 조회와 조립의 책임이 분명한 대신 일괄 조회 뒤 메모리에서 묶는 비용이 있습니다. 페이지 크기와 데이터 분포를 통제한 DB 실측으로 지연·메모리 영향을 확인할 과제가 남아 있습니다.
+afterCommit 전달은 기록 유실 틈을 남기고, 업무 안의 엔진 전송은 장애와 잠금 시간을 결합하므로 선택하지 않았습니다. 추가 DB 쓰기·잠금·이력 보관 비용이 생기며 지연 성능은 아직 측정하지 않았습니다. 자동 relay의 claim/ack·재처리와 공개 검색은 후속입니다. 개별 이벤트 ID를 완료 watermark로 쓰거나 명시 재생을 자동 동기화 완료로 표현하지 않습니다.
 
 #### 코드
 
 ~~~java
-private List<OrderInfo> attachDetails(List<OrderInfo> orders) {
-	if (orders == null || orders.isEmpty()) {
-		return List.of();
+@Override
+@Transactional
+public int removeProduct(int id) {
+	if (id <= 0) {
+		return 0;
 	}
-	List<Integer> orderIds = orders.stream().map(OrderInfo::getoId).toList();
-	Map<Integer, List<OrderDetailInfo>> detailsByOrderId = orderDao.getOrderDetailInfoByOrderIds(orderIds).stream()
-			.collect(Collectors.groupingBy(OrderDetailInfo::getOrderId));
-	for (OrderInfo order : orders) {
-		order.setDetails(detailsByOrderId.getOrDefault(order.getoId(), List.of()));
-	}
-	return orders;
+	if (productDao.selectByIdForUpdate(id) == null) return 0;
+	int changed = productDao.delete(id);
+	if (changed > 0) searchOutbox.recordDeleted(id);
+	return changed;
 }
 ~~~
 
-[주문 조립 메서드](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [ID 집합으로 상세를 조회하는 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml)
+~~~java
+private void append(int productId, boolean deleted, Map<String, Object> projection) {
+    if (productId <= 0) throw new IllegalArgumentException("Positive product ID required");
+    outbox.ensureVersion(productId);
+    if (outbox.advanceVersion(productId) != 1)
+        throw new IllegalStateException("Search source version cannot advance");
+    Long version = outbox.selectVersionForUpdate(productId);
+    if (version == null || version <= 0) throw new IllegalStateException("Search source version is invalid");
+    Map<String, Object> event = new LinkedHashMap<>();
+    event.put("productId", productId);
+    event.put("sourceVersion", version);
+    event.put("deleted", deleted);
+    event.put("document", projection);
+    try {
+        if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
+            throw new IllegalStateException("Search outbox event could not be recorded");
+    } catch (JsonProcessingException error) {
+        throw new IllegalStateException("Search projection cannot be serialized", error);
+    }
+}
+~~~
+
+[업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml)
 
 ### 2. 같은 ID 재가입과 권한 변경에서 기존 세션을 구분하기
 
@@ -366,7 +387,8 @@ public int removeUser(String id) {
 ## 🚀 로컬 실행
 
 Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니다.
-기존 DB는 [주문 가격 스냅샷 전환](docs/ORDER-PRICE-SNAPSHOT.md)을 먼저 확인하세요. 초기화 SQL을 다시 실행하지 않습니다.
+기존 DB는 [주문 가격 스냅샷 전환](docs/ORDER-PRICE-SNAPSHOT.md)부터 필요한 선행 전환과
+[007 검색 변경 기록 전환](docs/SEARCH-OUTBOX.md)을 확인하세요. 초기화 SQL을 다시 실행하지 않습니다.
 
 웹·추천 서버까지 함께 실행하려면 [로컬 통합 실행](docs/LOCAL-DEVELOPMENT.md)을 따릅니다. AWS 계정이나 외부 AI 키 없이 사용할 수 있습니다.
 

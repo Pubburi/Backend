@@ -17,10 +17,12 @@ import com.pubburi.pub.model.dto.ProductFeatureTag;
 public class ProductFeatureServiceImpl implements ProductFeatureService {
 	private final ProductDao productDao;
 	private final ProductFeatureDao featureDao;
+	private final ProductSearchOutbox searchOutbox;
 
-	public ProductFeatureServiceImpl(ProductDao productDao, ProductFeatureDao featureDao) {
+	public ProductFeatureServiceImpl(ProductDao productDao, ProductFeatureDao featureDao, ProductSearchOutbox searchOutbox) {
 		this.productDao = productDao;
 		this.featureDao = featureDao;
+		this.searchOutbox = searchOutbox;
 	}
 
 	@Override
@@ -58,6 +60,7 @@ public class ProductFeatureServiceImpl implements ProductFeatureService {
 		if (!tags.isEmpty() && featureDao.insertTags(productId, tags) != tags.size()) {
 			throw new IllegalStateException("Product feature tags could not be replaced");
 		}
+		searchOutbox.recordCurrent(productId);
 		return normalized;
 	}
 

@@ -12,21 +12,31 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 
 | ID | README 사례 | 채용 관점의 선정 이유 | 근거 범위 | 실측 성능 |
 |---|---|---|---|---|
-| BE-CS01 | 주문 페이지와 상세 일괄 조립 | 일대다 조회에서 페이지 경계·DB 왕복·메모리 조립의 선택을 설명한다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
+| BE-CS05 | 업무 변경과 검색 outbox의 원자적 생산 | 단일 업무TX·현재 특성 snapshot·상품별 버전·삭제 수명·외부 저장소 재생과 global commit 순서의 차이를 설명한다. | 실제 MySQL 원값 보존/실패·동시성, 실제 업무 API→CLI→OpenSearch 재생/재시작 | 신규 설계 정확성이며 지연 성능 미측정 |
 | BE-CS02 | 같은 ID 재가입·권한 변경의 기존 세션 구분 | 계정 인스턴스와 자격 수명, 실권한·표시·DB 실패·세션 경합을 구분하고 재발급의 버전 경계를 설명한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·003 전환, 제어한 단위 인터리빙 | 독립 경계 각각 1/1→0/1은 정확성; 성능 미측정 |
 | BE-CS03 | 중복 주문 상품 정규화 | 입력 단위와 저장·집계 단위의 차이, 여러 쓰기의 책임 경계를 드러낸다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
 | BE-CS04 | 가격·참조 삭제에서 주문 이력 분리 | 업무 기록과 활성 상품/회원의 수명·잠금·스냅샷·nullable/권한·개인정보·FK 전환 판단을 연결한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·기존 스키마 전환 | 가격 3/3→0/3, 상세 2/3→0/3·주문 유실 3/3→0/3은 각 실험의 정확성; 성능 미측정 |
 
-주문 읽기(BE-CS01)와 쓰기(BE-CS03)는 같은 클래스 안에 있지만 각각 페이지 단위의 관계 조립과 입력/쓰기 경계라는 독립 문제다. 단순히 변경 줄 수를 나눠 사례 수를 채우지 않는다.
+선행 주문 읽기(BE-CS01)의 구현/근거는 아래에 보존한다. BE-CS05는 실제 DB 실패/동시 순서·
+수동 전환과 별도 엔진 재생까지 직접 연결해 BE-CS01의 기존 가짜 DAO 중심 근거보다 원인/
+대안·구현 기여·재현 결과가 강해져 한 항목만 교체했다. 최신성·코드량·테스트 개수로 고른 것이
+아니며 나머지 권한·입력/집계·금액/이력의 독립 문제는 유지한다.
 
 ## 근거와 한계
 
-### BE-CS01
+### BE-CS01 — 이전 선정, BE-CS05로 교체
 
 - 구현: [OrderServiceImpl.attachDetails](../src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java), [order.xml](../src/main/resources/mappers/order.xml).
 - 기존 근거: [OrderServiceImplTests](../src/test/java/com/pubburi/pub/model/service/OrderServiceImplTests.java)의 `pagedOrdersAttachDetailsWithOneBatchQuery`, `emptyOrderPagesSkipDetailBatchQuery`. 가짜 DAO에서 ID 전달·상세 연결·빈 페이지의 호출 생략을 확인한다.
 - 경계: 가짜 DAO 호출 횟수는 실제 DB 쿼리 실측이나 응답 시간 전후 값이 아니다. 데이터 규모를 통제한 MySQL 측정 없이 N배 개선·메모리 절감·처리량 향상을 기재하지 않는다.
 - 추가 확보: 기준 구현과 비교 구현, 주문당 상세 분포, 페이지 크기, 캐시·워밍업·반복·표본 제외 기준을 먼저 고정한 뒤 쿼리와 지연·메모리 분포를 비교한다.
+
+### BE-CS05
+
+- 구현: [업무 쓰기](../src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java), [상품별 영속 버전/현재 투영](../src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java), [SQL](../src/main/resources/mappers/productSearchOutbox.xml), [007](migrations/007-product-search-outbox.sql).
+- 근거: [작업 계획](plans/2026-11-01-product-search-outbox.md)의 실제 MySQL 8.4/Java17/불변 jar·기존12업무표+guard 원값 보존, 실패 주입 rollback·두 동시 수정·삭제/상한·같은ID 후속버전, 실제 API 이벤트의 strict CLI/엔진 재생과 volume 재시작.
+- 선택: afterCommit만의 전송 틈·업무 안의 외부 IO·상품과 함께 사라지는 카운터·global autoID commit 순서를 구분했다. 값/태그의 원천 권리를 추가 승인하거나 비공개 회원/주문을 색인하지 않는다.
+- 경계: 신규 예방 설계의 제어된 정확성 검증이다. 과거 실사용자 사고·서비스 속도 개선이 아니며 자동 dispatcher/공개 검색은 미완료다. 추가 쓰기/잠금/보관 비용과 relay·재색인 세대 전환은 후속이다.
 
 ### BE-CS02
 
@@ -79,12 +89,17 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 
 [S02 관리 도구](plans/2026-11-01-local-search-replay.md)는 실제 엔진에서 중복/역전·동일 버전
 충돌·삭제/재시작·부분 receipt와 소유 자원 정리를 다룬다. 상태 경계의 근거는 확보했지만 아직
-업무 버전/outbox와 고객 검색에 연결하지 않았다. 초기 mapping 응답의 기본값 생략은 실제로
+이 선행 실험은 업무 버전/outbox와 고객 검색에 연결하지 않았다. 초기 mapping 응답의 기본값 생략은 실제로
 수정했어도 과거 업무 장애로 포장하지 않는다. 현재 거래/권한의 실제 업무 결함을 전후 확인한
 네 사례보다 강한 교체 근거가 없어 README 네 사례/순서를 유지한다. 자동 동기화와 장애 복구를
 업무 흐름에서 검증하면 다시 비교하며 테스트 개수·플랫폼 최신성으로 선정하지 않는다.
 관리 HTTP의 헤더 trickle 기한 위반·Python3.12 정상 close FD 경계도 실제 조건으로 보강했으나
 이번 새 관리 도구의 검수 결함이다. 이 근거만으로 고객 업무 영향이 확인된 네 사례를 교체하지 않는다.
+
+후속 [업무 생산 증가분](plans/2026-11-01-product-search-outbox.md)은 위 관리 도구만의 검수를 넘어
+업무TX·현재 특성/영속 버전·실제 rollback/동시성·수동 전환과 API→CLI→엔진 재생까지 연결했다.
+이 추가 근거로 BE-CS05를 선정해 기존 BE-CS01만 교체했다. 다른 세 사례와 총4개는 유지한다.
+자동 엔진 전달/공개 검색을 구현했다거나 같은 기반 작업을 여러 사례로 나눴다는 뜻은 아니다.
 
 ### 상품 페이지 offset 정확성 비교
 
