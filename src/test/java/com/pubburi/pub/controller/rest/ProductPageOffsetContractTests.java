@@ -71,7 +71,7 @@ class ProductPageOffsetContractTests {
 						if (method.getName().equals("countFiltered")) return 0;
 						throw new AssertionError("Unexpected product operation");
 					});
-			mvc = MockMvcBuilders.standaloneSetup(new ProductRestController(new ProductServiceImpl(dao), null))
+			mvc = MockMvcBuilders.standaloneSetup(new ProductRestController(new ProductServiceImpl(dao, org.mockito.Mockito.mock(com.pubburi.pub.model.service.ProductSearchOutbox.class)), null))
 					.setControllerAdvice(new GlobalExceptionHandler()).build();
 		}
 	}

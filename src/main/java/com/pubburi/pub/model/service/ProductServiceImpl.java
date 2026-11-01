@@ -16,9 +16,11 @@ import com.pubburi.pub.model.dto.Product;
 public class ProductServiceImpl implements ProductService {
 
 	private final ProductDao productDao;
+	private final ProductSearchOutbox searchOutbox;
 
-	public ProductServiceImpl(ProductDao productDao) {
+	public ProductServiceImpl(ProductDao productDao, ProductSearchOutbox searchOutbox) {
 		this.productDao = productDao;
+		this.searchOutbox = searchOutbox;
 	}
 
 	@Override
@@ -53,7 +55,9 @@ public class ProductServiceImpl implements ProductService {
 		if (product == null || product.getName() == null || product.getType() == null || product.getPrice() <= 0) {
 			return 0;
 		}
-		return productDao.insert(product);
+		int changed = productDao.insert(product);
+		if (changed > 0) searchOutbox.recordCurrent(product.getId());
+		return changed;
 	}
 
 	@Override
@@ -62,7 +66,10 @@ public class ProductServiceImpl implements ProductService {
 		if (product == null || product.getId() <= 0) {
 			return 0;
 		}
-		return productDao.update(product);
+		if (productDao.selectByIdForUpdate(product.getId()) == null) return 0;
+		int changed = productDao.update(product);
+		if (changed > 0) searchOutbox.recordCurrent(product.getId());
+		return changed;
 	}
 
 	@Override
@@ -71,7 +78,10 @@ public class ProductServiceImpl implements ProductService {
 		if (id <= 0) {
 			return 0;
 		}
-		return productDao.delete(id);
+		if (productDao.selectByIdForUpdate(id) == null) return 0;
+		int changed = productDao.delete(id);
+		if (changed > 0) searchOutbox.recordDeleted(id);
+		return changed;
 	}
 
 	@Override

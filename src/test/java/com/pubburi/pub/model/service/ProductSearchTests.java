@@ -57,7 +57,7 @@ class ProductSearchTests {
 					}
 					assertThat(args[2]).isSameAs(filters); return 3;
 				});
-		ProductServiceImpl service = new ProductServiceImpl(dao);
+		ProductServiceImpl service = new ProductServiceImpl(dao, org.mockito.Mockito.mock(com.pubburi.pub.model.service.ProductSearchOutbox.class));
 		var page = service.searchProducts(" ", " fixture ", "popular", filters, PageCriteria.of(2, 2, 12));
 		assertThat(page.total()).isEqualTo(3); assertThat(page.totalPages()).isEqualTo(2); assertThat(page.hasNext()).isFalse();
 		assertThat(calls).containsExactly("selectFiltered", "countFiltered");

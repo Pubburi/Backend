@@ -12,7 +12,7 @@ import sys
 import time
 import uuid
 
-from search_index import Engine, Http, SearchError, document
+from search_index import Engine, Http, SearchError, document, batch, MAX_INPUT_BYTES
 
 IMAGE = "pubburi-search:3.9.0-nori-v1"
 
@@ -44,6 +44,39 @@ def visible(http, alias):
     status, result = http.request("POST", f"/{alias}/_search", {"size": 10, "_source": False, "sort": [{"product_id": "asc"}], "query": {"match_all": {}}})
     assert status == 200
     return [int(row["_id"]) for row in result["hits"]["hits"]]
+
+
+def outbox_fixture(source, snapshot=None):
+    path = Path(source).resolve()
+    path.relative_to(Path(".pubburi").resolve())
+    with path.open("rb") as stream:
+        content = stream.read(MAX_INPUT_BYTES + 1)
+    kind, events = batch(content)
+    # This optional smoke consumes one actual disposable product's complete authored history.
+    if (kind != "backend_product_events" or len(events) < 2 or events[0]["deleted"]
+            or not events[-1]["deleted"] or len({event["product_id"] for event in events}) != 1
+            or any(left["source_version"] >= right["source_version"] for left, right in zip(events, events[1:]))):
+        raise SearchError("disposable_outbox_history_required")
+    if snapshot is not None:
+        snapshot.write_bytes(content)
+    return events
+
+
+def exercise_outbox(http, source, private, endpoint):
+    frozen = private / "business-outbox-events.json"
+    events = outbox_fixture(source, frozen)
+    engine = Engine(http, "pubburi-products-v1-outbox", "backend_product_events")
+    engine.ready(create=True)
+    output = private / "business-outbox-replay"
+    result = subprocess.run([sys.executable, "scripts/search_index.py", "replay", "--endpoint", endpoint,
+        "--index", engine.index, "--data-kind", "backend_product_events", "--input", str(frozen),
+        "--output-dir", str(output)], capture_output=True, text=True)
+    assert result.returncode == 0
+    receipt = json.loads((output / "receipt.json").read_text())
+    assert receipt["completed"] is True and receipt["applied"] == len(events)
+    assert engine.apply(events[0]) == "stale_ignored" and visible(http, engine.alias) == []
+    assert http.request("GET", f"/{engine.index}/_doc/{events[-1]['product_id']}")[1]["_source"] == events[-1]
+    return engine, events
 
 
 def exercise(http):
@@ -125,6 +158,10 @@ def main():
         wait_ready(http)
         engine, events = exercise(http)
         report["completed"].append("pinned engine/nori, strict owned schema, IDs, replay, stale/conflicting versions, tombstones, unknown and controlled concurrent conflict")
+        outbox = None
+        if os.environ.get("PUBBURI_SEARCH_OUTBOX_INPUT"):
+            outbox = exercise_outbox(http, os.environ["PUBBURI_SEARCH_OUTBOX_INPUT"], private, endpoint)
+            report["completed"].append("actual disposable business outbox CLI replay and old update rejected after deletion")
         docker("restart", state["container_id"])
         # Dynamic host ports can change when Docker restarts a container.
         raw = owned_container(); state.update(port=int(raw["NetworkSettings"]["Ports"]["9200/tcp"][0]["HostPort"]), container_pid=raw["State"]["Pid"]); save()
@@ -132,6 +169,11 @@ def main():
         engine = Engine(http, engine.index); engine.ready()
         assert engine.apply(document(events[1])) == "stale_ignored" and visible(http, engine.alias) == [2]
         report["completed"].append("persistent restart keeps tombstone version and prevents stale resurrection")
+        if outbox is not None:
+            outbox_engine = Engine(http, outbox[0].index, "backend_product_events"); outbox_engine.ready()
+            assert outbox_engine.apply(outbox[1][0]) == "stale_ignored" and visible(http, outbox_engine.alias) == []
+            assert http.request("GET", f"/{outbox_engine.index}/_doc/{outbox[1][-1]['product_id']}")[1]["_source"] == outbox[1][-1]
+            report["completed"].append("business outbox tombstone persists across engine restart")
         source = private / "events.json"
         source.write_text(json.dumps({"schemaVersion": 1, "dataKind": "authored_fixture", "events": events}))
         base = [sys.executable, "scripts/search_index.py"]

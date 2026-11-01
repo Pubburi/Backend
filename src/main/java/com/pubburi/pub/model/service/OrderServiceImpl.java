@@ -30,14 +30,16 @@ public class OrderServiceImpl implements OrderService {
 	private final StampDao stampDao;
 	private final UserDao userDao;
 	private final ProductDao productDao;
+	private final ProductSearchOutbox searchOutbox;
 
 	public OrderServiceImpl(OrderDao orderDao, OrderDetailDao orderDetailDao, StampDao stampDao, UserDao userDao,
-			ProductDao productDao) {
+			ProductDao productDao, ProductSearchOutbox searchOutbox) {
 		this.orderDao = orderDao;
 		this.orderDetailDao = orderDetailDao;
 		this.stampDao = stampDao;
 		this.userDao = userDao;
 		this.productDao = productDao;
+		this.searchOutbox = searchOutbox;
 	}
 
 	@Override
@@ -82,6 +84,7 @@ public class OrderServiceImpl implements OrderService {
 			if (productDao.incrementOrderCount(detail.getProductId(), detail.getQuantity()) <= 0) {
 				throw new IllegalArgumentException("Product not found: " + detail.getProductId());
 			}
+			searchOutbox.recordCurrent(detail.getProductId());
 		}
 		if (orderDetailDao.insertAll(normalizedDetails) != normalizedDetails.size()) {
 			throw new IllegalStateException("Order details could not be created");
