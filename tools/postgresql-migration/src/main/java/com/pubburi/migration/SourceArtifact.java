@@ -24,6 +24,7 @@ import java.util.UUID;
 
 final class SourceArtifact {
     record Report(int tables,long rows) { }
+    record Snapshot(JsonNode data,Report report,String sha256) { }
     private SourceArtifact() { }
     static Path path(Path requested,boolean existing) throws IOException {
         Path dir=requested.toAbsolutePath().normalize();
@@ -123,10 +124,13 @@ final class SourceArtifact {
         }
     }
     static Report validate(Path requested) throws Exception {
+        return load(requested).report();
+    }
+    static Snapshot load(Path requested) throws Exception {
         Path dir=path(requested,true);
         return validate(dir,SourceContract.parse(read(dir.resolve("receipt.json"),8192)));
     }
-    private static Report validate(Path dir,JsonNode receipt) throws Exception {
+    private static Snapshot validate(Path dir,JsonNode receipt) throws Exception {
         fields(receipt,"schemaVersion","accepted","bytes","sha256","tables","rows");
         if(integer(receipt,"schemaVersion")!=1 || !receipt.get("accepted").isBoolean() || !receipt.get("accepted").booleanValue()
                 || integer(receipt,"tables")!=16 || integer(receipt,"bytes")>SourceContract.MAX_BYTES) throw new IllegalArgumentException("source_receipt_not_complete");
@@ -169,6 +173,6 @@ final class SourceArtifact {
             if(identity.table().equals("t_product")) maximum=Math.max(maximum,maxima.getOrDefault("retainedProduct",0L));
             if(!Long.toString(n).equals(text) || n<1 || n>identity.maximum() || n<=maximum) throw new IllegalArgumentException("source_highwater_invalid");
         }
-        return new Report(16,total);
+        return new Snapshot(snapshot,new Report(16,total),SourceContract.hash(bytes));
     }
 }

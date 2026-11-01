@@ -24,7 +24,10 @@ def prepare(environ):
     databases = [(environ["PUBBURI_PG_DB_NAME"], environ["PUBBURI_PG_RUN_TOKEN"])]
     for purpose in ("RECOVERY", "BLOCKED"):
         databases.append((environ["PUBBURI_PG_" + purpose + "_DB_NAME"], environ["PUBBURI_PG_" + purpose + "_RUN_TOKEN"]))
-    if len({item[0] for item in databases}) != 3 or any(not re.fullmatch(r"[a-z][a-z0-9_]*_ci", name)
+    if any("PUBBURI_PG_IMPORT_" + purpose + "_DB_NAME" in environ for purpose in ("FRESH", "RECOVERY", "CONFLICT", "TYPED")):
+        for purpose in ("FRESH", "RECOVERY", "CONFLICT", "TYPED"):
+            databases.append((environ["PUBBURI_PG_IMPORT_" + purpose + "_DB_NAME"], environ["PUBBURI_PG_IMPORT_" + purpose + "_RUN_TOKEN"]))
+    if len({item[0] for item in databases}) != len(databases) or any(not re.fullmatch(r"[a-z][a-z0-9_]*_ci", name)
             or not re.fullmatch(r"[A-Za-z0-9_-]{12,100}", token) for name, token in databases):
         raise ValueError("postgresql_ci_databases_rejected")
 

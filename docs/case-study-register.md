@@ -11,15 +11,17 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 ## 현재 선정
 
 PostgreSQL schema/guarded installer·identity 예약은 [DB01/DB02 증가분](plans/2026-11-02-postgresql-schema-foundation.md)으로
-실제 DB에서 확인했다. 서비스 JPA/전체 이관이 아직 연결되지 않았고 기존 네 사례보다 강한 고객
-업무 문제 해결 근거로 보지 않아 사례·순서를 보존한다. 과거 MySQL 근거를 PostgreSQL 성과로
+실제 DB에서 확인했다. 당시 schema/installer 단독으로는 기존 네 사례보다 강한 근거로 보지
+않아 사례를 보존했다. 이후 실제 source→target 전체 값·예약·결과 분류를 완성한 BE-CS06이
+기존 정규화의 실제 HTTP/폐기 DB 보강도 인정하면서, 두 저장소의 타입/ID 수명·전행 검수와
+commit/close 판정의 독립 원인/구현 근거가 더 깊어 CS03 슬롯 하나만 교체했다. 서비스 JPA/전체 cutover는 미완료다. 과거 MySQL 근거를 PostgreSQL 성과로
 바꾸지 않으며 schema 회귀의 수치/목록은 README에 넣지 않는다.
 
 | ID | README 사례 | 채용 관점의 선정 이유 | 근거 범위 | 실측 성능 |
 |---|---|---|---|---|
 | BE-CS05 | 업무 원자 생산과 검색 릴레이의 상태 경계 | 단일 업무TX·상품별 버전·삭제 수명과 외부 IO 분리·lease/token ACK·source/target 수명·commit 순서의 차이를 설명한다. | 실제 MySQL 원값 보존/실패·동시성, API→CLI와 relay→OpenSearch의 별도 검증 | 신규 설계 정확성이며 지연 성능 미측정 |
 | BE-CS02 | 같은 ID 재가입·권한 변경의 기존 세션 구분 | 계정 인스턴스와 자격 수명, 실권한·표시·DB 실패·세션 경합을 구분하고 재발급의 버전 경계를 설명한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·003 전환, 제어한 단위 인터리빙 | 독립 경계 각각 1/1→0/1은 정확성; 성능 미측정 |
-| BE-CS03 | 중복 주문 상품 정규화 | 입력 단위와 저장·집계 단위의 차이, 여러 쓰기의 책임 경계를 드러낸다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
+| BE-CS06 | 저장소 전환의 원자 복사·ID/결과 수명 | source/target 타입·원문·격리·고수위와 commit/close 불확실성을 나누고 실제 복사·복구를 직접 구현했다. | 기본 copied source/별도 authored 타입·상태의 실제 PG 전행 대조·rollback·중복/드리프트 거절 | 신규 설계 정합성이며 지연 성능 미측정 |
 | BE-CS04 | 가격·참조 삭제에서 주문 이력 분리 | 업무 기록과 활성 상품/회원의 수명·잠금·스냅샷·nullable/권한·개인정보·FK 전환 판단을 연결한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·기존 스키마 전환 | 가격 3/3→0/3, 상세 2/3→0/3·주문 유실 3/3→0/3은 각 실험의 정확성; 성능 미측정 |
 
 선행 주문 읽기(BE-CS01)의 구현/근거는 아래에 보존한다. BE-CS05는 실제 DB 실패/동시 순서·
@@ -54,7 +56,7 @@ PostgreSQL schema/guarded installer·identity 예약은 [DB01/DB02 증가분](pl
 - 경계: 각각 N=1의 로컬 고정 정확성 결과다. 신규 로그인/구 비밀번호 차단은 기존에도 동작한 대조 조건이고, 이를 새 성과로 세지 않는다. 전체 요청의 인증과 쓰기를 계정 삭제와 원자적으로 묶거나 모든 in-flight 작업을 취소한 것은 아니다. Guard DB 읽기/수정 잠금 비용·분산 세션·전체 동시성은 미측정/미완료다.
 - 남은 근거: 실제 DB 동시 실행·실패 주입을 BE06/C04의 업무 경계와 맞춰 확장하고 요청별 조회 비용을 성능 조건부터 정해 측정한다. 구형 해시 형식 종료 정책·실제 DB의 재해시 경합은 별도 확인하며 보안 형식 전환을 지연 개선으로 표현하지 않는다.
 
-### BE-CS03
+### BE-CS03 — 이전 선정, BE-CS06으로 교체
 
 - 구현: [OrderServiceImpl.normalizeDetails/makeOrder](../src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java), [상품 수량 증가](../src/main/resources/mappers/product.xml), [사용자 스탬프 증가](../src/main/resources/mappers/user.xml), [상세 일괄 삽입](../src/main/resources/mappers/orderDetail.xml).
 - 기존 근거: [OrderServiceImplTests](../src/test/java/com/pubburi/pub/model/service/OrderServiceImplTests.java)의 `makeOrderAggregatesDuplicateProductsAndIncrementsStampsAtomically`, `missingProductStopsOrderBeforeDetailsAndRewardsAreCreated`. 중복 수량·DAO 전달 값·예외 이후 진행 중단을 확인한다.
@@ -195,3 +197,19 @@ README 코드는 실제 현재 함수와 링크를 동기화하고, 성능 전�
 이관/고객 API에 아직 연결하지 않아 거래·세션·검색 상태의 네 사례보다 강한 업무 효과로
 판단하지 않는다. 네 사례/순서를 보존하며 회귀 수치/목록은 계획·PR·CI에만 기록한다. 전체
 복사와 업무 재인수를 연결한 뒤 원인/선택/구현 기여와 확인 결과로 다시 비교한다.
+
+### BE-CS06 — H19 교체 판단
+
+[원자 import](plans/2026-11-02-postgresql-source-import.md)는 기존 installer/export 단독 후보와
+달리 승인된 source를 실제 PG에 복사하고 전체 PK tuple/셀·sequence·수령증·typed 상태를 대조했다.
+실제 SQL 실패/부분 저장·예약 이후 실패·충돌/드리프트·복구까지 직접 연결했고 commit/close
+분류의 단위 주입과 실제 ACK 유실의 미검증도 구분한다. 타입/콜레이션·격리·비MVCC ID 수명,
+오프라인 개인정보·승인 바이트와 중복 방지의 대안을 설명할 수 있다.
+
+BE-CS03은 기존 소스/가짜 DAO에 더해 실제 HTTP·폐기 DB의 주문 성공/정규화/쓰기 후 실패
+rollback 보강까지 갖춘 유효한 사례다. 이를 축소하지 않고, 이번 두 엔진의 typed 값/ID 수명·
+전행 검수·atomic sequence/receipt·commit/close 판정·무덮어쓰기 설계가 더 깊은 독립 원인/
+대안/직접 구현 근거를 갖췄다는 차이로 비교했다. 최신성/코드량/테스트 총수가 아니라
+이 차이로 CS03 슬롯만 교체했다. 나머지 outbox/세션/가격·삭제 이력과 순서·총4개는 보존한다.
+기본345행·별도 authored353행은 계획의 서로 다른 검증 입력이지 운영 규모·성능 성과가 아니다.
+README에는 회귀 숫자/목록을 옮기지 않으며 JPA/API·서비스 cutover 완료로 확대하지 않는다.

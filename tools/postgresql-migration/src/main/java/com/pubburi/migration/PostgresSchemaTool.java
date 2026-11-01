@@ -70,6 +70,10 @@ public final class PostgresSchemaTool {
     public static void guard(Settings settings) throws SQLException {
         try (Connection connection = settings.connect()) {
             connection.setReadOnly(true);
+            guard(connection,settings);
+        }
+    }
+    static void guard(Connection connection,Settings settings) throws SQLException {
             try (PreparedStatement statement = connection.prepareStatement("""
                     SELECT current_database() AS db, current_setting('server_version_num') AS version,
                            current_setting('server_encoding') AS encoding,
@@ -85,7 +89,6 @@ public final class PostgresSchemaTool {
                         throw new IllegalArgumentException("postgresql_fixture_guard_rejected");
                 }
             }
-        }
     }
 
     static FluentConfiguration configuration(Settings settings, String location) {

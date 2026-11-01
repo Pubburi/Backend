@@ -33,7 +33,8 @@ Python relay는 Psycopg3다. [DB01–DB06 계약](POSTGRESQL-MIGRATION.md)을 �
 11월22일까지 전환과 보존 재인수를 목표로 한다. 기존 MySQL/MyBatis는 이관 전 기준/복사 검증용으로
 보존하고 기술 선정 대기로 두지 않는다. 현재 독립 PostgreSQL schema 도구와 실제 DB 검증은
 DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 완성 단위로 제공한다.
-현재 API/JPA·PG 전체 데이터 복사·relay·cutover 완료와 구분한다.
+승인 snapshot의 [빈 PG 복사/전행 검수](SOURCE-IMPORT.md)도 제공한다. 현재 API/JPA·모든
+원본/업무 재인수·relay·cutover 완료와 구분한다.
 
 ## 검색·추천 연동
 

@@ -119,8 +119,31 @@ def run(environ):
         duplicate = subprocess.run(["python3", "scripts/mysql_source_snapshot.py", "export-source"], env=source, cwd=ROOT, capture_output=True, timeout=30)
         if duplicate.returncode != 2:
             raise ValueError("source_ci_output_reuse_not_rejected")
-        return {"status": "passed", "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
-                "full_copy": False, "source_original_touched": False}
+        imported = False
+        if environ.get("PUBBURI_PG_IMPORT_INTEGRATION") == "1":
+            from postgresql_schema import verify_owned_postgres
+            verify_owned_postgres(environ)
+            # A second owned DB separates authored type/state examples from the unmodified source copy.
+            typed_database, typed_reader = "source_typed_ci", "source_typed_reader"
+            typed_password, typed_token, typed_window = secrets.token_hex(24), secrets.token_hex(24), str(uuid.uuid4())
+            sql("SET time_zone='+00:00'; CREATE DATABASE " + typed_database + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + typed_database + ";\n" + (ROOT / "data.sql").read_text(), timeout=40)
+            sql("SET time_zone='+00:00'; USE " + typed_database + ";\n" + (ROOT / "tools/postgresql-migration/src/test/resources/source-import-types.sql").read_text())
+            typed_scope = "`" + typed_database.replace("_", "\\_") + "`.*"
+            sql("CREATE USER '" + typed_reader + "'@'%' IDENTIFIED BY '" + typed_password + "' REQUIRE SSL; GRANT SELECT,SHOW VIEW ON " + typed_scope + " TO '" + typed_reader + "'@'%'; USE " + typed_database + "; CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); INSERT INTO pubburi_source_snapshot_guard VALUES ('" + typed_token + "','QUIESCED','" + typed_window + "');")
+            typed = dict(source, PUBBURI_SOURCE_URL=source["PUBBURI_SOURCE_URL"].rsplit("/", 1)[0] + "/" + typed_database,
+                         PUBBURI_SOURCE_DB_NAME=typed_database, PUBBURI_SOURCE_USER=typed_reader, PUBBURI_SOURCE_PASSWORD=typed_password,
+                         PUBBURI_SOURCE_RUN_TOKEN=typed_token, PUBBURI_SOURCE_WINDOW_UUID=typed_window,
+                         PUBBURI_SOURCE_SNAPSHOT_DIR=str(directory / "typed-accepted"))
+            command(["python3", "scripts/mysql_source_snapshot.py", "export-source"], env=typed, cwd=ROOT, timeout=120)
+            source["PUBBURI_SOURCE_TYPED_SNAPSHOT_DIR"] = typed["PUBBURI_SOURCE_SNAPSHOT_DIR"]
+            with (directory / "import-integration.log").open("w") as log:
+                result = subprocess.run([str(ROOT / "mvnw"), "--batch-mode", "--no-transfer-progress", "-f", "tools/postgresql-migration/pom.xml",
+                    "-Dtest=SourceImportIntegrationTests,SourceImportTypedIntegrationTests", "test"], cwd=ROOT, env=source, stdout=log, stderr=subprocess.STDOUT, timeout=120)
+            if result.returncode:
+                raise ValueError("source_ci_postgresql_import_failed")
+            imported = True
+        return {"status": "passed", "postgresql_import_verified": imported, "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
+                "api_jpa_cutover": False, "source_original_touched": False}
     finally:
         # Diagnostic failures never bypass cleanup; never remove a non-owned container.
         if cid:

@@ -74,6 +74,14 @@ jobs:
       PUBBURI_PG_CA: ${{ github.workspace }}/.pubburi/postgres-ci-tls/ca.pem
       PUBBURI_PG_VALIDATION_LABEL: postgresql-schema-ci
       PUBBURI_PG_MUTATING: '1'
+      PUBBURI_PG_IMPORT_FRESH_DB_NAME: pubburi_pg_import_fresh_ci
+      PUBBURI_PG_IMPORT_FRESH_RUN_TOKEN: pubburi-pg-import-fresh-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_IMPORT_RECOVERY_DB_NAME: pubburi_pg_import_recovery_ci
+      PUBBURI_PG_IMPORT_RECOVERY_RUN_TOKEN: pubburi-pg-import-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_IMPORT_CONFLICT_DB_NAME: pubburi_pg_import_conflict_ci
+      PUBBURI_PG_IMPORT_CONFLICT_RUN_TOKEN: pubburi-pg-import-conflict-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_IMPORT_TYPED_DB_NAME: pubburi_pg_import_typed_ci
+      PUBBURI_PG_IMPORT_TYPED_RUN_TOKEN: pubburi-pg-import-typed-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,6 +119,8 @@ jobs:
       - name: Verify isolated read-only source snapshot and failure recovery
         env:
           PUBBURI_SOURCE_CI_RUN: source-snapshot-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          PUBBURI_PG_CONTAINER_ID: ${{ job.services.postgresql.id }}
+          PUBBURI_PG_IMPORT_INTEGRATION: '1'
         run: python3 scripts/source_snapshot_ci.py
       - name: Initialize disposable database
         env:

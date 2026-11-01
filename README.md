@@ -64,7 +64,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
 | CI | GitHub Actions · backend-ci |
 
-PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 원본 추출 도구](docs/SOURCE-SNAPSHOT.md)를 제공합니다. 전체 데이터 이관과 JPA API 전환은
+PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 원본 추출 도구](docs/SOURCE-SNAPSHOT.md), [승인 자료의 빈 대상 복사·검증 도구](docs/SOURCE-IMPORT.md)를 제공합니다. 전체 데이터 이관과 JPA API 전환은
 [전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따르며, 현재 API 실행 경로와 과거 검증을 보존합니다.
 
 <a id="architecture"></a>
@@ -246,57 +246,80 @@ public void refreshAfterCredentialChange(HttpSession session, SessionUser observ
 
 [현재 계정 확인·조건부 세션 갱신](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java) · [잠금 안의 버전 캡처](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [ID·epoch 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml) · [계약·전환](docs/SESSION-AUTHORITY.md)
 
-### 3. 중복 상품을 정규화한 뒤 같은 수량으로 주문과 적립을 처리하기
+### 3. 저장소 전환에서 업무 값·ID 수명과 복사 결과를 함께 확정하기
 
 #### 문제
 
-주문 요청에 같은 상품이 여러 행으로 들어오면 상세 저장·상품 주문 수·스탬프 적립이 서로 다른 단위로 계산될 수 있습니다. 처리 도중 상품이나 회원을 찾지 못했을 때도 실패를 성공 결과와 구분해야 합니다.
+PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전달 상태를 유지하는 복사 경로가 필요했습니다. 중간 실패를 부분 복사와 구분하고, 결과를 모르는 실행을 다시 덮어쓰지 않는 기준도 필요했습니다. 과거 운영 유실 사고를 수정한 사례가 아니라 실제 이관 도구의 설계·구현입니다.
 
 #### 원인
 
-클라이언트가 보낸 행을 그대로 저장하면 상품 단위 수량과 요청 행 수가 섞입니다. 주문 헤더·상세·상품 집계·적립은 서로 다른 DAO에 있어 입력 정규화와 쓰기 실패 처리의 경계를 서비스가 정해야 합니다.
+남아 있는 행의 최댓값과 원본 ID의 다음 값은 다릅니다. JSON 재직렬화·실수의 소수 변환·서로 다른 collation의 정렬 순서도 원래 값을 바꿀 수 있습니다. sequence의 nextval은 행 rollback과 다르게 움직이고 COMMIT 응답/연결 종료 실패만으로 결과를 단정할 수도 없습니다.
 
 #### 해결
 
-DB 쓰기 전에 상품 ID별로 수량을 합산하고 유효하지 않은 상세를 거부합니다. 정규화한 상세를 기준으로 상품 집계와 적립 수량을 계산하며, 쓰기 결과가 기대와 다르면 예외로 종료합니다. 쓰기 흐름은 서비스의 트랜잭션 경계 안에 둡니다.
+승인 파일의 바이트·타입·source/window를 한 번 검수하고 빈 대상만 허용합니다. 실제 catalog와 PK tuple별 전체 값을 대조하며, 업무 행·transactional sequence 예약·영구 수령증을 같은 트랜잭션에 둡니다. sequence 자체의 잠금도 먼저 얻고 commit 시도·확인과 연결 종료를 분리합니다.
 
 #### 결과
 
-같은 상품의 중복 행은 합산된 상세로 전달되고, 해당 합산 수량을 상품 주문 수와 스탬프 적립에 사용합니다. 존재하지 않는 상품에서는 이후 상세·적립 생성을 진행하지 않는 예외 경로가 있습니다.
+승인된 snapshot의 명시 ID·epoch·주문 금액·원문 JSON·전달 상태를 유지한 복사와 읽기 전용 대조를 제공합니다. 기존 데이터를 병합하거나 충돌을 정규화하지 않으며, 결과 미확인/연결 종료 실패도 성공·rollback과 구분합니다. 실제 확인 범위와 한계는 [작업 기록](docs/plans/2026-11-02-postgresql-source-import.md)에 남겼습니다.
 
 #### 대체안/회고
 
-클라이언트 합산은 화면 상태를 단순하게 만들지만 다른 클라이언트나 직접 API 호출의 입력까지 보장하지는 않습니다. 서버 정규화를 공통 경계로 선택했습니다. 현재 HTTP·폐기 DB의 쓰기 후 실패 경로까지 검증하지만 모든 단계의 장애·동시성·재시도 멱등성은 별도 개선이 필요합니다.
+표별 복사나 충돌 시 건너뛰기는 운영 복구를 단순하게 보이게 하지만 부분 상태를 성공으로 오인할 수 있어 빈 대상의 단일 트랜잭션을 선택했습니다. 대신 작업 중단·테이블 잠금과 제한된 파일 규모가 필요합니다. 파일은 원본 수준의 비공개 자료이며 hash는 암호화가 아닙니다. JPA API·relay 전환과 서비스 cutover는 별도 단계입니다.
 
 #### 코드
 
 ~~~java
-    private List<OrderDetail> normalizeDetails(List<OrderDetail> details) {
-        Map<Integer, OrderDetail> byProductId = new LinkedHashMap<>();
-        for (OrderDetail detail : details) {
-            if (detail == null || detail.getProductId() == null || detail.getProductId() <= 0 || detail.getQuantity() <= 0) {
-                throw new IllegalArgumentException("Invalid order detail");
-            }
-            byProductId.compute(detail.getProductId(), (productId, existing) -> {
-                if (existing == null) {
-                    OrderDetail normalized = new OrderDetail();
-                    normalized.setProductId(productId);
-                    normalized.setQuantity(detail.getQuantity());
-                    return normalized;
+    static SourceArtifact.Report run(Map<String,String> env) throws Exception {
+        // Read/validate once. No second file read after approved digest/identity checks.
+        var source=input(env);var settings=PostgresSchemaTool.Settings.from(env);
+        PostgresSchemaTool.guard(settings);PostgresSchemaTool.configuration(settings,PostgresSchemaTool.LOCATION).load().validate();
+        return ImportTransaction.run(settings.connect(),connection -> {
+                PostgresSchemaTool.guard(connection,settings);
+                try(var marker=connection.prepareStatement("SELECT token FROM public.pubburi_pg_migration_guard WHERE token=?")) {
+                    marker.setString(1,settings.token());try(var r=marker.executeQuery()){if(!r.next())throw new IllegalArgumentException("postgresql_import_guard_changed");}
                 }
-                try {
-                    existing.setQuantity(Math.addExact(existing.getQuantity(), detail.getQuantity()));
-                } catch (ArithmeticException ex) {
-                    throw new IllegalArgumentException("Order quantity is out of range", ex);
+                try(var statement=connection.createStatement()) {
+                    String names=String.join(",",SourceContract.TABLES.stream().map(t->"pubburi."+t.name()).toList());
+                    statement.execute("LOCK TABLE "+names+",pubburi.migration_source_receipt IN ACCESS EXCLUSIVE MODE");
+                    TargetSchemaContract.verify(connection);
+                    for(var table:SourceContract.TABLES)try(var rows=statement.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi."+table.name()+")")) {
+                        rows.next();if(rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_empty_target_required");
+                    }
+                    try(var rows=statement.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.migration_source_receipt)")) {rows.next();if(rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_already_recorded");}
                 }
-                return existing;
-            });
-        }
-        return List.copyOf(byProductId.values());
+                for(int t=0;t<SourceContract.TABLES.size();t++) insert(connection,SourceContract.TABLES.get(t),source.data().path("tables").get(t));
+                compare(connection,source);reserve(connection,source.data().path("sourceNext"));
+                try(var receipt=connection.prepareStatement("INSERT INTO pubburi.migration_source_receipt(singleton_id,artifact_sha256,source_id,source_server,window_id,row_count) VALUES(1,?,?::uuid,?::uuid,?::uuid,?)")) {
+                    receipt.setString(1,source.sha256());receipt.setString(2,source.data().path("sourceId").textValue());receipt.setString(3,source.data().path("sourceServer").textValue());
+                    receipt.setString(4,source.data().path("window").textValue());receipt.setLong(5,source.report().rows());if(receipt.executeUpdate()!=1)throw new IllegalArgumentException("postgresql_import_receipt_failed");
+                }
+                PostgresSchemaTool.guard(connection,settings);return source.report();
+        });
     }
 ~~~
 
-[입력 정규화와 트랜잭션 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 집계 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [스탬프 증가 SQL](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml)
+~~~java
+    static <T> T run(Connection connection,Work<T> work) throws Exception {
+        boolean attempted=false,confirmed=false;
+        try(connection) {
+            connection.setAutoCommit(false);
+            try {
+                T value=work.execute(connection);attempted=true;connection.commit();confirmed=true;return value;
+            } catch(Exception error) {
+                try{connection.rollback();}catch(SQLException ignored){ }
+                throw error;
+            }
+        } catch(Exception error) {
+            if(confirmed)throw new OutcomeException("postgresql_import_committed_close_failed",error);
+            if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
+            throw error;
+        }
+    }
+~~~
+
+[복사·PK tuple 대조·sequence 잠금](tools/postgresql-migration/src/main/java/com/pubburi/migration/SourceImportTool.java) · [commit/자원 종료 분류](tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java) · [typed bind](tools/postgresql-migration/src/main/java/com/pubburi/migration/TargetValues.java) · [복사 계약](docs/SOURCE-IMPORT.md)
 
 ### 4. 가격 변경·참조 삭제에서 주문 이력을 분리하기
 
