@@ -40,6 +40,7 @@
 | 기본 주류 목록 | 비개인 ID순 B0 연결, 전체 응답 대기·크기 제한, 현재 DB 재조회와 장애 대체 |
 | 상품 | 목록·이름/주종 검색, 가격·도수·명시 맛/향 AND 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 상품 특성 | 별도 조회·관리자 전체 교체 API, 용량·설명·맛/향 태그·출처, 미확인/검수된 빈 태그 구분 |
+| 색인 관리 | 선택적 로컬 OpenSearch·nori, 명시 ID/버전 이벤트 재생·중복/역전 처리·삭제 표식. 업무 outbox 연동은 진행 예정 |
 | 후기 | 상품별 평점·후기 조회와 작성·수정·삭제 |
 | 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 상품·회원 삭제 후 이력 보존, 관리자 완료 처리·스탬프 |
 | 관리자 | 상품·회원·후기·매장·주문 관리 |
@@ -57,6 +58,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 서버 | Spring Boot 3.5.0, Tomcat 10.1.61, Bean Validation |
 | JSON | Jackson BOM 2.21.8 · 문자셋/엄격 입력 계약 |
 | 저장 | MyBatis 3.0.3, MySQL 8.4 |
+| 로컬 색인 | OpenSearch 3.9.0 · analysis-nori 3.9.0 · 명시 관리 CLI |
 | API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
 | CI | GitHub Actions · backend-ci |
@@ -71,8 +73,12 @@ flowchart LR
     API --> Service["서비스 · 트랜잭션"]
     Service --> Mapper["MyBatis"]
     Mapper --> DB[("MySQL")]
-    Service -. "후속 연동" .-> Recommendation["추천 서비스"]
+    Service -->|B0/대체| Recommendation["추천 서비스"]
+    Events["명시 이벤트 파일"] --> CLI["색인 관리 CLI"]
+    CLI --> Search["로컬 OpenSearch · nori"]
 ~~~
+
+로컬 색인 기동·재생과 미완료 범위는 [실행 안내](docs/LOCAL-SEARCH.md)를 따릅니다. 현재 상품 검색은 MySQL을 사용합니다.
 
 <a id="case-studies"></a>
 

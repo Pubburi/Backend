@@ -77,6 +77,14 @@ jobs:
           PUBBURI_SMOKE_MUTATING: '1'
           PUBBURI_SMOKE_CONTAINER_ID: ${{ job.services.mysql.id }}
         run: ./scripts/smoke.sh
+      - name: Build pinned local search image
+        run: |
+          docker compose -f compose.search.yml config --quiet
+          docker build -t pubburi-search:3.9.0-nori-v1 search
+      - name: Verify disposable search replay and restart
+        env:
+          PUBBURI_SEARCH_VALIDATION_RUN: search-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 scripts/smoke_search.py
       - name: Preserve validation reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -85,5 +93,6 @@ jobs:
           path: |
             target/surefire-reports/*.xml
             target/api-smoke-report.json
+            target/search-smoke-report.json
           if-no-files-found: ignore
           retention-days: 7
