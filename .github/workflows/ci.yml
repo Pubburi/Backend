@@ -82,6 +82,12 @@ jobs:
       PUBBURI_PG_IMPORT_CONFLICT_RUN_TOKEN: pubburi-pg-import-conflict-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_IMPORT_TYPED_DB_NAME: pubburi_pg_import_typed_ci
       PUBBURI_PG_IMPORT_TYPED_RUN_TOKEN: pubburi-pg-import-typed-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_JPA_DB_NAME: pubburi_pg_jpa_ci
+      PUBBURI_PG_JPA_RUN_TOKEN: pubburi-pg-jpa-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_JPA_FAILURE_DB_NAME: pubburi_pg_jpa_failure_ci
+      PUBBURI_PG_JPA_FAILURE_RUN_TOKEN: pubburi-pg-jpa-failure-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_JPA_RUNTIME_USER: ci_jpa_runtime
+      PUBBURI_PG_JPA_RUNTIME_PASSWORD: ci_jpa_runtime_only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -116,11 +122,14 @@ jobs:
           ./mvnw --batch-mode --no-transfer-progress -f tools/postgresql-migration/pom.xml verify
           mkdir -p target
           python3 scripts/postgresql_schema.py validate > target/postgresql-schema-report.json
+      - name: Build explicit JPA rehearsal provider
+        run: ./mvnw --batch-mode --no-transfer-progress -f tools/jpa-rehearsal/pom.xml verify
       - name: Verify isolated read-only source snapshot and failure recovery
         env:
           PUBBURI_SOURCE_CI_RUN: source-snapshot-ci-${{ github.run_id }}-${{ github.run_attempt }}
           PUBBURI_PG_CONTAINER_ID: ${{ job.services.postgresql.id }}
           PUBBURI_PG_IMPORT_INTEGRATION: '1'
+          PUBBURI_JPA_CI: '1'
         run: python3 scripts/source_snapshot_ci.py
       - name: Initialize disposable database
         env:
@@ -169,6 +178,7 @@ jobs:
             target/search-smoke-report.json
             target/postgresql-schema-report.json
             target/source-snapshot-report.json
+            target/jpa-rehearsal-report.json
             tools/postgresql-migration/target/surefire-reports/TEST-com.pubburi.migration.PostgresSchemaToolTests.xml
             tools/postgresql-migration/target/surefire-reports/TEST-com.pubburi.migration.PostgresSchemaIntegrationTests.xml
             tools/postgresql-migration/target/surefire-reports/TEST-com.pubburi.migration.IdentityReservationsTests.xml

@@ -5,6 +5,10 @@ MySQL 기준이며 기존 볼륨을 보존한다. PostgreSQL schema installer는
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
 완료로 간주하거나 현재 기동 도구를 반쪽 PostgreSQL profile로 전환하지 않는다.
 
+세션·매장의 실제 JPA 실행은 별도 [명시 rehearsal 제공자](JPA-REHEARSAL.md)를 사용한다.
+copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 아래 기본 스택은 바꾸지 않는다.
+이 제공자는 상품/주문/개인 기능을 등록하지 않으므로 전체 웹 API 주소로 대신 지정하지 않는다.
+
 세 레포를 같은 상위 폴더에 `Backend`, `Frontend`, `Recommendation` 이름으로 둔다.
 Java 17, Node.js 24, Python 3.12, uv 0.13.6, 실행 중인 Docker Compose가 필요하다.
 macOS에서는 `JAVA_HOME`이 비어 있을 때 실행 스크립트가 설치된 JDK 17을 선택한다.
