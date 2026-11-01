@@ -103,7 +103,7 @@ flowchart LR
 
 #### 결과
 
-실제 MySQL에서 기록 저장 실패 시 업무가 함께 롤백되고, 같은 상품의 동시 수정은 서로 다른 버전을 남겼습니다. 기존 80개 상품을 포함한 가상 업무 이벤트 114개는 별도 watch가 모두 전달했습니다. 높은 ID보다 늦게 commit한 낮은 ID도 누락되지 않았고, 엔진쓰기 직후 worker를 종료한 조건은 재기동 후 중복으로 판정해 ACK했습니다. 재시작 후 삭제 표식은 유지됐으며, 전달 도중 물리 색인을 교체한 조건은 ACK를 거절했습니다. [생산 근거](docs/plans/2026-11-01-product-search-outbox.md)와 [relay의 제어 조건·결과·한계](docs/plans/2026-11-01-durable-search-relay.md)를 구분했습니다.
+상품 변경과 전송 예약은 함께 commit·rollback되고, 명시 실행한 relay는 중단 뒤 남은 미전달 작업을 다시 처리합니다. 중복·순서 역전은 상품별 버전과 엔진 정본으로 판정하며, source·target 식별이 달라지면 ACK하지 않습니다. 이 동작을 공개 검색 전환이나 색인 유실의 자동 복구로 확대하지 않습니다. [생산 근거](docs/plans/2026-11-01-product-search-outbox.md)와 [relay의 상세 근거·한계](docs/plans/2026-11-01-durable-search-relay.md)는 별도 기록에 보존했습니다.
 
 #### 대체안/회고
 
