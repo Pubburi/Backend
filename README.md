@@ -64,7 +64,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
 | CI | GitHub Actions · backend-ci |
 
-PostgreSQL의 독립 Flyway 스키마·설치/검증 도구를 제공합니다. 전체 데이터 이관과 JPA API 전환은
+PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 원본 추출 도구](docs/SOURCE-SNAPSHOT.md)를 제공합니다. 전체 데이터 이관과 JPA API 전환은
 [전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따르며, 현재 API 실행 경로와 과거 검증을 보존합니다.
 
 <a id="architecture"></a>

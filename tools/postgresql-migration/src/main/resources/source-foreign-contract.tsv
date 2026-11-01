@@ -1,0 +1,15 @@
+t_comment	product_id	t_product	id	CASCADE
+t_comment	user_id	t_user	id	CASCADE
+t_order	user_id	t_user	id	SET NULL
+t_order_detail	order_id	t_order	o_id	CASCADE
+t_order_detail	product_id	t_product	id	SET NULL
+t_product_feature	product_id	t_product	id	CASCADE
+t_product_feature_tag	product_id	t_product_feature	product_id	CASCADE
+t_product_search_delivery	event_id	t_product_search_outbox	event_id	RESTRICT
+t_product_search_outbox	product_id	t_product_search_version	product_id	RESTRICT
+t_stamp	order_id	t_order	o_id	CASCADE
+t_stamp	user_id	t_user	id	CASCADE
+t_user_favorite	product_id	t_product	id	CASCADE
+t_user_favorite	user_id	t_user	id	CASCADE
+t_user_preference	user_id	t_user	id	CASCADE
+t_user_preference_value	user_id	t_user_preference	user_id	CASCADE
