@@ -18,7 +18,12 @@ python3 scripts/mysql_source_snapshot.py validate-source
 export는 `*_ci` 복사 DB와 명시 CID·pubburi.validation label·Running·정확한 단일 numeric loopback
 3306 publication을 요구한다. Java도 실제 DB명/8.4 버전·SSL cipher와 별도 marker를 검사한다.
 원본 계정은 해당 DB의 SELECT/SHOW VIEW만 허용하고 SHOW GRANTS에서 추가/역할/전역 권한을
-거절한다. 검증용 제어 계정/관리자 자격은 export 자식 프로세스에 전달하지 않는다.
+거절한다. MySQL partial_revokes=OFF에서 DB 권한의 `_`는 backtick 안에서도 wildcard이므로
+SHOW GRANTS의 원래 scope를 먼저 검사해 모든 `_`가 backslash로 escape된 literal DB만 받는다.
+이스케이프를 지운 뒤 이름만 비교하지 않는다. partial_revokes=ON의 별도 의미는 지원한다고
+추정하지 않고 보수적으로 거절한다. [공식 권한 패턴](https://dev.mysql.com/doc/refman/8.4/en/request-access.html)과
+[GRANT 규칙](https://dev.mysql.com/doc/refman/8.4/en/grant.html)을 따른다. 검증용 제어 계정/관리자
+자격은 export 자식 프로세스에 전달하지 않는다.
 
 JDBC는 이 독립 모듈에만 Connector/J **26.10.0**을 고정한다. 현재 API의 의존성은 바꾸지 않는다.
 [공식26.10.0 release](https://dev.mysql.com/doc/relnotes/connector-j/en/news-26-10-0.html)와

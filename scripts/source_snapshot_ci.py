@@ -94,11 +94,19 @@ def run(environ):
             raise ValueError("source_ci_version_rejected")
         # All following DDL targets only this new owned container/database.
         sql("SET time_zone='+00:00'; CREATE DATABASE " + database + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + database + ";\n" + (ROOT / "data.sql").read_text(), timeout=40)
-        sql("CREATE USER '" + reader + "'@'%' IDENTIFIED BY '" + password + "' REQUIRE SSL; GRANT SELECT, SHOW VIEW ON " + database + ".* TO '" + reader + "'@'%'; "
-            "CREATE USER '" + control + "'@'%' IDENTIFIED BY '" + control_password + "' REQUIRE SSL; GRANT SELECT ON " + database + ".* TO '" + control + "'@'%'; "
+        literal_scope = "`" + database.replace("_", "\\_") + "`.*"
+        sql("CREATE USER '" + reader + "'@'%' IDENTIFIED BY '" + password + "' REQUIRE SSL; GRANT SELECT, SHOW VIEW ON " + literal_scope + " TO '" + reader + "'@'%'; "
+            "CREATE USER '" + control + "'@'%' IDENTIFIED BY '" + control_password + "' REQUIRE SSL; GRANT SELECT ON " + literal_scope + " TO '" + control + "'@'%'; "
             "GRANT UPDATE,INSERT,ALTER ON " + database + ".t_product TO '" + control + "'@'%'; GRANT UPDATE ON " + database + ".t_user TO '" + control + "'@'%'; "
             "USE " + database + "; CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); "
             "INSERT INTO pubburi_source_snapshot_guard VALUES ('" + token + "','QUIESCED','" + window + "'); GRANT UPDATE ON " + database + ".pubburi_source_snapshot_guard TO '" + control + "'@'%';")
+        # A colliding database proves '_' is a privilege wildcard, not an identifier quote escape.
+        shadow = database.replace("_", "a")
+        wildcard_reader = "source_wildcard_reader"
+        sql("CREATE DATABASE " + shadow + "; CREATE TABLE " + shadow + ".access_canary(value INT NOT NULL); INSERT INTO " + shadow + ".access_canary VALUES (1); "
+            "CREATE USER '" + wildcard_reader + "'@'%' IDENTIFIED BY '" + password + "' REQUIRE SSL; GRANT SELECT ON `" + database + "`.* TO '" + wildcard_reader + "'@'%';")
+        source["PUBBURI_SOURCE_SHADOW_DB"] = shadow
+        source["PUBBURI_SOURCE_WILDCARD_USER"] = wildcard_reader
         # Test logs may contain private fixture data on failure: private only, never CI artifacts/stdout.
         with (directory / "integration.log").open("w") as log:
             result = subprocess.run([str(ROOT / "mvnw"), "--batch-mode", "--no-transfer-progress", "-f", "tools/postgresql-migration/pom.xml",

@@ -25,11 +25,11 @@ final class SourceSession implements AutoCloseable {
 
     static String guard(Connection c,SourceSettings settings) throws SQLException {
         try(PreparedStatement s=c.prepareStatement("SELECT DATABASE(),@@version,@@server_uuid,@@session.time_zone,"
-                +"EXISTS(SELECT 1 FROM pubburi_source_snapshot_guard WHERE token=? AND state='QUIESCED' AND window_uuid=?)")) {
+                +"EXISTS(SELECT 1 FROM pubburi_source_snapshot_guard WHERE token=? AND state='QUIESCED' AND window_uuid=?),@@partial_revokes")) {
             s.setString(1,settings.token());s.setString(2,settings.window());
             try(ResultSet r=s.executeQuery()) {
                 if(!r.next() || !settings.database().equals(r.getString(1)) || !r.getString(2).startsWith("8.4.")
-                        || !(Set.of("+00:00","UTC").contains(r.getString(4))) || !r.getBoolean(5)) throw new IllegalArgumentException("source_guard_rejected");
+                        || !(Set.of("+00:00","UTC").contains(r.getString(4))) || !r.getBoolean(5) || r.getBoolean(6)) throw new IllegalArgumentException("source_guard_rejected");
                 String server=r.getString(3);if(!UUID.fromString(server).toString().equals(server)) throw new IllegalArgumentException("source_server_identity_invalid");
                 try(Statement ssl=c.createStatement();ResultSet cipher=ssl.executeQuery("SHOW SESSION STATUS LIKE 'Ssl_cipher'")) {
                     if(!cipher.next() || cipher.getString(2).isBlank()) throw new IllegalArgumentException("source_tls_required");
@@ -38,16 +38,21 @@ final class SourceSession implements AutoCloseable {
             }
         }
     }
+    static boolean exactSchemaGrant(String object,String database) {
+        // With partial_revokes=OFF, unescaped '_' and '%' are privilege-pattern wildcards,
+        // even inside identifier quotes. Do not normalize them before checking literal scope.
+        return object.equals("`"+database.replace("_","\\_")+"`.*");
+    }
     static void readOnlyGrants(Connection c,SourceSettings settings) throws SQLException {
         boolean select=false;
         try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SHOW GRANTS")) {
             while(r.next()) {
                 String grant=r.getString(1);int on=grant.indexOf(" ON "),to=grant.indexOf(" TO ");
                 if(!grant.startsWith("GRANT ") || on<0 || to<on || grant.contains("WITH GRANT OPTION")) throw new IllegalArgumentException("source_read_only_grants_required");
-                String privileges=grant.substring(6,on),object=grant.substring(on+4,to).replace("`","").replace("\\_","_");
+                String privileges=grant.substring(6,on),object=grant.substring(on+4,to);
                 if(privileges.equals("USAGE") && object.equals("*.*")) continue;
                 Set<String> values=Set.of(privileges.split(", "));
-                if(!object.equals(settings.database()+".*") || !Set.of("SELECT","SHOW VIEW").containsAll(values) || !values.contains("SELECT"))
+                if(!exactSchemaGrant(object,settings.database()) || !Set.of("SELECT","SHOW VIEW").containsAll(values) || !values.contains("SELECT"))
                     throw new IllegalArgumentException("source_read_only_grants_required");
                 select=true;
             }

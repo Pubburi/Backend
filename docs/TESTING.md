@@ -184,7 +184,9 @@ PUBBURI_SOURCE_CI_RUN=source-snapshot-unique-run python3 scripts/source_snapshot
 VERIFY_IDENTITY·SELECT/SHOW VIEW reader·DB 한정 fixture control을 만들며 기존 API 서비스의
 CA/권한/DB를 바꾸지 않는다. 실제 source 통합에서 RR 중 두 표 DML·원값 복원, 고수위 변경
 거절(no reset), maintenance marker 변경/NUL/schema drift 거절과 실패 receipt·최종 행 보존을
-검사한다. wrapper의 export/두 번 offline validate·같은 출력 재사용 거절도 실제 실행한다.
+검사한다. unescaped DB grant의 underscore wildcard가 허구 shadow DB에 닿는 반례와
+정상 escaped-literal reader의 shadow 접근 거절/자체 source 접근 유지를 구분해 확인한다.
+wrapper의 export/두 번 offline validate·같은 출력 재사용 거절도 실제 실행한다.
 모든 경로에서 label/CID를 재확인한 뒤 자기 컨테이너/private CA·로그·snapshot을 정리한다.
 기존 container/volume 채택이나 source 원본 초기화는 제공하지 않는다.
 

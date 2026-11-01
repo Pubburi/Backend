@@ -82,3 +82,26 @@ ACK를 자동 reset하거나 기존 DB를 초기화하는 복구 명령은 추�
 기존 PG모듈9개(단위5+실PG4)와 MySQL HTTP14·실engine의 required CI는 유지한다. API jar SHA256은
 dcb73c35b4dbf148b05775992408b8d930977e84022fbabc878e68491ed22b81, 불변V1은
 98d9f46a24872139650694eff0cb3b6584ce9652633a8f4bd9f48fab5b3e6078로 확인했다.
+
+## 검수에서 찾은 DB 권한 pattern 경계
+
+첫 구현 e9c8b5c는 SHOW GRANTS의 backslash escape를 제거한 뒤 DB 이름만 비교해 unescaped
+underscore 권한을 정확한 DB-only로 오인했다. MySQL partial_revokes=OFF에서는 backtick으로
+감싸도 underscore가 한 문자 wildcard다. 새 자체 CI 컨테이너의 기술 canary DB에서 해당 허구
+reader가 실제 shadow SELECT에 성공함을 확인했고, 조정자의 별도 copiedsource도 같은 조건을
+확인했다. 원본 사용자 DB 침해나 서비스 사고가 아니라 새 검증 도구의 권한 검수 결함이다.
+
+raw grant scope가 모든 underscore를 escape한 정확한 literal인지 먼저 비교하도록 수정했다.
+CI bootstrap의 reader/control DB단위 SELECT도 literal grant로 좁혔으며 table단위 고정 fixture
+권한은 보존했다. partial_revokes=ON 의미를 일반화하지 않고 명시 guard에서 보수적으로 거절한다.
+단위에서 두 grant 표현을 대조하고 실제 CI에서는 unescaped 허구 reader의 shadow 접근 성공/
+export 거절, 정상 literal reader의 shadow 접근 거절/source export 통과를 각각 확인했다.
+처음 범위를 오인했던 e9c8b5c 이력은 보존하며 별도 한국어 fix 커밋으로 정정한다. 기존345행/
+고수위·작업 창 검증과 별도의 개발 도구 권한 범위 증거이며 성능/운영 침해율로 집계하지 않는다.
+
+권한 보강 후 최종 Python3.12 전체70개, 독립 모듈 단위11개(기본 실DB5개 skip), 새 source CI의
+단위6개/실통합1개와 CLI가 통과했다. 조정자가 좁힌 동일 reader/동일 원본에서도16표345행
+export와 offline 두 번 검증을 다시 통과했다. 새 CI 컨테이너·private 자료 정리 완료, 원본
+복사 컨테이너/CA는 조정자 소유로 보존한다. CLI child에는 명시 reader 환경만 전달하고 offline
+검증에는 DB 자격 자체를 전달하지 않는 회귀도 확인했다. 기존 API Java140/불변 jar 근거는
+동일 코드이므로 유지하며 이번 보강을 위해 재빌드하지 않았다.

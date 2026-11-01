@@ -29,6 +29,11 @@ class SourceContractTests {
         assertThrows(IllegalArgumentException.class,()->SourceContract.validate(c("INSTANT",false,"timestamp","6"),new TextNode("2026-11-01T01:02:03.123456789Z")));
         assertThrows(IllegalArgumentException.class,()->SourceContract.validate(c("TEXT",false,"char","64"),new TextNode("short")));
     }
+    @Test void onlyEscapedLiteralSchemaGrantsAreAccepted() {
+        assertTrue(SourceSession.exactSchemaGrant("`source\\_snapshot\\_ci`.*","source_snapshot_ci"));
+        for(String scope:List.of("`source_snapshot_ci`.*","source_snapshot_ci.*","`source%`.*","*.*","`another\\_ci`.*"))
+            assertFalse(SourceSession.exactSchemaGrant(scope,"source_snapshot_ci"));
+    }
     @Test void settingsRequireExplicitReadOnlyWindowNumericLoopbackAndVerifiedTls() throws Exception {
         Path ca=temporary.resolve("fixture.p12");Files.writeString(ca,"configuration fixture only");
         var env=new HashMap<String,String>();env.put("PUBBURI_SOURCE_URL","jdbc:mysql://127.0.0.1:3307/source_ci");env.put("PUBBURI_SOURCE_DB_NAME","source_ci");

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mysql_source_snapshot import verify_owned_source, private_path
+from mysql_source_snapshot import verify_owned_source, private_path, child_environment
 from source_snapshot_ci import run
 
 
@@ -32,6 +32,13 @@ class MySqlSourceGuardTests(unittest.TestCase):
             with patch("mysql_source_snapshot.subprocess.run") as cmd:
                 with self.assertRaises(ValueError):verify_owned_source(dict(self.settings(),PUBBURI_SOURCE_URL=url))
                 cmd.assert_not_called()
+
+    def test_java_child_receives_only_reader_settings_and_offline_gets_no_credentials(self):
+        env={"JAVA_HOME":"authored-java", "PUBBURI_SOURCE_SNAPSHOT_DIR":"authored-private-dir", "PUBBURI_SOURCE_PASSWORD":"reader-only",
+             "PUBBURI_SOURCE_CONTROL_PASSWORD":"control-only", "PUBBURI_SOURCE_WILDCARD_USER":"broad-reader", "PUBBURI_DB_PASSWORD":"app-only",
+             "PUBBURI_PG_ADMIN_PASSWORD":"admin-only", "MYSQL_PWD":"root-only", "JAVA_TOOL_OPTIONS":"authored-untrusted-option"}
+        self.assertEqual(child_environment(env,True),{k:env[k] for k in ("JAVA_HOME","PUBBURI_SOURCE_SNAPSHOT_DIR","PUBBURI_SOURCE_PASSWORD")})
+        self.assertEqual(child_environment(env,False),{k:env[k] for k in ("JAVA_HOME","PUBBURI_SOURCE_SNAPSHOT_DIR")})
 
     def test_private_artifact_path_cannot_escape_or_overwrite(self):
         with tempfile.TemporaryDirectory() as temp:

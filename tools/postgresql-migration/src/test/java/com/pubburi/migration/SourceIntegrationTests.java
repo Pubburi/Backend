@@ -30,6 +30,18 @@ class SourceIntegrationTests {
             assertEquals(16,source.counts.size());assertThrows(SQLException.class,()->{try(var s=source.connection.createStatement()){s.executeUpdate("UPDATE t_product SET price=price WHERE id=1");}});
             assertEquals(16,SourceArtifact.export(source,accepted).tables());
         }
+        String shadow=env.get("PUBBURI_SOURCE_SHADOW_DB");
+        if(shadow!=null) {
+            assertEquals(settings.database().replace("_","a"),shadow);
+            try(Connection reader=settings.connect();var statement=reader.createStatement()) {
+                assertThrows(SQLException.class,()->statement.executeQuery("SELECT value FROM `"+shadow+"`.access_canary"));
+            }
+            var wildcard=new HashMap<>(env);wildcard.put("PUBBURI_SOURCE_USER",env.get("PUBBURI_SOURCE_WILDCARD_USER"));
+            // Deliberately authored pre-fix pattern grant really reaches the colliding DB.
+            try(Connection broad=SourceSettings.from(wildcard).connect();var statement=broad.createStatement();var rows=statement.executeQuery("SELECT value FROM `"+shadow+"`.access_canary")) {assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
+            // Exporter refuses that role before opening a source snapshot.
+            assertThrows(IllegalArgumentException.class,()->{try(var unused=new SourceSession(SourceSettings.from(wildcard))){}});
+        }
         var baseline=artifact(accepted);assertEquals(16,SourceArtifact.validate(accepted).tables());assertEquals(16,SourceArtifact.validate(accepted).tables());
         assertThrows(IllegalArgumentException.class,()->SourceArtifact.path(accepted,false));
         assertTrue(table(baseline,"t_product").path("rows").size()>0,"copied catalog required");

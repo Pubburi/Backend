@@ -48,6 +48,14 @@ def private_path(environ, existing):
     return requested
 
 
+def child_environment(environ, exporting):
+    allowed = {"PATH", "JAVA_HOME", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "PUBBURI_SOURCE_SNAPSHOT_DIR"}
+    if exporting:
+        allowed.update("PUBBURI_SOURCE_" + name for name in ("URL", "DB_NAME", "USER", "PASSWORD", "TRUSTSTORE", "TRUSTSTORE_PASSWORD",
+                       "RUN_TOKEN", "WINDOW_UUID", "WRITES_STOPPED", "DATETIME_ZONE"))
+    return {key: value for key, value in environ.items() if key in allowed}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("export-source", "validate-source"))
@@ -59,11 +67,8 @@ def main():
         target = ROOT / "tools/postgresql-migration/target"
         if not (target / "classes/com/pubburi/migration/SourceSnapshotTool.class").is_file():
             raise ValueError("source_tool_build_required")
-        child = dict(os.environ)
-        # A reader subprocess never receives administrator/control credentials.
-        for key in list(child):
-            if key.endswith(("ROOT_PASSWORD", "ADMIN_PASSWORD", "ADMIN_USER", "CONTROL_PASSWORD", "CONTROL_USER")) or key in ("MYSQL_PWD", "PGPASSWORD"):
-                child.pop(key, None)
+        # Export gets only its reader settings; offline validation gets no database credentials.
+        child = child_environment(os.environ, args.command == "export-source")
         java = str(Path(child["JAVA_HOME"]) / "bin/java") if child.get("JAVA_HOME") else "java"
         runtime = str(target / "classes") + os.pathsep + str(target / "dependency/*")
         result = subprocess.run([java, "-cp", runtime, "com.pubburi.migration.SourceSnapshotTool", args.command],
