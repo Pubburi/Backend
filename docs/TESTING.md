@@ -10,6 +10,16 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 
 ## HTTP 계약과 DB 검증
 
+기본 추천 연결은 private loopback ephemeral upstream에서 정상 B0 계약·비정상/중복/추가 JSON·
+잘못된 ID/algorithm·비JSON/503/redirect·연결 거부·본문32KiB 초과를 검사한다. 헤더 뒤 끝나지 않는
+chunked body도 전체 완료 deadline으로 종료하고 소유 subscription 취소를 확인한다. 이 소량
+실패 주입은 서비스 지연/처리량 측정이나 전체 부하 검증이 아니다. DAO 경계는 최신 가격 배치
+재조회·삭제 후 current fallback·DB 오류/빈 결과 구분을 확인한다.
+
+실행 OpenAPI는 기본 목록의 items/source 두 필드와 기존 Product7을 확인한다. 필수 HTTP는
+size 기본4/1/12·정수/범위400·현재 상품 필드·ID순을 확인한다. CI는 추천 서버를 기동하지 않고
+FALLBACK도 정상 목록임을 검사한다. 실제 3서버 검증은 [연결 계획](plans/2026-11-01-default-recommendation-integration.md)에 구분한다.
+
 Jackson의 주 회귀는 새 스레드의 실제 default shared pool에 60,000자 문자열을 먼저 읽은 뒤
 기본 name 상한 50,000자·키 140,000자·128자 chunk에서 추가 누적 성장을 거부하는지 확인한다.
 보조 회귀의 상한64/키2,048은 fresh non-recycling 조건을 명시한다. primed 큰 버퍼에서는 같은

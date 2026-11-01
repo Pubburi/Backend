@@ -41,6 +41,9 @@ jobs:
       PUBBURI_DB_ROOT_PASSWORD: ci_root_only
       PUBBURI_DB_URL: jdbc:mysql://127.0.0.1:3306/pubburi_ci
       PUBBURI_SERVER_PORT: '9987'
+      # This job intentionally starts no recommendation server; the web API must still work.
+      PUBBURI_RECOMMENDATION_BASE_URL: http://127.0.0.1:8000
+      PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE: FALLBACK
       PUBBURI_SMOKE_RUN_TOKEN: pubburi-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
