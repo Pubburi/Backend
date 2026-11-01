@@ -21,6 +21,8 @@
         <java.version>17</java.version>
         <!-- Keep embedded core, EL and WebSocket on one patched Tomcat 10.1 line. -->
         <tomcat.version>10.1.61</tomcat.version>
+        <!-- Keep JSON modules aligned while applying the Reader field-name limit fix. -->
+        <jackson-bom.version>2.21.8</jackson-bom.version>
     </properties>
 
     <dependencies>

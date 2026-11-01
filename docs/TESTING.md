@@ -10,6 +10,14 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 
 ## HTTP 계약과 DB 검증
 
+Jackson의 주 회귀는 새 스레드의 실제 default shared pool에 60,000자 문자열을 먼저 읽은 뒤
+기본 name 상한 50,000자·키 140,000자·128자 chunk에서 추가 누적 성장을 거부하는지 확인한다.
+보조 회귀의 상한64/키2,048은 fresh non-recycling 조건을 명시한다. primed 큰 버퍼에서는 같은
+작은 키를 전부 소비할 수 있으므로 모든 경로의 즉시 중단으로 해석하지 않는다.
+소비한 문자 수는 고정 파서 경계이며 전체 요청 메모리·DoS/지연 결과가 아니다. 별도 10B/13B
+문서 길이 대조는 이전에도 통과한 경계다. MockMvc/필수 폐기 HTTP는 UTF-8·ISO-8859-1·UTF-16의
+정상 DTO/로그인, 60,000자 필드명 오류의 고정 400·원문 비노출·기존 세션 불변을 확인한다.
+
 Maven의 MultipartParserSecurityTests는 실제 embedded Tomcat 라이브러리로 정상 part header와
 2,111B header의 512B 기본 상한 거부를 검사한다. 포트·DB·대량 메모리 부하 없이 파싱 경계만
 검증하며 실제 HTTP의 전후 오류율이나 전체 DoS 방어 완료로 표현하지 않는다.

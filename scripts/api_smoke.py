@@ -116,6 +116,42 @@ def multipart_security_contract(environ):
             "Unsupported Content-Type" if status == 415 else "Multipart request is too large")
 
 
+def json_charset_contract(environ):
+    """Small owned JSON fixtures; charset compatibility is not a DoS benchmark."""
+    require_disposable_database(environ)
+    client = ApiClient(environ.get("PUBBURI_SERVER_PORT", "9987"))
+    user_id, password = "ci_json_" + uuid.uuid4().hex, uuid.uuid4().hex
+    client.request("POST", "/users", 201, {"id": user_id, "name": "CI JSON fixture", "pass": password})
+    login = {"id": user_id, "pass": password}
+
+    def send(payload, charset, expected_status):
+        request = urllib.request.Request(client.base + "/auth/login", method="POST",
+            data=json.dumps(payload).encode(charset), headers={
+                "Content-Type": "application/json; charset=" + charset,
+                "Accept": "application/json",
+            })
+        try:
+            response = client.opener.open(request, timeout=15)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            assert response.status == expected_status, "Unexpected JSON charset response"
+            assert response.headers.get_content_type() == "application/json"
+            envelope = json.load(response)
+        assert set(envelope) == {"data", "message", "error"}
+        return envelope
+
+    for charset in ("utf-8", "iso-8859-1", "utf-16"):
+        normal = send(login, charset, 200)
+        assert normal["error"] is None and normal["data"]["id"] == user_id
+        assert set(normal["data"]) == {"id", "name", "stamps", "role", "admin"}
+        profile = client.request("GET", "/auth/me", 200)["data"]
+        invalid = send(dict(login, **{"private-source-" + "a" * 60000: None}), charset, 400)
+        assert invalid["data"] is None
+        assert invalid["error"] == {"code": "VALIDATION_FAILED", "message": "Malformed request body", "fields": {}}
+        assert client.request("GET", "/auth/me", 200)["data"] == profile
+
+
 def verify_feature_openapi(document):
     """Check the real generated document, independent from the business API responses."""
     def resolve(schema):
@@ -766,6 +802,8 @@ def main():
         if mutating:
             multipart_security_contract(os.environ)
             report["completed"].append("bounded multipart headers, safe client errors and unchanged media rejection")
+            json_charset_contract(os.environ)
+            report["completed"].append("JSON charset compatibility, field-name constraints and unchanged session state")
             mutating_contract(client, product, os.environ)
             report["completed"].append("session, authorization, order price snapshots and rollback")
             history_preservation_contract(os.environ)
