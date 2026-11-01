@@ -10,6 +10,11 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 
 ## 현재 선정
 
+PostgreSQL schema/guarded installer·identity 예약은 [DB01/DB02 증가분](plans/2026-11-02-postgresql-schema-foundation.md)으로
+실제 DB에서 확인했다. 서비스 JPA/전체 이관이 아직 연결되지 않았고 기존 네 사례보다 강한 고객
+업무 문제 해결 근거로 보지 않아 사례·순서를 보존한다. 과거 MySQL 근거를 PostgreSQL 성과로
+바꾸지 않으며 schema 회귀의 수치/목록은 README에 넣지 않는다.
+
 | ID | README 사례 | 채용 관점의 선정 이유 | 근거 범위 | 실측 성능 |
 |---|---|---|---|---|
 | BE-CS05 | 업무 원자 생산과 검색 릴레이의 상태 경계 | 단일 업무TX·상품별 버전·삭제 수명과 외부 IO 분리·lease/token ACK·source/target 수명·commit 순서의 차이를 설명한다. | 실제 MySQL 원값 보존/실패·동시성, API→CLI와 relay→OpenSearch의 별도 검증 | 신규 설계 정확성이며 지연 성능 미측정 |

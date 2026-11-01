@@ -57,11 +57,15 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 언어·런타임 | Java 17 |
 | 서버 | Spring Boot 3.5.0, Tomcat 10.1.61, Bean Validation |
 | JSON | Jackson BOM 2.21.8 · 문자셋/엄격 입력 계약 |
-| 저장 | MyBatis 3.0.3, MySQL 8.4 |
+| 현재 API 저장 | MyBatis 3.0.3, MySQL 8.4 · 이관 전 기준 |
+| 확정 저장 전환 | PostgreSQL 18.6 · Spring Data JPA(Hibernate) · Flyway Community |
 | 로컬 색인 | OpenSearch 3.9.0 · analysis-nori 3.9.0 · 명시 관리 CLI |
 | API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
 | CI | GitHub Actions · backend-ci |
+
+PostgreSQL의 독립 Flyway 스키마·설치/검증 도구를 제공합니다. 전체 데이터 이관과 JPA API 전환은
+[전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따르며, 현재 API 실행 경로와 과거 검증을 보존합니다.
 
 <a id="architecture"></a>
 

@@ -10,7 +10,7 @@ AWS 연결 전 로컬 개발, 모바일 별도 담당, 챗봇·실제 결제·�
 | 역할 | 책임 |
 |---|---|
 | 조정자 | 최신 기획·Git/PR/CI·활성 작업 확인, API/ERD 계약과 선행 조건 조정, 저장소 소유권·위임 기록, 통합 검증·머지 게이트·Notion·최종 인계 |
-| Backend 에이전트 | Java 17·Spring·MyBatis·MySQL, 데이터 정합성·트랜잭션·인증/권한·공통 API·쿼리·동시성 |
+| Backend 에이전트 | Java17·Spring·확정 PostgreSQL/JPA/Flyway 전환, 이관 전 MySQL 기준 보존·정합성·트랜잭션·인증/권한·공통 API·쿼리·동시성 |
 | Frontend 에이전트 | Vue 유지와 승인된 React 전환, 라우팅·상태·세션/API 연동·실제 브라우저·접근성·자산·렌더링 |
 | Recommendation 에이전트 | Python 3.12·FastAPI·데이터 출처/누락·특성·추천/이유·콜드스타트·fallback·학습/평가·재현성 |
 

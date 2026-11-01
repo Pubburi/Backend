@@ -3,6 +3,13 @@
 `./scripts/check.sh`는 저장소 비밀정보/생성물 검사, 로컬 도구/안전 게이트 테스트와 Java 17
 Maven 단위 테스트·패키징을 실행한다. DB가 없는 개발 환경에서도 이 경로를 사용할 수 있다.
 
+확정 목표는 [PostgreSQL/JPA](POSTGRESQL-MIGRATION.md)다. 독립 Flyway 도구의 Java17 단위/패키징도
+기본 검사에 포함하며, 실제 PostgreSQL18.6 TLS·비superuser의 새 설치/no-op·marker/CID·checksum·
+실패DDL rollback/복구·기존ID/타입/불변json·sequence 예약은 별도 폐기3DB로 실행한다.
+PUBBURI_PG_INTEGRATION=1이 실제 통합 조건이며 CI에서 빠지면 성공으로 간주하지 않는다.
+이 결과는 아직 없는 전체 JPA API·이관·Psycopg relay/사용자 흐름의 통과가 아니다. 기존 MySQL
+아래 회귀는 baseline으로 계속 유지하고 전체 cutover 게이트에서 PostgreSQL로 대체한다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.

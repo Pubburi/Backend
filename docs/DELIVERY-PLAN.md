@@ -3,7 +3,7 @@
 이 문서는 Backend의 업무 API·DB·인증·검색 연동을 다룬다. 전체 기능·담당·진척은 승인된 공통 기획,
 각 영역의 코드·설계·테스트·상세 계획·문서·PR은 소유 레포에서 관리한다.
 
-- Backend: 회원/권한·세션, 상품/주문/후기/취향/찜/장바구니/기록/알림 API, MySQL, 검색 색인 동기화·API·대체 응답.
+- Backend: 회원/권한·세션, 상품/주문/후기/취향/찜/장바구니/기록/알림 API, PostgreSQL/JPA 전환·업무 DB, 검색 색인 동기화·API·대체 응답.
 - Frontend: 화면·라우팅·상태·API 소비·브라우저·정적 자산. [Frontend 지침](https://github.com/Pubburi/Frontend/blob/main/AGENTS.md)이 해당 영역 기준이다.
 - Recommendation: 원천 조사/수집·정제·검수 카탈로그·특성·모델 학습·점수/이유·평가. [데이터·모델 계획](https://github.com/Pubburi/Recommendation/blob/main/docs/DATA-AND-MODEL-PLAN.md)이 정본이다.
 
@@ -28,11 +28,18 @@ AWS는 후속 사용자 지시 전까지 연결하지 않고 [로컬 개발](LOC
 | 01-11–01-24 | DB 변경·롤백/동시성·장애/통합 검증·백엔드 병목 실측 개선 |
 | 01-25–02-05 | 백엔드 인수·결함 수정·실행/API 문서·인계 |
 
+2026-11-01 최신 사용자 확정 목표는 PostgreSQL18.6·Spring Data JPA(Hibernate)·Flyway Community,
+Python relay는 Psycopg3다. [DB01–DB06 계약](POSTGRESQL-MIGRATION.md)을 우선 적용하며
+11월22일까지 전환과 보존 재인수를 목표로 한다. 기존 MySQL/MyBatis는 이관 전 기준/복사 검증용으로
+보존하고 기술 선정 대기로 두지 않는다. 현재 독립 PostgreSQL schema 도구와 실제 DB 검증은
+DB02 일부이며 현재 API/JPA·전체 데이터 복사·relay·cutover 완료와 구분한다.
+
 ## 검색·추천 연동
 
 [검색 계획](SEARCH-PLAN.md)의 Backend 담당 S01–S05를 구현한다. OpenSearch는 로컬 Docker의
-파생 색인이며 MySQL이 업무 데이터 원본이다. 변경/삭제·재처리·재색인·필수 조건·페이지/정렬·대체 검색을 검증한다.
-기존 Java 17·Spring·MyBatis·/api·ApiResponse·세션과 Recommendation GET /health를 보존한다.
+파생 색인이며 목표 업무 정본은 PostgreSQL이다. 현재 MySQL 정본은 안전한 이관 전까지 보존한다.
+변경/삭제·재처리·재색인·필수 조건·페이지/정렬·대체 검색을 PostgreSQL에서 별도로 검증한다.
+Java17·Spring·/api·ApiResponse·세션과 추천 계약을 보존하며 MyBatis/MySQL 최종 runtime은 DB03에서 제거한다.
 Backend는 추천 요청의 인증·업무 맥락·최신 상품 유효성·시간 제한·장애 대체를 담당한다.
 추천 계산·데이터/모델·학습·평가는 Recommendation 정본을 참조한다.
 자유 문장 의미/벡터 검색·Jira·그래프는 별도 검토이며 자동으로 범위를 늘리지 않는다.
