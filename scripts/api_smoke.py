@@ -193,6 +193,7 @@ def documentation_contract(port):
     verify_feature_openapi(document)
     verify_preference_openapi(document)
     verify_favorite_openapi(document)
+    verify_default_recommendation_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
         assert "swagger-ui" in response.read().decode("utf-8").lower(), "Swagger UI entry is absent"
@@ -255,6 +256,42 @@ def verify_favorite_openapi(document):
         assert "requestBody" not in operation, "Membership operations do not consume a body"
         envelope = resolve(operation["responses"]["200"]["content"]["application/json"]["schema"])
         assert set(resolve(envelope["properties"]["data"])["properties"]) == {"productId", "favorited"}
+
+
+def verify_default_recommendation_openapi(document):
+    def resolve(schema):
+        while "$ref" in schema:
+            target = document
+            for part in schema["$ref"].removeprefix("#/").split("/"):
+                target = target[part]
+            schema = target
+        return schema
+    operation = document["paths"]["/api/recommendations/default"]["get"]
+    assert "requestBody" not in operation
+    envelope = resolve(operation["responses"]["200"]["content"]["application/json"]["schema"])
+    data = resolve(envelope["properties"]["data"])
+    assert set(data["properties"]) == {"items", "source"}
+    assert set(resolve(data["properties"]["source"])["enum"]) == {"BASELINE", "FALLBACK"}
+    product = resolve(data["properties"]["items"]["items"])
+    assert set(product["properties"]) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
+
+
+def default_recommendation_contract(client, expected_source=None):
+    total = client.request("GET", "/products?size=1", 200)["data"]["total"]
+    for query, size in (("", 4), ("?size=1", 1), ("?size=12", 12)):
+        data = client.request("GET", "/recommendations/default" + query, 200)["data"]
+        assert set(data) == {"items", "source"}
+        assert data["source"] in {"BASELINE", "FALLBACK"}
+        if expected_source is not None:
+            assert data["source"] == expected_source, "Unexpected configured recommendation source"
+        assert len(data["items"]) == min(total, size)
+        ids = [item["id"] for item in data["items"]]
+        assert ids == sorted(set(ids)), "Default selection must remain unique and ID-ordered"
+        for item in data["items"]:
+            assert set(item) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
+            assert client.request("GET", f"/products/{item['id']}", 200)["data"] == item
+    for size in ("0", "13", "abc", "1.5", "2147483648"):
+        client.request("GET", "/recommendations/default?size=" + size, 400, error_code="BAD_REQUEST")
 
 
 def change_ci_product(environ, product_id, price, name):
@@ -799,6 +836,8 @@ def main():
         report["completed"].append("read-only HTTP envelope, pagination, auth and validation")
         documentation_contract(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         report["completed"].append("runtime OpenAPI feature paths/schemas and Swagger UI")
+        default_recommendation_contract(client, os.environ.get("PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE"))
+        report["completed"].append("public default recommendation envelope, current products and fallback availability")
         if mutating:
             multipart_security_contract(os.environ)
             report["completed"].append("bounded multipart headers, safe client errors and unchanged media rejection")

@@ -15,6 +15,9 @@ public interface ProductDao {
 	 */
 	List<Product> selectAll();
 
+	List<Product> selectDefaultCandidates(@Param("limit") int limit);
+	List<Product> selectCurrentByIds(@Param("ids") List<Integer> ids);
+
 	List<Product> selectFiltered(@Param("type") String type, @Param("q") String q, @Param("sort") String sort,
 			@Param("limit") int limit, @Param("offset") int offset);
 

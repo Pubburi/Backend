@@ -1,0 +1,207 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pubburi public default recommendations",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:9987"
+    }
+  ],
+  "paths": {
+    "/api/recommendations/default": {
+      "get": {
+        "operationId": "getPublicDefaultRecommendations",
+        "description": "Non-personal first1000-ID candidate scope. Current DB values after upstream; no sales/stock guarantee. Missing/slow/invalid upstream uses FALLBACK; DB failures remain errors.",
+        "parameters": [
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12,
+              "default": 4
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current product defaults, including an honest empty catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BAD_REQUEST: size must be an integer1..12.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "NOT_ACCEPTABLE JSON error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "DB/internal failure; never an empty successful catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Product": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "price",
+          "img",
+          "abv",
+          "orderCount"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "img": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "abv": {
+            "type": "number",
+            "format": "float"
+          },
+          "orderCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DefaultRecommendation": {
+        "type": "object",
+        "required": [
+          "items",
+          "source"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "BASELINE",
+              "FALLBACK"
+            ]
+          }
+        }
+      },
+      "Envelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DefaultRecommendation"
+          },
+          "message": {
+            "type": "string"
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "properties": {
+          "data": {
+            "type": "null"
+          },
+          "message": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "fields"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

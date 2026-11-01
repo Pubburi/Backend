@@ -53,6 +53,10 @@ NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약]
 
 ## Products
 
+- `GET /api/recommendations/default?size=4`: 공개 비개인 기본 주류 목록, 기존 상품 배열과 BASELINE/FALLBACK
+  ([정본](DEFAULT-RECOMMENDATIONS.md)·[OpenAPI](openapi/default-recommendations.json)). 추천 서버가 없어도
+  현재 DB ID순 대체를 제공하고 DB 실패를 빈 성공으로 바꾸지 않는다.
+
 - `GET /api/products?page=1&size=12&type=&q=&sort=popular`: 상품 목록, 검색, 카테고리, 정렬
 - `GET /api/products/popular`: 인기 상품
 - `GET /api/products/{id}`: 상품 상세

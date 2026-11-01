@@ -136,6 +136,21 @@ class RuntimeDocumentationTests {
 		}
 	}
 
+	@Test
+	void defaultRecommendationDocumentIsPublicAndKeepsOnlyProductsAndSource() throws Exception {
+		JsonNode document = mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString());
+		JsonNode operation = document.path("paths").path("/api/recommendations/default").path("get");
+		assertThat(operation.has("requestBody")).isFalse();
+		JsonNode envelope = resolve(document, operation.path("responses").path("200").path("content")
+				.path("application/json").path("schema"));
+		JsonNode data = resolve(document, envelope.path("properties").path("data"));
+		assertThat(fieldNames(data.path("properties"))).isEqualTo(Set.of("items", "source"));
+		JsonNode product = resolve(document, data.path("properties").path("items").path("items"));
+		assertThat(fieldNames(product.path("properties"))).isEqualTo(Set.of("id", "name", "type", "price", "img", "abv", "orderCount"));
+		assertThat(data.path("properties").path("source").path("enum").toString()).contains("BASELINE", "FALLBACK");
+	}
+
 	private Set<String> fieldNames(JsonNode object) {
 		Set<String> names = new HashSet<>();
 		object.fieldNames().forEachRemaining(names::add);
