@@ -6,18 +6,21 @@ Java 17·Boot/Framework·crypto·MyBatis/SQL·springdoc/라우팅과 기존 입�
 
 ## 재현·선택
 
-공식 GHSA-649p-m576-vr99의 문자 입력 경로를 소량으로 재현했다. maxNameLength=64인 factory,
-2,048자 필드명·전체 2,054자 JSON, 매 read 최대 128자를 반환하는 Reader를 같은 조건으로 사용했다.
-이것은 실제 기본 50,000자 상한을 바꾼 테스트용 축소 fixture이고 제품 기본값은 유지한다.
+공식 GHSA-649p-m576-vr99의 문자 입력 경로를 소량으로 재현했다. 모든 Reader는 매 read 최대
+128자를 반환한다. 초기 maxNameLength64/키2,048 결과는 fresh 버퍼에서 얻은 축소 fixture다.
+이후 CI에서 발견한 재사용 조건을 추가해 기본 50,000자 상한의 주 회귀를 검증했다. 제품 기본값은 유지한다.
 
 | 조건 | Jackson 2.19.0 | BOM 2.21.8 |
 |---|---|---|
-| 긴 필드명·상한64 | StreamConstraintsException 전 2,054자 소비 | 같은 종류 예외 전 256자 소비 |
+| fresh 버퍼·상한64·키2,048 | 예외 전 2,054자 소비 | 예외 전 256자 소비 |
+| 기본 shared pool primed·상한64·키2,048 | 예외 전 2,054자 소비 | 예외 전 2,054자 소비 |
+| 같은 primed pool·기본상한50,000·키140,000 | 예외 전 140,006자 소비 | 예외 전 76,032자 소비 |
 | 문서 길이10B/정상10B | 통과 | 통과 |
 | 문서 길이10B/초과13B | 이미 거부 | 계속 거부 |
 
 기준의 긴 이름은 최종적으로도 거부됐다. 결함은 필드명을 끝까지 모은 뒤 검사하는 시점이며,
-새 버전은 같은 조각 입력을 중간에 거절한다. 소량 fixture의 소비 수를 전 HTTP 요청의 수신
+새 버전은 segment가 다시 성장하기 전에 제한을 검사한다. 큰 기존 버퍼에 들어가는 작은 키까지
+제한값에서 즉시 중단한다고 보장하지 않는다. 소량 fixture의 소비 수를 전 HTTP 요청의 수신
 바이트·힙 메모리·처리 시간·전체 DoS 차단률로 바꾸지 않는다. 문서 길이 공지의 작은 blocking
 샘플은 기존에도 차단됐으므로 그 우회를 고쳤다는 성과로 집계하지 않는다.
 패치 후 별도 짧은 정상 Reader도 통과했다. 그 축소 Reader의 정상 대조는 패치 후에 추가했으며
@@ -34,15 +37,37 @@ Jackson BOM 속성 하나로 바뀐 실제 runtime/jar는 core/databind·jdk8/js
 2.21.8 여섯 개와 annotations 2.21이다. 그 밖의 runtime 버전은 비교 결과 같았다. 단일 모듈만
 강제로 올리거나 annotations까지 존재하지 않는 동일 patch 번호로 맞추지 않았다.
 
-Java 17 Maven verify 100개·패키징과 Python 도구/안전 게이트 28개·저장소/문법/diff 검사를
+원인 보강 뒤 Java 17 Maven verify 101개·패키징과 Python 도구/안전 게이트 28개·저장소/문법/diff 검사를
 통과했다. 작은 Reader의 소비 숫자와 정상/거부는 실제 라이브러리 회귀이고, MockMvc는 세 charset의
 정상 Join DTO와 60,000자 필드명의 400·원문 비노출·컨트롤러 호출0을 확인했다. 실제 업무 DB 쓰기
 검증이나 운영 메모리 성능으로 표현하지 않는다. 전체 MVC 문서·Swagger와 기존 strict DTO도 유지했다.
 
 재현 명령은 `./mvnw --batch-mode --no-transfer-progress -Dtest=JsonNameConstraintTests test`다.
-기준 POM에서 긴 이름 조기 거부 회귀가 실제 소비2,054자로 실패했고 같은 조건의 패치 후 소비는
-256자다. `JsonDocumentConstraintTests`는 기존에도 통과한 문서 경계를 유지하는 대조다.
+최종 테스트를 `-Djackson-bom.version=2.19.0`로 실행하면 fresh 작은 키/primed 기본 상한의 두
+회귀가 각각 소비2,054/140,006으로 실패한다. 2.21.8에서는 해당 두 조건이256/76,032로 통과한다.
+작은 primed 키의2054 전체 소비도 명시적으로 확인해 기존 버퍼 재사용의 의미를 숨기지 않는다.
+`JsonDocumentConstraintTests`는 기존에도 통과한 문서 경계를 유지하는 대조다.
 runtime tree는 고정 maven-dependency-plugin:3.8.1 tree -Dscope=runtime과 BOOT-INF/lib를 함께 확인했다.
+
+## 최초 CI 실패와 원인 확인
+
+[최초 PR CI](https://github.com/Pubburi/Backend/actions/runs/41262574331)는 100개 중 작은 Reader
+회귀 하나가 소비2,054자로 실패했다. 승인/무조건 재시도로 처리하지 않았다. CI XML은 Temurin
+17.0.21과 의도한 Jackson core2.21.8/annotations2.21 등 일곱 모듈을 확인했다. 로컬도 같은
+Temurin17.0.21이며 공식 Maven Central의 새 core jar와 기존 캐시 SHA-256은 모두
+`604ef7765013daf5cde192e40bc4c8412c4ca93f4aaf7bf8e9a62fad1e1026bb`였다. 공식 SHA-1도 일치했다.
+CI core jar 자체의 checksum을 기존 테스트 아티팩트가 제공한 것은 아니므로 버전 경로 확인과
+로컬/공식 artifact 검증을 구분한다.
+
+공식 소스는 누적 segment가 가득 찰 때 validateNameLength를 호출한다. 기본 pool에서 60,000자
+정상 문자열을 먼저 읽으면 큰 TextBuffer가 돌아오고, 뒤의 작은 키는 추가 성장 없이 전부 들어간다.
+이를 공식 fresh jar·기본 shared pool에서 직접 재현해 CI 결과와 일치시켰다. 사설65,536자 재사용
+buffer 대조도 같은 특성을 보였다. 손상된 캐시나 누락된 POM 적용으로 결론 내리지 않았다.
+
+검사를 새 buffer로만 격리해 실패를 숨기는 대신 주 회귀는 새 스레드 안에서 실제 기본 ThreadLocal
+pool을 의도적으로 prime한다. 같은 수명 안에서 작은 키의 전체 소비와 기본 상한/더 큰 키의 추가
+성장 차단을 둘 다 확인한다. 새 스레드는 외부 테스트의 이전 buffer 크기를 제거하기 위한 수명
+경계이고, 그 안의 실제 재사용은 그대로 검증한다. 서비스의 pool/설정·오류 정책은 바꾸지 않았다.
 
 최종 불변 jar SHA-256: `2b868211d132971d77b947622bfb1aff0d24d92357a91151fa96e3497b499410`.
 조정자가 같은 jar/전용 MySQL의 실제 HTTP smoke 열 범주를 통과했다. 새 charset 경로와 기존

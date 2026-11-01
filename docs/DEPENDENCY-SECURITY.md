@@ -65,9 +65,15 @@ proxy/HTTP2/업로드·정적 캐시/인증 방식이 바뀌면 다시 검토한
 
 현재 2.19.0은 공식 [GHSA-649p-m576-vr99](https://github.com/FasterXML/jackson-core/security/advisories/GHSA-649p-m576-vr99)의
 영향 범위다. 문자 입력 경로가 긴 필드명을 모두 모은 뒤 상한을 검사하는 문제를 실제 소량
-Reader로 재현했다. name 상한 64자·필드명 2,048자·128자 chunk의 같은 입력에서 거부 전 소비는
-2,054→256자였다. 두 버전 모두 최종 크기 예외지만 제한을 적용하는 시점이 다르다. 이 수치는
-그 고정 Reader의 소비량이며 전체 HTTP 수신/메모리·DoS·응답 시간 개선으로 환산하지 않는다.
+Reader로 재현했다. **fresh 버퍼에 한정한** name 상한 64자·필드명 2,048자·128자 chunk의 거부 전
+소비는 2,054→256자였다. 그러나 기본 shared pool에 큰 버퍼가 남아 있으면 같은 작은 키는 패치
+버전에서도 2,054자를 전부 읽을 수 있다. 패치는 기존 버퍼 안의 모든 입력을 정확히 제한값에서
+멈추는 방식이 아니라, 누적 segment가 다시 커지기 전에 제한을 검사한다.
+
+실제 기본 pool에서 60,000자 문자열을 먼저 읽어 재사용을 준비한 뒤 **기본 name 상한 50,000자·
+키 140,000자**를 같은 chunk로 비교했다. 기준은 140,006자, 패치는 76,032자를 소비한 뒤 거부했다.
+CI 실패를 이 primed 조건으로 재현해 주 회귀를 보강했고 fresh 작은 입력은 보조 검사로 명시했다.
+모든 숫자는 해당 Reader/재사용 조건의 소비량이며 전 HTTP 수신/메모리·DoS·응답 시간 개선으로 환산하지 않는다.
 
 최초 수정은 2.21.6이고, [공식 2.21.8 릴리스](https://github.com/FasterXML/jackson/wiki/Jackson-Release-2.21.8)와
 [BOM](https://github.com/FasterXML/jackson-bom/releases/tag/jackson-bom-2.21.8)을 확인해 같은 2.x LTS
