@@ -20,6 +20,11 @@ pinned base/nori를 준비한다. 기존 서버·DB/볼륨을 채택하지 않�
 실제 HTTPResponse fixture는 Content-Length보다 짧은 완결 JSON EOF를 거절하고 chunked/본문
 상한·전체 deadline을 유지한다. 검증 본문 성공 뒤의 로그 IO 실패도 소유 자원 정리를 막지 않으며
 비소유/삭제 실패 보호·실패 상태와 partial receipt를 별도 단위 경계로 확인한다.
+추가 실제 header trickle fixture는 idle timeout보다 짧은0.08초 간격의 헤더도 절대 기한0.15초에
+중단하는지 확인한다. nonblocking connect 대기·읽지 않는 peer에 막힌 요청 body·Connection: close
+본문과 기한이 다른 두 동시 요청도 검사한다. 반환 시 요청별 watchdog 종료·소유 socket/취소용
+descriptor 해제를 확인하며 기한 실패는 partial receipt를 complete로 바꾸지 않는다. 짧은 제어
+실험의 경과값을 실제 서비스 응답 속도/운영 오류율로 표현하지 않는다.
 
 상품 page offset은 음수/0/양수 래핑과 첫 지원 범위 초과를 SQL 전에400으로 거절한다.
 MockMvc와 실제 상품 서비스/fake DAO는 미지원 조건의 DAO 호출0·정상/최대 근처·0/음수/

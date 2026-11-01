@@ -2,6 +2,7 @@
 """Explicit local index administration; not a MySQL outbox or public search path."""
 
 import argparse
+import errno
 import hashlib
 import http.client
 import ipaddress
@@ -9,7 +10,10 @@ import json
 import math
 from pathlib import Path
 import re
+import select
+import socket
 import sys
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -145,6 +149,73 @@ def checked_stored(raw):
     return checked
 
 
+class _DeadlineConnection(http.client.HTTPConnection):
+    """One request owns its sockets and a joined, per-connection IO interrupter."""
+
+    def __init__(self, host, port, budget):
+        super().__init__(host, port, timeout=min(2, budget))
+        self.end = time.monotonic() + budget
+        self.expired, self.stopped = threading.Event(), threading.Event()
+        self.lock, self.interrupt_socket = threading.Lock(), None
+        self.watchdog = threading.Thread(target=self._expire, name="pubburi-search-deadline", daemon=True)
+        self.watchdog.start()
+
+    def remaining(self):
+        remaining = self.end - time.monotonic()
+        if self.expired.is_set() or remaining <= 0:
+            raise SearchError("engine_request_deadline")
+        return remaining
+
+    def _expire(self):
+        if self.stopped.wait(max(0, self.end - time.monotonic())):
+            return
+        with self.lock:
+            if self.stopped.is_set():
+                return
+            self.expired.set()
+            if self.interrupt_socket is not None:
+                try:
+                    self.interrupt_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass  # A failed/unconnected socket is still closed by finish().
+
+    def connect(self):
+        # Numeric loopback only: no unbounded resolver. Nonblocking connect cannot start
+        # a fresh blocking timeout in the race between expiry and socket registration.
+        transport = socket.socket(socket.AF_INET6 if ":" in self.host else socket.AF_INET, socket.SOCK_STREAM)
+        with self.lock:
+            self.sock = transport
+            # HTTPConnection closes its socket after headers for Connection: close.
+            # A duplicate retains shutdown access to the same connection during body IO.
+            self.interrupt_socket = transport.dup()
+        transport.setblocking(False)
+        self.remaining()
+        error = transport.connect_ex((self.host, self.port))
+        if error not in (0, errno.EISCONN):
+            if error not in (errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY, errno.EINTR):
+                raise OSError(error, "connect_failed")
+            _, writable, exceptional = select.select([], [transport], [transport], min(2, self.remaining()))
+            self.remaining()
+            if not writable and not exceptional:
+                raise TimeoutError("connect_timeout")
+            error = transport.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            if error:
+                raise OSError(error, "connect_failed")
+        transport.settimeout(self.remaining())
+
+    def finish(self):
+        # No background request future survives return. Stop/join before closing the
+        # cancellation descriptor, so the watchdog never targets a reused descriptor.
+        self.stopped.set()
+        self.watchdog.join()
+        try:
+            self.close()
+        finally:
+            if self.interrupt_socket is not None:
+                self.interrupt_socket.close()
+                self.interrupt_socket = None
+
+
 class Http:
     def __init__(self, endpoint, deadline=5.0):
         try:
@@ -159,13 +230,12 @@ class Http:
         self.host, self.port, self.deadline = url.hostname, url.port, deadline
 
     def request(self, method, path, body=None):
-        connection = http.client.HTTPConnection(self.host, self.port, timeout=min(2, self.deadline))
-        end = time.monotonic() + self.deadline
+        connection = _DeadlineConnection(self.host, self.port, self.deadline)
         try:
             payload = None if body is None else json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
             connection.request(method, path, payload, {"Content-Type": "application/json", "Accept": "application/json"})
             transport = connection.sock
-            transport.settimeout(max(0.001, end - time.monotonic()))
+            transport.settimeout(connection.remaining())
             with connection.getresponse() as response:
                 if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
                     raise SearchError("engine_response_not_json")
@@ -175,27 +245,26 @@ class Http:
                 declared_length = None if length is None else int(length)
                 content = bytearray()
                 while True:
-                    remaining = end - time.monotonic()
-                    if remaining <= 0:
-                        raise SearchError("engine_request_deadline")
-                    transport.settimeout(remaining)
+                    transport.settimeout(connection.remaining())
                     chunk = response.read1(min(16384, MAX_RESPONSE_BYTES + 1 - len(content)))
-                    if time.monotonic() > end:
-                        raise SearchError("engine_request_deadline")
+                    connection.remaining()
                     content.extend(chunk)
                     if len(content) > MAX_RESPONSE_BYTES:
                         raise SearchError("engine_response_exceeds_2_mib")
-                    if not chunk:
+                    if not chunk or response.isclosed():
                         break
                 if declared_length is not None and len(content) != declared_length:
                     raise SearchError("engine_response_length_mismatch")
-                return response.status, decode(content)
-        except SearchError:
-            raise
+                result = response.status, decode(content)
+                connection.remaining()
+                return result
         except (OSError, http.client.HTTPException, ValueError) as error:
+            connection.remaining()  # Expired IO gets one fixed diagnostic, including EOF on shutdown.
+            if isinstance(error, SearchError):
+                raise
             raise SearchError("engine_transport_failed") from error
         finally:
-            connection.close()
+            connection.finish()
 
 
 class Engine:

@@ -45,6 +45,32 @@ alias fixture도 기대 정의와 공유하던 참조를 deepcopy로 분리했�
 통과했다. 불완전 응답은 부분 적용 receipt도 incomplete로 남는다. 이는 새 도구의 개발 중
 검수/수정 근거이며 기존 서비스의 실제 truncation/자원 누출 사고를 주장하지 않는다.
 
+PR21의 native Codex는 이 검사들에 없던 헤더 수신 기한 문제를 지적했다. 기준523edf0/Python3.9의 실제
+loopback HTTPResponse에 헤더5개를0.08초 간격으로 보내고 기한0.15초를 지정했다. 기존 socket
+timeout은 각 읽기의 idle 시간이라 헤더가 계속 들어오면 전체 예산을 넘겼다. 동일 회귀의 수정 전
+한 실행은0.430초 후에야 실패했다. 이전 body deadline 통과를 모든 IO의 기한 보장으로 해석한
+범위를 바로잡았다. 이는 개발 중 관리 도구의 제어 실패이며 기존 사용자 장애나 지연 성능 측정이 아니다.
+
+요청별 소유 connection을 추가했다. 숫자 loopback의 connect는 nonblocking+남은 예산 select로,
+쓰기/헤더/본문은 절대 기한에 소유 socket을 shutdown하는 watchdog으로 제한한다. HTTP의
+Connection: close 이후에도 shutdown할 수 있도록 같은 연결의 dup descriptor를 소유한다.
+finally에서 watchdog을 중지/join하고 연결과 취소용 descriptor를 모두 닫는다. 전역 signal은
+동시 요청에 간섭하므로 쓰지 않고, timeout만 반환한 채 요청 future를 남기는 대안도 제외했다.
+
+같은 Python3.9 헤더 회귀의 최종 수정 후 한 실행은0.160초에 engine_request_deadline으로 종료했고 헤더 전송
+완료 전이었다. 반환 시 소유 watchdog/열린 socket은0이었다. 테스트의0.32초 허용 경계는0.40초
+헤더 완료 전 취소를 확인하기 위한 스케줄링 여유이며 정확한 실시간 실행 보장/성능 개선율이 아니다.
+실제 읽지 않는 peer에 막힌4MiB 요청 body와 Connection: close 본문, 제어된 connect 대기,
+기한이 다른 두 동시 요청의 격리와 정상/실패 뒤 소유 자원 정리도 확인했다. 기존 short
+Content-Length·정상 chunked/2MiB 상한·버전 충돌과 incomplete receipt 경계는 유지한다.
+
+추가 정적 검토는 정상 Connection: close의 완결 본문 뒤 원 FD를 다시 조작할 가능성을 지적했다.
+보강 전 복사본의 실제 정상 CL2/JSON 응답은 Python3.9에서 성공했지만, CI와 같은 Python3.12.14에서
+다음 settimeout이 EBADF가 되어 engine_transport_failed로 실패했다. 같은 정상 chunked close는
+보강 전에도 성공했다. read1 뒤 응답이 이미 닫혔으면 즉시 반복을 끝내도록 보강했고, 정확 CL/
+chunked close 성공과 미완료 close의 기한 실패를 구분했다. 최종 전체 Python49개를3.9와3.12.14
+모두 통과했다. 원문 네이티브 지적의 답글/실제 Resolve와 새 head CI/Codex는 조정자 게이트로 남겼다.
+
 최종 실제 검증은 공식 base/nori image, 512MiB heap·1.5GiB 컨테이너 상한, 새 전용 volume과
 동적 loopback 포트에서 다음을 통과했다. 설정 상한은 실측 사용량이 아니다.
 
@@ -56,8 +82,8 @@ alias fixture도 기대 정의와 공유하던 참조를 deepcopy로 분리했�
 6. 새 색인의 실제 CLI 이벤트 이력 재생, 반복 시 적용0/중복2/오래된2와 complete receipt.
 7. 정지 엔진에서 exit2와 incomplete receipt. 소유 label을 확인한 컨테이너/volume 정리.
 
-최종 관리 client SHA-256은 `db258961ab00737277bc7584d0894748b8aaacc63e2d411cda9f31e4b3c2079b`이며
-실제 report의 hash와 일치했다. 초기 독립 probe와 네 전체 lifecycle 실행의 컨테이너/volume을
+최종 관리 client SHA-256은 `e97f57c79fe385c9924abb627b2e67690b6d48bf52a570f3ca83b0e9d236d86a`이며
+실제 report의 hash와 일치했다. 초기 독립 probe와 여섯 전체 lifecycle 실행의 컨테이너/volume을
 모두 정리했고, 같은 label의 잔여 자원0을 확인했다. ID/포트/PID·원문 로그·가상 입력은 ignored에
 보존하며 공개 artifact에는 가상 검증의 집계/버전·client hash만 둔다. 원본 업무/추천 데이터는 사용하지 않았다.
 

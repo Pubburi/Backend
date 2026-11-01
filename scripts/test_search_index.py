@@ -1,9 +1,13 @@
 import copy
+from concurrent.futures import ThreadPoolExecutor
+import errno
 import io
 import json
 from pathlib import Path
 import tempfile
+import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
 from unittest.mock import patch
@@ -124,7 +128,8 @@ class SearchProtocolTests(unittest.TestCase):
                     with self.assertRaises(search.SearchError): engine.ready()
 
     def test_partial_replay_and_final_receipt_failure_never_claim_completion_or_leak_paths(self):
-        for final_failure in (False, True):
+        for failure in ("engine_response_length_mismatch", "engine_request_deadline", "final_receipt"):
+            final_failure = failure == "final_receipt"
             with tempfile.TemporaryDirectory() as temp:
                 directory = Path(temp) / ".pubburi" / "result"
                 source = Path(temp) / "events.json"
@@ -134,19 +139,28 @@ class SearchProtocolTests(unittest.TestCase):
                 def write_receipt(path, report):
                     if final_failure and report["completed"]: raise OSError("private-path-must-not-leak")
                     return real_receipt(path, report)
-                effects = ["applied", "duplicate"] if final_failure else ["applied", search.SearchError("engine_response_length_mismatch")]
+                effects = ["applied", "duplicate"] if final_failure else ["applied", search.SearchError(failure)]
                 output = io.StringIO()
                 with patch.object(search.sys, "argv", args), patch.object(search.Engine, "ready"), patch.object(search.Engine, "apply", side_effect=effects), patch.object(search, "receipt", side_effect=write_receipt), patch("sys.stderr", output):
                     self.assertEqual(search.main(), 2)
                 report = json.loads((directory / "receipt.json").read_text())
                 self.assertFalse(report["completed"]); self.assertEqual(report["applied"], 1)
+                if not final_failure: self.assertEqual(report["error_code"], failure)
                 self.assertNotIn("private-path", output.getvalue())
 
 
 class SearchTransportTests(unittest.TestCase):
     def setUp(self):
         self.mode = "normal"
-        self.started, self.release = threading.Event(), threading.Event()
+        self.started, self.release, self.headers_finished = threading.Event(), threading.Event(), threading.Event()
+        self.connections = []
+        self.connection_type = search._DeadlineConnection
+        def connection(*args):
+            result = self.connection_type(*args)
+            self.connections.append(result)
+            return result
+        self.connection_patch = patch.object(search, "_DeadlineConnection", side_effect=connection)
+        self.connection_patch.start(); self.addCleanup(self.connection_patch.stop)
         test = self
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -155,17 +169,31 @@ class SearchTransportTests(unittest.TestCase):
                 try: super().handle()
                 except (ConnectionResetError, BrokenPipeError): pass  # Expected client cancellation.
             def do_GET(self):
+                if self.path == "/delayed":
+                    if test.release.wait(0.30): return
+                if test.mode == "trickle_headers" or self.path == "/trickle":
+                    self.wfile.write(b"HTTP/1.1 200 OK\r\n"); self.wfile.flush(); test.started.set()
+                    for number in range(5):
+                        if test.release.wait(0.08): return
+                        self.wfile.write(f"X-Trickle-{number}: value\r\n".encode()); self.wfile.flush()
+                    self.wfile.write(b"Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"); self.wfile.flush()
+                    test.headers_finished.set(); return
                 self.send_response(302 if test.mode == "redirect" else 200)
                 self.send_header("Content-Type", "application/json")
+                if test.mode in ("normal_close", "chunked_close"): self.send_header("Connection", "close")
                 if test.mode == "redirect": self.send_header("Location", "/must-not-follow")
                 if test.mode == "declared_overflow":
                     self.send_header("Content-Length", str(search.MAX_RESPONSE_BYTES + 1)); self.end_headers(); return
-                if test.mode == "partial":
+                if test.mode in ("partial", "partial_close"):
+                    if test.mode == "partial_close": self.send_header("Connection", "close")
                     self.send_header("Content-Length", "1000"); self.end_headers()
                     self.wfile.write(b"{"); self.wfile.flush(); test.started.set(); test.release.wait(2); return
                 if test.mode == "short_length":
                     self.send_header("Content-Length", "12"); self.end_headers()
                     self.wfile.write(b"{}"); self.wfile.flush(); self.close_connection = True; return
+                if test.mode == "chunked_close":
+                    self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
+                    self.wfile.write(b"2\r\n{}\r\n0\r\n\r\n"); self.wfile.flush(); return
                 if test.mode in ("at_cap", "chunked_overflow"):
                     content = b"{}" + b" " * (search.MAX_RESPONSE_BYTES - 2 + (test.mode == "chunked_overflow"))
                     self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
@@ -174,6 +202,9 @@ class SearchTransportTests(unittest.TestCase):
                     except OSError: pass  # An oversized stream can be canceled by the client.
                     return
                 self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}")
+            def do_POST(self):
+                test.started.set(); test.release.wait(2)  # Intentionally do not consume the request body.
+                self.close_connection = True
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True); self.thread.start()
@@ -181,6 +212,10 @@ class SearchTransportTests(unittest.TestCase):
 
     def tearDown(self):
         self.release.set(); self.server.shutdown(); self.server.server_close(); self.thread.join(2)
+        for connection in self.connections:
+            self.assertFalse(connection.watchdog.is_alive())
+            self.assertIsNone(connection.sock)
+            self.assertIsNone(connection.interrupt_socket)
 
     def test_redirect_is_not_followed_and_content_length_is_bounded(self):
         self.mode = "redirect"; self.assertEqual(self.http.request("GET", "/")[0], 302)
@@ -201,6 +236,59 @@ class SearchTransportTests(unittest.TestCase):
         self.mode = "short_length"
         with self.assertRaisesRegex(search.SearchError, "response_length_mismatch"):
             self.http.request("GET", "/")
+
+    def test_absolute_deadline_interrupts_headers_that_never_hit_the_idle_timeout(self):
+        self.mode = "trickle_headers"; self.http.deadline = 0.15
+        start = time.monotonic()
+        with self.assertRaisesRegex(search.SearchError, "engine_request_deadline"):
+            self.http.request("GET", "/")
+        elapsed = time.monotonic() - start
+        self.assertTrue(self.started.is_set())
+        self.assertFalse(self.headers_finished.is_set(), f"headers already completed after {elapsed:.3f}s")
+        self.assertLess(elapsed, 0.32)  # Scheduling allowance, before the fixture's 0.40s headers finish.
+
+    def test_deadline_still_interrupts_body_after_http_connection_detaches_a_close_socket(self):
+        self.mode = "partial_close"; self.http.deadline = 0.15
+        with self.assertRaisesRegex(search.SearchError, "engine_request_deadline"):
+            self.http.request("GET", "/")
+        self.assertTrue(self.started.is_set()); self.assertFalse(self.release.is_set())
+
+    def test_complete_connection_close_body_is_not_reused_after_http_response_closes_its_fd(self):
+        for mode in ("normal_close", "chunked_close"):
+            with self.subTest(mode=mode):
+                self.mode = mode
+                self.assertEqual(self.http.request("GET", "/"), (200, {}))
+
+    def test_request_body_blocked_by_a_nonreading_peer_has_the_same_absolute_budget(self):
+        original = self.connection_type.connect
+        def small_send_buffer(connection):
+            original(connection); connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+        self.http.deadline = 0.15
+        with patch.object(self.connection_type, "connect", small_send_buffer):
+            with self.assertRaisesRegex(search.SearchError, "engine_request_deadline"):
+                self.http.request("POST", "/", {"padding": " " * (4 * 1024 * 1024)})
+        self.assertTrue(self.started.is_set()); self.assertFalse(self.release.is_set())
+
+    def test_nonblocking_connect_wait_obeys_remaining_budget_and_cleans_up(self):
+        actual_socket = socket.socket
+        class PendingConnect(actual_socket):
+            def connect_ex(self, address): return errno.EINPROGRESS
+        def wait_for_budget(readable, writable, exceptional, timeout):
+            time.sleep(timeout); return [], [], []
+        self.http.deadline = 0.05
+        with patch.object(search.socket, "socket", PendingConnect), patch.object(search.select, "select", side_effect=wait_for_budget):
+            with self.assertRaisesRegex(search.SearchError, "engine_request_deadline"):
+                self.http.request("GET", "/")
+
+    def test_expiring_one_request_does_not_cancel_a_concurrent_independent_connection(self):
+        slow = search.Http("http://127.0.0.1:" + str(self.server.server_port), deadline=0.15)
+        with ThreadPoolExecutor(max_workers=2) as requests:
+            independent = requests.submit(self.http.request, "GET", "/delayed")
+            pending = requests.submit(slow.request, "GET", "/trickle")
+            self.assertTrue(self.started.wait(1))
+            with self.assertRaisesRegex(search.SearchError, "engine_request_deadline"):
+                pending.result(timeout=1)
+            self.assertEqual(independent.result(timeout=1), (200, {}))
 
 
 if __name__ == "__main__": unittest.main()

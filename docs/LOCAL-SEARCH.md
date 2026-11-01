@@ -89,8 +89,15 @@ filtered alias는 deleted=false의 **검색**을 제공하며 보안/권한 경�
 직접 확인해야 한다. 관리 작업 동안 같은 index/alias를 다른 작업자가 변경하지 않는 소유권이 필요하다.
 쓰기는 require_alias=true로 지정해 alias 소실 시 의도치 않은 물리 색인이 자동 생성되지 않게 한다.
 
-HTTP는 연결 최대2초·응답 전체 본문 완료 최대5초·누적2MiB 상한과 무자동재시도/redirect 미추적을
-사용한다. 이는 개별 요청의 예산이며 배치 전체 시간이나 프로세스 메모리 측정값이 아니다.
+HTTP는 연결 대기 최대2초·연결/쓰기/헤더/본문을 합친 요청별 절대 기한5초·누적2MiB 상한과
+무자동재시도/redirect 미추적을 사용한다. numeric loopback의 nonblocking connect는 남은 예산
+안에서만 기다린다. 요청별 watchdog은 기한에 소유 socket을 shutdown해, idle timeout보다 짧게
+이어지는 헤더/본문도 중단한다. Connection: close로 HTTP 라이브러리가 socket을 분리해도 중단할
+수 있도록 같은 연결의 취소용 descriptor를 유지한다. 반환 전에 watchdog을 중지/join하고 두
+descriptor를 닫는다. 전역 signal이나 반환 뒤 계속 실행되는 요청 future는 사용하지 않는다.
+[Python socket의 timeout/shutdown 동작](https://docs.python.org/3.12/library/socket.html#socket.socket.shutdown)을
+구분하며, 기한 진단은 engine_request_deadline이다. 이는 개별 IO 예산이며 OS 스케줄링을 포함한
+실시간 실행 보장·배치 전체 시간이나 프로세스 메모리 측정값은 아니다.
 Content-Length가 있으면 실제 수신 바이트와도 일치해야 한다. 완결된 JSON이라도 선언 길이에
 못 미치는 EOF는 transport 실패이며 정상 ack/완료로 취급하지 않는다. 길이 없는 정상 chunked 응답은 유지한다.
 모든 입력을 IO 전에 검증해도 중간 엔진 장애/응답 유실은 이미 적용한 문서를 rollback하지 못한다.
