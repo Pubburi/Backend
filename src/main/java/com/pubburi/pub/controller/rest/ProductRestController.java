@@ -56,6 +56,7 @@ public class ProductRestController {
 		@Parameter(name = "aromaTag", in = ParameterIn.QUERY, style = ParameterStyle.FORM, explode = Explode.TRUE, description = "Repeat for all required aroma tags; commas stay literal. Unknown/empty tags cannot match.", array = @ArraySchema(maxItems = 20, schema = @Schema(type = "string", maxLength = 40)))})
 	public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> products(@RequestParam(required = false) String type,
 			@RequestParam(required = false) String q, @RequestParam(defaultValue = "popular") String sort,
+			@Parameter(description = "Existing page normalization; (page - 1) * normalized size must fit 0..2147483647 OFFSET or returns 400 BAD_REQUEST")
 			@RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
 			@Parameter(schema = @Schema(type = "integer", minimum = "0", maximum = "2147483647")) @RequestParam(required = false) String minPriceKrw,
 			@Parameter(schema = @Schema(type = "integer", minimum = "0", maximum = "2147483647")) @RequestParam(required = false) String maxPriceKrw,

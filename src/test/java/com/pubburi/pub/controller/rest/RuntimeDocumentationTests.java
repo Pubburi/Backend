@@ -86,6 +86,7 @@ class RuntimeDocumentationTests {
 		var parameters = new java.util.HashMap<String, JsonNode>();
 		operation.path("parameters").forEach(parameter -> parameters.put(parameter.path("name").asText(), parameter));
 		assertThat(parameters.keySet()).contains("type", "q", "sort", "page", "size", "minPriceKrw", "maxPriceKrw", "minAbvPercent", "maxAbvPercent", "tasteTag", "aromaTag");
+		assertThat(parameters.get("page").path("description").asText()).contains("2147483647 OFFSET", "400 BAD_REQUEST");
 		for (String tag : Set.of("tasteTag", "aromaTag")) {
 			JsonNode parameter = parameters.get(tag);
 			assertThat(parameter.path("style").asText()).isEqualTo("form"); assertThat(parameter.path("explode").booleanValue()).isTrue();

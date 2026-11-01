@@ -47,7 +47,7 @@
             "name": "page",
             "in": "query",
             "required": false,
-            "description": "Existing defaults/clamping; no global pagination policy change",
+            "description": "Existing page1 normalization. The normalized (page-1)*size must fit signed 32-bit OFFSET 0..2147483647; larger offsets return 400 BAD_REQUEST without wrapping. Other endpoints are unchanged.",
             "schema": {
               "type": "integer",
               "default": 1
@@ -156,7 +156,7 @@
             }
           },
           "400": {
-            "description": "BAD_REQUEST: invalid new filter syntax/range/tag values.",
+            "description": "BAD_REQUEST: invalid filter values or normalized product offset outside 0..2147483647.",
             "content": {
               "application/json": {
                 "schema": {
@@ -176,7 +176,7 @@
             }
           },
           "500": {
-            "description": "Internal/DB failure; never an empty successful page. Extreme existing page offset overflow is tracked separately.",
+            "description": "Internal/DB failure; never an empty successful page.",
             "content": {
               "application/json": {
                 "schema": {

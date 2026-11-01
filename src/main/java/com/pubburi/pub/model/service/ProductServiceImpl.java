@@ -29,10 +29,13 @@ public class ProductServiceImpl implements ProductService {
 	@Override
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public PageResponse<Product> searchProducts(String type, String q, String sort, ProductSearchFilters filters, PageCriteria criteria) {
+		long offset = ((long) criteria.page() - 1) * criteria.size();
+		if (offset < 0 || offset > Integer.MAX_VALUE)
+			throw new IllegalArgumentException("Product page offset exceeds the supported range");
 		String safeType = blankToNull(type);
 		String safeQ = blankToNull(q);
 		List<Product> products = productDao.selectFiltered(safeType, safeQ, blankToNull(sort), filters, criteria.size(),
-				criteria.offset());
+				(int) offset);
 		return PageResponse.of(products, criteria, productDao.countFiltered(safeType, safeQ, filters));
 	}
 
