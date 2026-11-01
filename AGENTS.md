@@ -1,8 +1,8 @@
 # Backend working guide
 
-- Preserve Java 17, Spring Boot, MyBatis, /api, ApiResponse and session-based AccessGuard behavior.
+- Target PostgreSQL18.6 + Spring Data JPA(Hibernate) + Flyway Community; the Python relay target is Psycopg3. This latest user decision supersedes older MySQL/MyBatis-preservation wording. Preserve Java17, Spring Boot, /api, ApiResponse and session-based AccessGuard behavior while migrating.
 - Keep transaction boundaries, batched order-detail queries and atomic stamp updates.
-- Root commands: ./scripts/check.sh and ./scripts/dev.sh. MySQL Compose mounts root data.sql.
+- Root commands: ./scripts/check.sh and ./scripts/dev.sh. The current API still runs the pre-cutover MySQL baseline; its Compose/data.sql and prior migrations remain intact until the verified PostgreSQL cutover. Do not call PostgreSQL schema preparation a completed API/JPA migration.
 - Do not commit .env, credentials, target/ or real database settings. Update docs with changes.
 - Branches use PRs and Conventional Commits. CI must pass before squash merging.
 - 커밋 제목은 `type: 한국어 변경 요약` 또는 `type(scope): 한국어 변경 요약`으로 쓰고 필요한 본문도 한국어로 작성한다. 유형은 feat/fix/refactor/perf/test/ci/build/docs/chore/revert이며 식별자는 원문을 유지할 수 있다.
@@ -12,7 +12,8 @@
 
 ## Delivery and automation
 
-- Backend owns business APIs, MySQL, auth/session, search indexing/API integration, backend tests and backend docs/PRs. Frontend owns UI/routes/state/API consumption/browser tests/assets and its docs/PRs. Recommendation owns source ingestion/curation, features, model training/scoring/reasons/evaluation and its docs/PRs.
+- Backend owns business APIs, PostgreSQL/JPA migration and business persistence, auth/session, search indexing/API integration, backend tests and backend docs/PRs. MySQL is the preserved migration-source/baseline. Frontend owns UI/routes/state/API consumption/browser tests/assets and its docs/PRs. Recommendation owns source ingestion/curation, features, model training/scoring/reasons/evaluation and its docs/PRs.
+- DB01–DB06 are required migration work, not extra user features. Use JPA repositories/projections and deliberate native queries for atomic SQL/queue boundaries; no replacement-technology decision remains pending. Disable OSIV; Hibernate ddl-auto=validate and versioned PostgreSQL Flyway migrations own the target schema. Preserve source IDs, epochs, order snapshots, immutable outbox JSON text/source UUID and delivery state. Do not reset source/target IDs or treat MySQL test results as PostgreSQL validation. See docs/POSTGRESQL-MIGRATION.md.
 - Recommendation/docs/DATA-AND-MODEL-PLAN.md is the data/model/evaluation canonical plan (sibling checkout or GitHub main). Backend owns docs/SEARCH-PLAN.md and integration contracts. Reference other owners rather than copying detailed plans or mixing their implementation into Backend PRs; coordinate shared contracts in approved planning.
 - Follow approved planning referenced by this chat/private context and this repo's docs/DELIVERY-PLAN.md for Backend work. Frontend and Recommendation own their role plans. Deadline: 2027-02-05 inclusive Asia/Seoul; no new implementation, commits or merges from 2027-02-06 00:00.
 - All R01–R08 and F01–F12 are required; P1/P2 determines order only. Keep chatbot, mobile implementation, real payments/shipping and AWS resource creation outside this work. AWS requires a later user instruction.

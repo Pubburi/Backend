@@ -19,6 +19,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
+      postgresql:
+        image: postgres:18.6@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: ci_pg_admin
+          POSTGRES_PASSWORD: ci_pg_admin_only
+          POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --label=pubburi.validation=postgresql-schema-ci
+          --health-cmd="pg_isready -h127.0.0.1 -Uci_pg_admin -dpostgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
       mysql:
         image: mysql:8.4
         env:
@@ -46,6 +61,19 @@ jobs:
       PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE: FALLBACK
       PUBBURI_SMOKE_RUN_TOKEN: pubburi-ci-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_RELAY_DB_CA: .pubburi/mysql-ca.pem
+      # PostgreSQL is an isolated migration target; the current API baseline remains separately verified.
+      PUBBURI_PG_URL: jdbc:postgresql://127.0.0.1:5432/pubburi_pg_fresh_ci
+      PUBBURI_PG_DB_NAME: pubburi_pg_fresh_ci
+      PUBBURI_PG_USER: ci_pg_migrator
+      PUBBURI_PG_PASSWORD: ci_pg_fixture_only
+      PUBBURI_PG_RUN_TOKEN: pubburi-pg-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_RECOVERY_DB_NAME: pubburi_pg_recovery_ci
+      PUBBURI_PG_RECOVERY_RUN_TOKEN: pubburi-pg-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_BLOCKED_DB_NAME: pubburi_pg_blocked_ci
+      PUBBURI_PG_BLOCKED_RUN_TOKEN: pubburi-pg-blocked-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_CA: ${{ github.workspace }}/.pubburi/postgres-ci-tls/ca.pem
+      PUBBURI_PG_VALIDATION_LABEL: postgresql-schema-ci
+      PUBBURI_PG_MUTATING: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +91,23 @@ jobs:
           .venv-relay/bin/python -m pip install --require-hashes -r tools/search-relay/requirements.lock
       - name: Verify local ownership and lifecycle tools
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Prepare isolated PostgreSQL TLS and migration fixtures
+        env:
+          PUBBURI_PG_CONTAINER_ID: ${{ job.services.postgresql.id }}
+          PUBBURI_PG_ADMIN_USER: ci_pg_admin
+          PUBBURI_PG_ADMIN_PASSWORD: ci_pg_admin_only
+        run: python3 scripts/prepare_postgresql_ci.py
+      - name: Verify PostgreSQL Flyway schema and identity preservation
+        env:
+          PUBBURI_PG_CONTAINER_ID: ${{ job.services.postgresql.id }}
+          PUBBURI_PG_INTEGRATION: '1'
+          # Used only by the owned test's fixed permission-failure DDL; installer remains non-superuser.
+          PUBBURI_PG_ADMIN_USER: ci_pg_admin
+          PUBBURI_PG_ADMIN_PASSWORD: ci_pg_admin_only
+        run: |
+          ./mvnw --batch-mode --no-transfer-progress -f tools/postgresql-migration/pom.xml verify
+          mkdir -p target
+          python3 scripts/postgresql_schema.py validate > target/postgresql-schema-report.json
       - name: Initialize disposable database
         env:
           MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
@@ -108,5 +153,7 @@ jobs:
             target/surefire-reports/*.xml
             target/api-smoke-report.json
             target/search-smoke-report.json
+            target/postgresql-schema-report.json
+            tools/postgresql-migration/target/surefire-reports/*.xml
           if-no-files-found: ignore
           retention-days: 7

@@ -7,6 +7,10 @@ S02 전체 완료는 구분한다.
 기존 2027-02-05 기한, 로컬 개발, 세 영역 담당과 PR 게이트를 유지한다.
 S01–S05는 F02·R06·R02의 기술 작업이며 R 8개 + F 12개 = 20개 기능과 중복 합산하지 않는다.
 
+최신 확정 업무 DB 목표는 [PostgreSQL18.6/JPA 전환](POSTGRESQL-MIGRATION.md)이다. 아래 기존
+MySQL 구현/측정은 이관 전 기준으로 보존하며 PostgreSQL/JPA/Psycopg3의 outbox·현재 상품
+재조회·필수조건 대체 검색을 DB03–DB06에서 재검증한다. schema 도입만으로 검색 전환을 완료하지 않는다.
+
 Backend는 검색 API·업무 상품 원본·색인 동기화·추천 서버 연동·장애 대체 검색을 소유한다.
 주류 데이터 수집·정제·특성 설계·추천 모델 학습·평가의 정본은
 [Recommendation 데이터·모델 계획](https://github.com/Pubburi/Recommendation/blob/main/docs/DATA-AND-MODEL-PLAN.md)이다.
@@ -14,7 +18,7 @@ Backend는 해당 추천 구현을 중복 보관하지 않고 필요한 상품/�
 
 ## 검색 범위와 연동 책임
 
-- MySQL은 업무 상품의 원본이고 OpenSearch는 재생 가능한 검색 색인이다. 상품 변경·색인 동기화·검색 API·인증·장애 복구는 Backend가 담당한다.
+- 목표 PostgreSQL은 업무 상품 원본이고 OpenSearch는 재생 가능한 검색 색인이다. 현재 MySQL 원본은 이관 전까지 보존한다. 상품 변경·색인 동기화·검색 API·인증·장애 복구는 Backend가 담당한다.
 - Frontend는 React 검색 화면·자동완성·필터·URL 상태·최신 요청 반영을 담당한다.
 - Recommendation은 검색 조건을 통과한 후보의 점수·이유를 계약에 따라 반환한다. Backend는 반환 결과의 최신 상품 상태와 필수 조건을 다시 확인한다.
 - OpenSearch는 로컬 Docker로 실행한다. 구현 시 엔진/한국어 플러그인 버전을 맞춰 고정하고 AWS 연결을 요구하지 않는다.

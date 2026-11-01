@@ -1,5 +1,10 @@
 # 로컬 통합 실행
 
+확정 목표 DB/영속 계층은 PostgreSQL18.6·JPA(Hibernate)·Flyway다. 현재 아래 통합 기동은 이관 전
+MySQL 기준이며 기존 볼륨을 보존한다. PostgreSQL schema installer는 별도 폐기 검증 DB에서
+[전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
+완료로 간주하거나 현재 기동 도구를 반쪽 PostgreSQL profile로 전환하지 않는다.
+
 세 레포를 같은 상위 폴더에 `Backend`, `Frontend`, `Recommendation` 이름으로 둔다.
 Java 17, Node.js 24, Python 3.12, uv 0.13.6, 실행 중인 Docker Compose가 필요하다.
 macOS에서는 `JAVA_HOME`이 비어 있을 때 실행 스크립트가 설치된 JDK 17을 선택한다.
