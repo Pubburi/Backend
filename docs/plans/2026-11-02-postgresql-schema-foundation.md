@@ -86,6 +86,30 @@ CI 준비 도구 자체도 새 서비스에서 실제 CA/SAN·TLS reload·비sup
 최종 V1 SHA256은98d9f46a24872139650694eff0cb3b6584ce9652633a8f4bd9f48fab5b3e6078,
 source-index contract는5dfcac2cc69c4edc2089acce9e9fa96762dfbe1ad56eb738bb12615d5bcffbfe다.
 
+## 최초 Actions 실패와 CI 환경 보정
+
+PR24의 head8ec7dcc [첫 required CI](https://github.com/Pubburi/Backend/actions/runs/41325844371)는
+PostgreSQL 준비 단계에서 exit2로 실패했다. 이후 PG통합·기존 HTTP·engine 단계는 실행되지
+않았으므로 이 run을 통과 근거로 사용하지 않는다.
+
+실제 runner의 Docker 명령은 -p5432:5432로 0.0.0.0/[::]에 공개했다. 도구의 정확한 loopback
+publication 검사와 달라 기존 guard가 거절하는 조건이었다. workflow를127.0.0.1:5432:5432로
+고쳤고 guard는 완화하지 않았다. [GitHub service ports 문서](https://docs.github.com/en/actions/tutorials/use-containerized-services/use-docker-service-containers)와
+[runner 전달 코드](https://github.com/actions/runner/blob/main/src/Runner.Worker/Container/DockerCommandManager.cs)의
+Docker --publish 전달을 확인했다. 실제 실패 CI의 두 publication 구조를 재현한 검사도 계속 거절한다.
+
+별도로 로컬 자동화에는 존재하던 ignored .pubburi가 fresh checkout에는 없었다. 기존 하위 TLS
+directory.mkdir는 clean ROOT에서 FileNotFound로 실패함을 먼저 재현했다. 부모만 mode0700/
+exist_ok로 만들고 기존 TLS directory를 채택/덮어쓰지 않는 동작은 유지했다.
+
+최종 Python3.12 전체66개가 통과했다. .pubburi가 처음 없는 별도 ROOT와 새 소유 loopback PG/
+tmpfs에서 실제 준비·TLS·marker 생성부터 다시 실행해 PG9개 전부 통과/skip0·CLI·wrongCA
+거절·30index/sequence rollback을 확인했다. CA 절대 경로와 Maven의 다른 cwd, 명시 serial 경로도
+유지했으며 소유 container/private material/PID를 정리했다.
+이 수정은 workflow/Python 준비/회귀/기록뿐이며 V1·Java·API jar는 바꾸지 않았다. 따라서 기존
+Java140을 다시 빌드하지 않았고 최신 head의 required CI가 PG/HTTP/engine 전체를 다시 통과해야
+한다. Codex의 두 구체 지적은 조정자가 원 스레드 답글·native 해결과 최신 head 게이트로 처리한다.
+
 ## README 선정
 
 현재 네 사례는 서비스의 거래·세션·입력·검색 상태 경계에 실제 구현 근거가 있다. 이번 schema

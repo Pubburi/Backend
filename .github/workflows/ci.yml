@@ -27,7 +27,7 @@ jobs:
           POSTGRES_PASSWORD: ci_pg_admin_only
           POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
         ports:
-          - 5432:5432
+          - 127.0.0.1:5432:5432
         options: >-
           --label=pubburi.validation=postgresql-schema-ci
           --health-cmd="pg_isready -h127.0.0.1 -Uci_pg_admin -dpostgres"

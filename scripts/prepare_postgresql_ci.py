@@ -48,6 +48,7 @@ def prepare(environ):
     public_ca = directory / "ca.pem"
     if Path(environ["PUBBURI_PG_CA"]).resolve() != public_ca.resolve():
         raise ValueError("postgresql_ci_ca_path_rejected")
+    directory.parent.mkdir(mode=0o700, exist_ok=True)  # Fresh checkouts do not contain ignored .pubburi.
     directory.mkdir(mode=0o700)  # Existing material is not adopted or overwritten.
 
     def openssl(*args):
