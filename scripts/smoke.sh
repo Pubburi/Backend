@@ -27,7 +27,8 @@ if ((${#jars[@]} != 1)); then
   exit 1
 fi
 scratch=$(mktemp -d)
-java -jar "${jars[0]}" > "$scratch/server.log" 2>&1 &
+# The validation driver retains its separate fixture-DDL credential; the app never needs it.
+env -u PUBBURI_DB_ROOT_PASSWORD java -jar "${jars[0]}" > "$scratch/server.log" 2>&1 &
 server_pid=$!
 cleanup() {
   kill "$server_pid" 2>/dev/null || true

@@ -24,6 +24,7 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             "PUBBURI_DB_URL": "jdbc:mysql://127.0.0.1:62928/pubburi_ci",
             "PUBBURI_DB_USER": "ci_user",
             "PUBBURI_DB_PASSWORD": "ci_test_only",
+            "PUBBURI_DB_ROOT_PASSWORD": "ci_root_only",
             "PUBBURI_SMOKE_CONTAINER_ID": "disposable-test-container",
             "PUBBURI_SMOKE_RUN_TOKEN": "test-run-marker-0123456789",
         }
@@ -76,7 +77,44 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
             sql = run.call_args.args[0][-1]
             self.assertIn("NEW.product_id=123", sql)
             self.assertNotIn(self.environ["PUBBURI_DB_PASSWORD"], str(run.call_args.args))
+            self.assertNotIn(self.environ["PUBBURI_DB_ROOT_PASSWORD"], str(run.call_args.args))
+            self.assertIn("-uroot", run.call_args.args[0])
+            self.assertEqual(run.call_args.kwargs['env']['MYSQL_PWD'], self.environ['PUBBURI_DB_ROOT_PASSWORD'])
             guard.assert_called_with(self.environ)
+
+    def test_search_outbox_ddl_requires_root_but_queries_keep_the_application_user(self):
+        with patch("api_smoke.require_disposable_database"), patch("api_smoke.subprocess.run") as run:
+            for operation in (True, False):
+                with self.assertRaises(RuntimeError):
+                    ci_search_outbox(dict(self.environ, PUBBURI_DB_ROOT_PASSWORD=""), 123, failing_trigger=operation)
+            run.assert_not_called()
+            run.return_value.stdout = '1\n{"productId":123}\n'
+            ci_search_outbox(self.environ, 123)
+            self.assertIn('-uci_user', run.call_args.args[0])
+            self.assertEqual(run.call_args.kwargs['env']['MYSQL_PWD'], self.environ['PUBBURI_DB_PASSWORD'])
+        with patch('api_smoke.require_disposable_database'), patch('api_smoke.ApiClient') as client:
+            with self.assertRaises(RuntimeError):
+                search_outbox_contract(dict(self.environ, PUBBURI_DB_ROOT_PASSWORD=''))
+            client.assert_not_called()
+
+    def test_search_outbox_drop_inspects_exact_fixture_before_root_ddl(self):
+        expected = {'table':'t_product_search_outbox','timing':'BEFORE','event':'INSERT',
+                    'body':'SET NEW.source_version = IF(NEW.product_id=123, 0, NEW.source_version)'}
+        for mutation in ({'table':'t_product'}, {'timing':'AFTER'}, {'event':'UPDATE'},
+                         {'body':'SET NEW.source_version = 0'}, {'body':None}):
+            with patch('api_smoke.require_disposable_database'), patch('api_smoke.subprocess.run') as run:
+                run.return_value.stdout = json.dumps(dict(expected, **mutation))
+                with self.assertRaisesRegex(RuntimeError,'unowned'):
+                    ci_search_outbox(self.environ,123,failing_trigger=False)
+                self.assertEqual(run.call_count,1)
+                self.assertIn('-uci_user',run.call_args.args[0]); self.assertNotIn('DROP TRIGGER',run.call_args.args[0][-1])
+        with patch('api_smoke.require_disposable_database'), patch('api_smoke.subprocess.run') as run:
+            run.return_value.stdout=json.dumps(expected)
+            ci_search_outbox(self.environ,123,failing_trigger=False)
+            self.assertEqual(run.call_count,2)
+            self.assertIn('-uci_user',run.call_args_list[0].args[0])
+            self.assertIn('-uroot',run.call_args_list[1].args[0])
+            self.assertEqual(run.call_args_list[1].args[0][-1], 'DROP TRIGGER ci_search_outbox_fail_123')
 
     def test_price_mutation_encodes_names_and_keeps_password_out_of_arguments(self):
         name = "상품 ' ; DELETE FROM t_order; --"

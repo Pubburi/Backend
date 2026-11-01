@@ -18,6 +18,12 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 CI의 다음 엔진 단계는 `PUBBURI_SEARCH_OUTBOX_INPUT`으로 이 HTTP가 만든 private 가상 batch를
 받는다. 실제 CLI 재생·삭제 뒤 old version 차단·재시작 뒤 유지가 필수 성공 조건이다. 원문 입력은
 artifact에 넣지 않으며 입력은 검증용 private 복사본으로 고정한다.
+앱·조회는 DB 전용 CI 계정으로 실행한다. binlog가 켜진 MySQL은 DB의 ALL 권한만으로 TRIGGER
+생성을 허용하지 않을 수 있어, 폐기 DB/CID/marker 검사 후 고정 실패 주입 CREATE/DROP에만
+별도 `PUBBURI_DB_ROOT_PASSWORD`를 사용한다. 값은 child MYSQL_PWD로만 전달하며 Java 앱
+프로세스에서는 제거한다. root 자격 누락은 DDL/새 fixture HTTP 전에 거절한다. DROP 전에는 일반
+계정으로 schema·이름·대상표·시점/종류·해당 productID에 한정한 본문이 맞는지도 확인한다.
+SUPER 부여나 글로벌 log_bin_trust 변경으로 검사를 우회하지 않는다.
 
 로컬 색인은 `python3 scripts/smoke_search.py`로 고유 label/새 volume·동적 loopback 포트의
 전용 엔진을 만들고 검증/재시작/정지·정리한다. 먼저 `docker build -t pubburi-search:3.9.0-nori-v1 search`로

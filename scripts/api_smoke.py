@@ -943,30 +943,50 @@ def ci_search_outbox(environ, product_id, *, failing_trigger=None):
     require_disposable_database(environ)
     if type(product_id) is not int or not 1 <= product_id <= 2147483647:
         raise ValueError("Invalid fixture product ID")
+    if failing_trigger is not None and type(failing_trigger) is not bool:
+        raise ValueError("Invalid fixture trigger operation")
     trigger = "ci_search_outbox_fail_" + str(product_id)
+    body = f"SET NEW.source_version = IF(NEW.product_id={product_id}, 0, NEW.source_version)"
+    if failing_trigger is not None and not environ.get("PUBBURI_DB_ROOT_PASSWORD"):
+        raise RuntimeError("Disposable failure injection requires a separate root credential")
+
+    def execute(statement, *, ddl=False):
+        # Application/query credentials stay unchanged. Only these fixed fixture DDLs use root;
+        # binlog-enabled MySQL can require SUPER to create a trigger even with database ALL.
+        return subprocess.run([
+            "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+            "mysql", "-u" + ("root" if ddl else environ["PUBBURI_DB_USER"]), "--default-character-set=utf8mb4",
+            "--batch", "--raw", "--skip-column-names", environ["PUBBURI_DB_NAME"], "--execute", statement,
+        ], capture_output=True, text=True, check=True, env=dict(environ, MYSQL_PWD=(
+            environ["PUBBURI_DB_ROOT_PASSWORD"] if ddl else environ.get("PUBBURI_DB_PASSWORD", ""))))
+
     if failing_trigger is True:
-        statement = (f"CREATE TRIGGER {trigger} BEFORE INSERT ON t_product_search_outbox "
-                     f"FOR EACH ROW SET NEW.source_version = IF(NEW.product_id={product_id}, 0, NEW.source_version)")
+        execute(f"CREATE TRIGGER {trigger} BEFORE INSERT ON t_product_search_outbox FOR EACH ROW " + body, ddl=True)
+        return None
     elif failing_trigger is False:
-        statement = f"DROP TRIGGER {trigger}"
+        inspected = execute("SELECT JSON_OBJECT('table', EVENT_OBJECT_TABLE, 'timing', ACTION_TIMING, "
+            "'event', EVENT_MANIPULATION, 'body', ACTION_STATEMENT) FROM information_schema.TRIGGERS "
+            f"WHERE TRIGGER_SCHEMA=DATABASE() AND TRIGGER_NAME='{trigger}'").stdout.strip()
+        owned = json.loads(inspected) if inspected else {}
+        def normalized(value): return re.sub(r"\s+|`", "", value).rstrip(";").lower() if isinstance(value, str) else None
+        if (owned.get("table") != "t_product_search_outbox" or owned.get("timing") != "BEFORE"
+                or owned.get("event") != "INSERT" or normalized(owned.get("body")) != normalized(body)):
+            raise RuntimeError("Refusing to remove an unowned fixture trigger")
+        execute(f"DROP TRIGGER {trigger}", ddl=True)
+        return None
     else:
         statement = ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ; START TRANSACTION READ ONLY; "
                      f"SELECT source_version FROM t_product_search_version WHERE product_id={product_id}; "
                      f"SELECT payload FROM t_product_search_outbox WHERE product_id={product_id} ORDER BY source_version; COMMIT;")
-    result = subprocess.run([
-        "docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
-        "mysql", "-u" + environ["PUBBURI_DB_USER"], "--default-character-set=utf8mb4",
-        "--batch", "--raw", "--skip-column-names", environ["PUBBURI_DB_NAME"], "--execute", statement,
-    ], capture_output=True, text=True, check=True,
-        env=dict(environ, MYSQL_PWD=environ.get("PUBBURI_DB_PASSWORD", "")))
-    if failing_trigger is not None:
-        return None
+    result = execute(statement)
     rows = result.stdout.splitlines()
     return {"version": int(rows[0]) if rows else None, "events": [json.loads(row) for row in rows[1:]]}
 
 
 def search_outbox_contract(environ):
     require_disposable_database(environ)
+    if not environ.get("PUBBURI_DB_ROOT_PASSWORD"):
+        raise RuntimeError("Disposable failure injection requires a separate root credential")
     admin = ApiClient(environ.get("PUBBURI_SERVER_PORT", "9987"))
     admin_id, password = "ci_admin_" + uuid.uuid4().hex, uuid.uuid4().hex
     admin.request("POST", "/users", 201, {"id": admin_id, "name": "CI outbox admin", "pass": password})

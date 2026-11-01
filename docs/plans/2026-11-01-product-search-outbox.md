@@ -67,4 +67,23 @@ CI도 HTTP가 만든 이 private fixture를 다음 엔진 단계에 전달하며
 BE-CS01의 주문 상세 조립은 기존 가짜 DAO 중심이며 전후 실측이 없었다. 이번은 원인/대안·
 구현 기여·직접 재현한 경계가 더 강해 1번만 BE-CS05로 교체하고 나머지3개와 총4개를 유지했다.
 신규 설계임을 명시하며 과거 운영 사고·자동 relay·속도 개선으로 포장하지 않는다.
+## 첫 CI 실패와 최소 계정 검증 보강
+
+PR22의 최초 required CI는 새 실패 주입용 CREATE TRIGGER에서 실패했다. 기존 로컬 실제 검증은
+root DB 계정이라 이 조건을 확인하지 못했다. 같은 DB 전용 ALL/비SUPER 계정에서
+@@log_bin=1·@@log_bin_trust_function_creators=0과 ERROR1419를 재현했다.
+[공식 binary logging 규칙](https://dev.mysql.com/doc/refman/8.4/en/stored-programs-logging.html)의
+trigger 생성 권한 경계이며 업무 TX/007의 결함이나 성능 결과와 구분한다.
+
+앱·조회는 최소 계정을 유지하고, 기존 폐기 DB/CID/marker 확인 후 고정 실패 주입 DDL만 별도
+root 자격을 child MYSQL_PWD로 넘긴다. Java 프로세스에는 그 root 환경값도 전달하지 않는다.
+CREATE는 기존 이름을 덮지 않으며 DROP은 일반 계정으로 동일 schema/name·표/시점/종류와
+해당 productID 한정 고정 본문을 확인한 뒤에만 한다. root 누락/guard 실패/비소유 trigger는 DDL
+전에 거절한다. SUPER 권한 부여·글로벌 설정 변경·검사 생략·무조건 재시도는 하지 않았다.
+
+최종 Python3.12 도구54개와 같은 최소 계정의 실제 jar HTTP14범주가 통과했다. app jar와007은
+위 SHA 그대로이며, 이 계정이 생성한 실제 가상 이벤트의 strict CLI→엔진 재생/재시작도
+통과했다. 소유 앱/PID와 검색 컨테이너/볼륨·실패 주입 trigger는 남기지 않았다.
+README의 네 사례/코드는 이번 검증 권한 수정으로 교체하거나 늘리지 않는다.
+
 최신 CI·Codex·관련 검증·병합/main CI와 브랜치 정리는 조정자 게이트다.
