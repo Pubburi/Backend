@@ -1,7 +1,8 @@
 # MySQL 원본 스냅샷 추출 계약
 
 DB02의 **읽기 전용 export와 오프라인 검증**이다. 현재16업무표를 하나의 InnoDB 행 snapshot에서
-추출하며 PostgreSQL import·전체 복사·JPA API·cutover는 구현하지 않았다. 현재 API/MySQL001–008,
+추출한다. PostgreSQL 복사는 [별도 import 도구](SOURCE-IMPORT.md)로 제공하며 JPA API·cutover는
+미완료다. 현재 API/MySQL001–008,
 PostgreSQL Flyway V1과 원본 계정/상품/주문/relay 상태를 자동 변경하지 않는다.
 
 ## 실행과 소유권
@@ -85,7 +86,8 @@ bounded output을 사용하며 상한 초과는 부분 artifact만 남기고 실
 기존 출력/심볼릭 링크를 채택·덮어쓰지 않는다. `receipt.json`은 accepted=false에서 시작한다.
 행/고수위/최종 작업 창 검사·atomic rename 뒤 완성 파일을 같은 오프라인 검증기로 먼저
 검수한 다음에만 accepted=true를 게시한다. 실패/부분 receipt는 후속 사용 불가이며 자동 삭제/재시도로 감추지 않는다.
-동일 artifact의 validate는 DB 연결 없이 반복 가능하지만 export 재사용이나 import 멱등성을 뜻하지 않는다.
+동일 artifact의 validate는 DB 연결 없이 반복 가능하지만 export 재사용을 뜻하지 않는다.
+별도 import는 빈 대상과 영구 수령증을 검수해 중복을 거절한다.
 
 오프라인 검사는 바이트/표 hash·정확한 필드/타입·NULL·PK 중복·source ID/고수위와 계약을 검수한다.
 모든 target FK/ICU 충돌·업무 제약 검증 또는 원천 인증을 대체하지 않는다. **SHA256은 무결성

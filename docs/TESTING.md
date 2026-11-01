@@ -194,3 +194,32 @@ wrapper의 export/두 번 offline validate·같은 출력 재사용 거절도 �
 있으므로 **업로드하지 않는다**. CI artifact는 고정 오류/안전한 집계의 source-snapshot-report.json과
 기존 PG 테스트 세 클래스의 XML만 명시하며 원본·CA/private key·.env는 제외한다. CI 준비/수신
 거절을 서비스 성능이나 실제 이관 데이터 손실 개선율로 계산하지 않는다.
+
+## 승인 source의 PG import·결과 대조
+
+[Import 계약](SOURCE-IMPORT.md)은 기존 V1을 보존하고 V2 수령증 metadata를 추가한다.
+기본 `check.sh`에는 파일 승인/한 번 읽기/typed bind·commit/close 분류 단위를 포함한다.
+기존 PG 통합의 기대 migration 수는 새 설치2개로 바뀌지만 거래/타입/인덱스/실패/복구 검사는
+삭제하지 않는다. 새 기본 경로의 실DB skip은 실제 DB 성공으로 세지 않는다.
+
+같은 required backend-ci에서 PG 준비 도구는 기존3DB와 별도 import4DB를 생성한다.
+source CI helper는 기존 API MySQL CA를 보존한 새 source 컨테이너에서 기본 source와 별도
+[authored 타입 fixture](../tools/postgresql-migration/src/test/resources/source-import-types.sql)를
+분리한다. 기본 source export/권한/작업 창 검사를 유지하고 다음 실제 PG 범위를 추가한다.
+
+- 기본 snapshot의16표 모든 셀을 exact PK tuple별로 대조하고7개 sequence/source UUID·epoch·
+  가격·원문 JSON·수령증을 확인한다. 같은 import의 재실행은 상태 변경 없이 거절한다.
+- 일부 상품 INSERT 뒤 실패와 모든 sequence 예약 뒤 수령증 INSERT 실패를 각각 주입해
+  모든 업무행/수령증·sequence 상태의 rollback을 검증한다. fixture trigger/function을 제거하고
+  같은 빈 DB·동일 파일의 CLI import로 복구한다.
+- 대상 collation과 FK parent namespace의 드리프트를 거절/복원한다. 허구 typed artifact의
+  ICU PK 충돌·missing FK, 기존 데이터가 있는 대상을 병합/정규화 없이 거절한다.
+- 별도 authored source의 numeric/NULL·0/known flags·태그·찜 microseconds·삭제 참조/주문금액·
+  claim/lease/ACK/binding 원문을 importer로 보존한다. 기본 원본과 데이터 분모를 합치지 않는다.
+- commit ACK 미확인·ACK 뒤 close 실패와 부모 timeout의 분류는 단위 주입이다. 실제 네트워크
+  ACK 유실·서버 crash 실험이나 운영 장애율로 표시하지 않는다. verify-import는 READ ONLY다.
+
+SourceImportIntegration/Typed XML와 원본·source/env/CA·상세 로그는 업로드하지 않는다.
+기존 PG3개 클래스 XML만 명시하고 source-snapshot-report.json의 안전한 상태만 추가한다.
+새 CI helper는 자기 CID/label·loopback과 target PG 소유권을 확인하고 자기 source/private
+자료만 finally 정리한다. root/다른 작업자 DB를 초기화하거나 보호 규칙을 완화하지 않는다.

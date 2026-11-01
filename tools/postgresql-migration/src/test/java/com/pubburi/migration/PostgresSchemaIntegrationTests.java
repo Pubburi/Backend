@@ -61,14 +61,14 @@ class PostgresSchemaIntegrationTests {
     @Test @Order(1) void freshInstallPreservesTypesAndReferencesAndReservesImportedIdentityHighWatermarks() throws Exception {
         Map<String, String> env = env("FRESH"); var settings = PostgresSchemaTool.Settings.from(env);
         PostgresSchemaTool.guard(settings);
-        assertEquals(1, PostgresSchemaTool.run("migrate", env));
+        assertEquals(2, PostgresSchemaTool.run("migrate", env));
         assertEquals(0, PostgresSchemaTool.run("migrate", env));
         assertEquals(0, PostgresSchemaTool.run("validate", env));
         String epoch = "960dc638-0651-4b64-af81-f8c41fa08b04";
         String source = "0db714c6-ef29-4cda-8020-d3b2eb15bd81";
         String payload = "{\n \"productId\":41, \"sourceVersion\":1, \"deleted\":false, \"document\":{\"name\":\"가\",\"type\":\"탁주\",\"priceKrw\":7500,\"abvPercent\":5.555,\"orderCount\":0,\"tasteTags\":null,\"aromaTags\":[]}}\n";
         try (Connection connection = settings.connect(); Statement statement = connection.createStatement()) {
-            assertEquals(17, number(connection, "SELECT count(*) FROM information_schema.tables WHERE table_schema='pubburi'"));
+            assertEquals(18, number(connection, "SELECT count(*) FROM information_schema.tables WHERE table_schema='pubburi'"));
             assertEquals(30,SchemaIndexContract.actual(connection).size());
             assertEquals(SchemaIndexContract.expected(),SchemaIndexContract.actual(connection));
             connection.setAutoCommit(false);
@@ -162,7 +162,7 @@ class PostgresSchemaIntegrationTests {
         try (Connection connection=settings.connect()) {
             assertEquals(0,number(connection,"SELECT count(*) FROM information_schema.tables WHERE table_schema='pubburi' AND table_name LIKE 'transaction_%'"));
         }
-        assertEquals(1,PostgresSchemaTool.run("migrate",env));
+        assertEquals(2,PostgresSchemaTool.run("migrate",env));
         assertEquals(0,PostgresSchemaTool.run("validate",env));
     }
 
