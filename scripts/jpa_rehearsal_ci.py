@@ -7,22 +7,62 @@ import secrets
 import re
 import subprocess
 import signal
+import select
+import sys
+import time
 
 from postgresql_schema import ROOT, verify_owned_postgres
+from jpa_smoke import cleanup_on_termination,defer_termination
 
 
-def command(args,env,log):
-    with log.open("w") as output:
-        process=subprocess.Popen(args,env=env,cwd=ROOT,stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
-        try:
-            code=process.wait(timeout=180)
-        except subprocess.TimeoutExpired:
-            # wait(timeout) has not reaped this leader: its PID/session identity cannot be reused.
-            # Kill the entire owned session before reaping, including Java children of Python/Maven.
-            try:os.killpg(process.pid,signal.SIGKILL)
-            except ProcessLookupError:pass
-            process.wait(timeout=5)
-            raise ValueError("jpa_ci_process_deadline") from None
+# The supervisor holds its session identity until the parent cleans the complete group.
+# Even after an abruptly terminated command, the parent never reaps this leader before killpg.
+SUPERVISOR="""
+import os,subprocess,sys
+fd=int(sys.argv[1])
+try:
+    code=subprocess.Popen(sys.argv[2:]).wait()
+    os.write(fd,(str(code)+'\\n').encode())
+finally:os.close(fd)
+sys.stdin.buffer.read(1)
+"""
+
+
+def command(args,env,log,budget=180):
+    if not 0<budget<=180:raise ValueError("jpa_ci_process_budget_rejected")
+    read,write=os.pipe()
+    try:
+        with cleanup_on_termination(),log.open("w") as output:
+            process=None
+            try:
+                with defer_termination():
+                    process=subprocess.Popen([sys.executable,"-c",SUPERVISOR,str(write),*args],env=env,cwd=ROOT,stdin=subprocess.PIPE,
+                        stdout=output,stderr=subprocess.STDOUT,start_new_session=True,pass_fds=(write,))
+                    os.close(write);write=None
+                end=time.monotonic()+budget;status=bytearray()
+                while b"\n" not in status:
+                    remaining=end-time.monotonic()
+                    if remaining<=0:raise ValueError("jpa_ci_process_deadline")
+                    if not select.select([read],[],[],remaining)[0]:raise ValueError("jpa_ci_process_deadline")
+                    chunk=os.read(read,32-len(status))
+                    if not chunk or len(status)+len(chunk)>=32:raise ValueError("jpa_ci_supervisor_rejected")
+                    status.extend(chunk)
+                if not re.fullmatch(rb"-?[0-9]+\n",status):raise ValueError("jpa_ci_supervisor_rejected")
+                code=int(status)
+            finally:
+                # The leader is still held/unreaped, so this PGID cannot belong to another job.
+                # Include normal/failed/signalled command exits and parent SIGTERM in cleanup.
+                if process is not None:
+                    with defer_termination():
+                        try:
+                            try:os.killpg(process.pid,signal.SIGKILL)
+                            except ProcessLookupError:pass
+                        finally:
+                            process.wait(timeout=5)
+                            process.stdin.close()
+    finally:
+        os.close(read)
+        if write is not None:os.close(write)
     if code:raise ValueError("jpa_ci_rehearsal_failed")
 
 def run(environ,snapshot,directory):

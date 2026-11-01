@@ -68,7 +68,7 @@ source 채택을 하지 않는다. wrapper는 별도로 CID/label/loopback·서�
 규모나 주문/검색/추천 품질 성과가 아니다. source345행 수는 복사 도구의 준비 입력이며 JPA가
 345행 전부의 업무 처리를 제공한다는 뜻도 아니다.
 
-기본 check: Python3.12 도구77개, 루트 Java140개, 이관 도구 단위18개, JPA 단위3개/패키징
+기본 check: 초기 Python3.12 도구77개, 루트 Java140개, 이관 도구 단위18개, JPA 단위3개/패키징
 성공. DB 없는 경로의 이관 통합9개/JPA 통합·준비3개 skip은 DB 성공으로 세지 않는다.
 실제 별도 실행에서는 JPA HTTP2개가 성공했고 CI 전용 준비는 정상/실패 DB에 각각 실행했다.
 
@@ -95,9 +95,42 @@ JAR/기동 거절·재시작 검증을 모두 통과했다. 자기 CID/label/tmp
    무효였다. 확인된 이번 테스트 자식만 정리하고 Python3.12/승인된 loopback·프로세스 조건에서
    77개 전체 성공을 다시 확인했다. 제한 환경 실패를 제품 실패/성공 분모에 합치지 않는다.
 
-실행 로그/원문·계정/개인 경로는 ignored에만 보존하며 공개 근거에 싣지 않는다. 도구 child
-deadline은 소유 새 session을 leader reap 전에 종료해 자식을 남기지 않는다. 정상 종료 뒤 PID가
-재사용될 수 있는 process group에는 signal하지 않는다. 진단 실패와 실제 소유 JVM 정리를 분리했다.
+실행 로그/원문·계정/개인 경로는 ignored에만 보존하며 공개 근거에 싣지 않는다. 진단 실패와
+실제 소유 JVM 정리를 분리한다. 초기 timeout 전용 정리의 부족분은 아래 독립 검토에서 보강했다.
+
+## 독립 도구 검토와 절대 기한·종료 보강
+
+같은 채팅의 Recommendation 담당자가 Python 검증 도구를 읽기 전용 검토해 HTTP 전체 기한과
+작업 leader 종료 뒤 자식 수명 경계 두 건을 제시했다. native Codex 승인과는 별도다.
+
+- 기존 urllib timeout6초는 inactivity였다. 작은 완결 JSON에 공백을0.07초 간격으로 보내면
+  예산0.15초의 body 요청이 실제0.454초 뒤200으로 성공했다(소유 fixture1회). 새 요청은 기존
+  검증된 요청별 socket shutdown watchdog을 재사용해 connect/write/headers/body 모두에
+  `min(6초, 전체 남은 예산)`을 적용한다. 같은 body 조건은 기한 거절로 바뀌었고 헤더 trickle도
+  별도 회귀에서 거절했다. 종료 뒤 watchdog/소유 socket을 남기지 않는다. 이 경과값은 제어한
+  검증 도구의 기한 위반 근거이며 서비스 응답 성능 개선/운영 SLA가 아니다.
+- 기존 command의 leader 정상0·오류2·SIGTERM 세 authored 조건에서 각각 자식 listener가
+  남음을 확인했다. 재현 뒤 정확한 소유 자식만 즉시 정리했다. 새 session supervisor는 실제
+  작업의 종료 코드를 private pipe로 알린 뒤 살아 있는 상태를 유지한다. 부모는 종료 결과와
+  무관하게 이 unreaped leader의 전체 group을 정리하고 마지막에 reap한다. 같은 세 조건 모두
+  listener가 남지 않았고 부모 SIGTERM·명시 짧은 command deadline도 별도로 검증했다.
+- SIGTERM handler는 smoke의 finally를 실행하게 하고, child 등록/정리의 짧은 구간은 Python
+  handler만 지연한다. 초기 OS mask 방식은 자식에게 SIGTERM 차단을 물려주어 signal 회귀가
+  실패했으므로 채택하지 않았다. 최종 방식은 자식의 정상 signal 동작과 pending signal 뒤
+  등록 완료/원래 handler 복원을 확인한다. 정상/실패 정리 중 추가 SIGTERM도 모든 JVM/stream·
+  상태 저장과 private JAR 제거 뒤에 전달한다. 첫 stop의 실제 SIGTERM 뒤 다음 항목과 후속
+  상태 단계를 마치는 회귀를 포함했다. 전역 alarm이나 종료 뒤 재사용될 PID의 group에는
+  의존하지 않는다. 임의로 다른 session을 만드는 외부 명령 전부를 관리한다는 보장은 아니다.
+
+최종 Python3.12 도구83개가 통과했다. 동일 불변 JPA JAR·예약된 정상/실패 PG 두 DB를 새
+supervisor/HTTP 경로로 실행해 기동 거절·cookie/권한·매장 CRUD·재시작·정리까지 다시 통과했다.
+Java/POM/JAR/V1/V2는 바꾸지 않아 기존 Maven/실DB 근거를 유지했다. 무관한 전체 DB bootstrap을
+반복하지 않았고 새 head required CI는 전체 기존 검사와 함께 다시 실행한다.
+
+조정자는 별도로 현재 production 웹을 동결 JPA JAR/PG에 연결했다. 실제 ADMIN cookie의
+로그인·매장 생성201/수정200·double 좌표·편집 중 삭제200/GET404·폼 정리·세션 유지가 성공했고
+API mock/예상외 API 오류/pageerror는 없었다. 이 신규 JPA 연동1회는 기존 MySQL 화면의
+전후 오류 세 조건과 합산하지 않는다. 전체 FE03/C04·상품/주문 인수가 아니다.
 
 ## 불변 artifact와 한계
 

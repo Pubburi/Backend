@@ -93,6 +93,10 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 필수 CI는 기존 MySQL HTTP·검색·snapshot/import 검사와 함께 새 PG 두 DB에서 실제 이 제공자를
 실행한다. 안전한 요약만 보존하고 통합 XML/원문 SQL·서버 로그/자격·복사 artifact는 업로드하지
 않는다. 실제 조건·실패·회귀의 상세 근거는 [작업 기록](plans/2026-11-02-jpa-market-rehearsal.md)에 둔다.
+검증 HTTP는 연결·쓰기·헤더·본문에 요청 소유 절대 기한을 적용하며 cookie를 유지한다.
+각 요청은 최대6초와 전체 남은120초 중 짧은 예산을 사용한다. 실행 supervisor는 작업 종료 뒤에도
+소유 session의 식별을 유지해 자식 정리 후 leader를 reap한다. 정상/오류·SIGTERM·기한 초과는
+같은 정리 경로를 사용하며 startup/cleanup 시간은 HTTP 지연 성능 수치가 아니다.
 
 남은 DB03은 다른 업무 DAO/API의 실제 JPA 이전과 전체 MyBatis runtime 제거다. 거래·필터/정렬·
 outbox/relay·웹 전체 인수와 최종 cutover/rollback은 DB04–DB06에서 별도로 검증한다. 이번의 실제

@@ -24,6 +24,9 @@ CAS/epoch·역할·사용자 전체 잠금·SQL 실패 rollback·CREATE/ALTER/DR
 실제 JAR의 허용 경로·MyBatis runtime 제외·기동 거절·매장 저장·재기동/재로그인·삭제를 검사한다.
 소유한 JVM/자식과 private JAR 복사본은 finally 정리한다. 원문 로그/통합 XML/자격을 업로드하지
 않고 안전 요약만7일 보존한다. [실행 조건·실패 구분](plans/2026-11-02-jpa-market-rehearsal.md)을 따른다.
+소량 HTTP fixture는 idle timeout보다 짧은 헤더/본문 trickle도 절대 기한에 중단하고 정상
+Content-Length·chunked close의 cookie를 보존하는지 검사한다. 실제 자식 listener의 정상/오류/
+SIGTERM 종료와 부모 SIGTERM·deadline도 supervisor의 전체 session 정리 경계로 검사한다.
 
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.

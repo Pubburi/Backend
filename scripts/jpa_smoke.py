@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Verify one explicitly owned local JPA rehearsal JAR, HTTP session/market flow and restart."""
 import hashlib
+from contextlib import contextmanager
+import http.client
 import http.cookiejar
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -14,8 +17,71 @@ import urllib.error
 import urllib.request
 import uuid
 import zipfile
+from urllib.parse import urlsplit
 
 from postgresql_schema import ROOT, verify_owned_postgres
+from search_index import _DeadlineConnection
+
+
+@contextmanager
+def cleanup_on_termination():
+    previous=signal.getsignal(signal.SIGTERM)
+    def terminate(signum,frame):raise SystemExit(128+signum)
+    signal.signal(signal.SIGTERM,terminate)
+    try:yield
+    finally:signal.signal(signal.SIGTERM,previous)
+
+
+@contextmanager
+def defer_termination():
+    # Register the child before a pending termination can unwind its owner's finally block.
+    # Defer Python handlers, not the OS mask: exec'ed children must not inherit blocked SIGTERM.
+    previous={kind:signal.getsignal(kind) for kind in (signal.SIGTERM,signal.SIGINT)};pending=[]
+    def remember(kind,frame):pending.append((kind,frame))
+    for kind in previous:signal.signal(kind,remember)
+    try:yield
+    finally:
+        for kind,handler in previous.items():signal.signal(kind,handler)
+        for kind,frame in pending:
+            handler=previous[kind]
+            if callable(handler):handler(kind,frame)
+            elif handler!=signal.SIG_IGN:raise SystemExit(128+kind)
+
+
+def request_json(cookies,base,method,path,body,deadline):
+    """Bound connect/write/headers/body by one request-owned absolute IO deadline."""
+    origin=urlsplit(base)
+    if origin.scheme!="http" or not ipaddress.ip_address(origin.hostname).is_loopback or origin.path or origin.query or origin.fragment or origin.username or origin.password or not origin.port:
+        raise ValueError("jpa_runtime_loopback_origin_required")
+    budget=min(6,deadline-time.monotonic())
+    if budget<=0:raise ValueError("jpa_runtime_total_deadline")
+    connection=_DeadlineConnection(origin.hostname,origin.port,budget)
+    try:
+        data=None if body is None else json.dumps(body,allow_nan=False).encode()
+        req=urllib.request.Request(base+path,data=data,method=method,headers={"Accept":"application/json",**({"Content-Type":"application/json"} if body is not None else {})})
+        cookies.add_cookie_header(req)
+        connection.request(method,path,data,dict(req.header_items()))
+        transport=connection.sock
+        transport.settimeout(connection.remaining())
+        with connection.getresponse() as response:
+            length=response.getheader("Content-Length")
+            if length is not None and (not length.isascii() or not length.isdigit() or int(length)>262144):raise ValueError("jpa_runtime_response_limit")
+            content=bytearray()
+            while True:
+                transport.settimeout(connection.remaining())
+                chunk=response.read1(min(16384,262145-len(content)))
+                connection.remaining();content.extend(chunk)
+                if len(content)>262144:raise ValueError("jpa_runtime_response_limit")
+                if not chunk or response.isclosed():break
+            if length is not None and len(content)!=int(length):raise ValueError("jpa_runtime_response_length_mismatch")
+            result=response.status,json.loads(content)
+            connection.remaining()
+            cookies.extract_cookies(response,req)
+            return result
+    except (OSError,http.client.HTTPException,ValueError,RecursionError):
+        if connection.expired.is_set() or time.monotonic()>=connection.end:raise ValueError("jpa_runtime_total_deadline") from None
+        raise ValueError("jpa_runtime_http_rejected") from None
+    finally:connection.finish()
 
 
 def child_environment(environ):
@@ -38,12 +104,13 @@ def verify_jar(path):
 
 def cleanup_owned(processes,stop):
     failed=False
-    for process,stream in processes:
-        try:stop(process)
-        except Exception:failed=True
-        finally:
-            try:stream.close()
+    with defer_termination():
+        for process,stream in processes:
+            try:stop(process)
             except Exception:failed=True
+            finally:
+                try:stream.close()
+                except Exception:failed=True
     if failed:raise ValueError("jpa_runtime_cleanup_failed")
 
 
@@ -80,8 +147,9 @@ def run(environ):
         if extra:env.update(extra)
         log=directory/(name+".log");stream=log.open("w");log.chmod(0o600)
         java=str(Path(env["JAVA_HOME"])/"bin/java") if env.get("JAVA_HOME") else "java"
-        process=subprocess.Popen([java,"-jar",str(immutable)],env=env,cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT)
-        processes.append((process,stream));state["processes"].append({"pid":process.pid,"kind":name,"stopped":False});save()
+        with defer_termination():
+            process=subprocess.Popen([java,"-jar",str(immutable)],env=env,cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT)
+            processes.append((process,stream));state["processes"].append({"pid":process.pid,"kind":name,"stopped":False});save()
         end=min(deadline,time.monotonic()+45)
         while time.monotonic()<end:
             text=log.read_text(errors="replace")
@@ -96,17 +164,9 @@ def run(environ):
                 return process,"http://127.0.0.1:"+str(port)
             time.sleep(.1)
         raise ValueError("jpa_runtime_start_deadline")
-    def client():return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    def client():return http.cookiejar.CookieJar()
     def request(c,base,method,path,body=None):
-        if time.monotonic()>=deadline:raise ValueError("jpa_runtime_total_deadline")
-        data=None if body is None else json.dumps(body).encode();req=urllib.request.Request(base+path,data=data,method=method,headers={"Accept":"application/json",**({"Content-Type":"application/json"} if body is not None else {})})
-        try:
-            response=c.open(req,timeout=6)
-        except urllib.error.HTTPError as error:response=error
-        with response:
-            raw=response.read(262145)
-            if len(raw)>262144:raise ValueError("jpa_runtime_response_limit")
-            return response.code,json.loads(raw)
+        return request_json(c,base,method,path,body,deadline)
     def expect(status,expected):
         if status!=expected:raise ValueError("jpa_runtime_http_contract_failed")
     def login(c,base,role):
@@ -140,20 +200,22 @@ def run(environ):
         state["phase"]="passed";save()
         return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":7,"restart_data_preserved":True,"session_relogin_after_restart":True,"full_cutover":False}
     finally:
-        cleanup_failed=False
-        try:cleanup_owned(processes,stop)
-        except Exception:cleanup_failed=True
-        state["all_owned_processes_stopped"]=all(p.poll() is not None for p,_ in processes)
-        try:
-            save()
-            if state["all_owned_processes_stopped"]:immutable.unlink(missing_ok=True)
-        except Exception:cleanup_failed=True
-        if cleanup_failed or not state["all_owned_processes_stopped"]:raise ValueError("jpa_runtime_cleanup_failed")
+        with defer_termination():
+            cleanup_failed=False
+            try:cleanup_owned(processes,stop)
+            except Exception:cleanup_failed=True
+            state["all_owned_processes_stopped"]=all(p.poll() is not None for p,_ in processes)
+            try:
+                save()
+                if state["all_owned_processes_stopped"]:immutable.unlink(missing_ok=True)
+            except Exception:cleanup_failed=True
+            if cleanup_failed or not state["all_owned_processes_stopped"]:raise ValueError("jpa_runtime_cleanup_failed")
 
 
 def main():
     try:
-        report=run(os.environ);target=ROOT/"target";target.mkdir(exist_ok=True);(target/"jpa-rehearsal-report.json").write_text(json.dumps(report)+"\n");print(json.dumps(report));return 0
+        with cleanup_on_termination():report=run(os.environ)
+        target=ROOT/"target";target.mkdir(exist_ok=True);(target/"jpa-rehearsal-report.json").write_text(json.dumps(report)+"\n");print(json.dumps(report));return 0
     except Exception:
         print(json.dumps({"status":"failed","error_code":"jpa_rehearsal_smoke_rejected"}));return 2
 
