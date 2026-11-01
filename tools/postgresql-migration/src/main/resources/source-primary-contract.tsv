@@ -1,0 +1,16 @@
+t_user	id
+t_product	id
+t_product_feature	product_id
+t_product_feature_tag	product_id,kind,tag
+t_order	o_id
+t_order_detail	d_id
+t_comment	id
+t_stamp	id
+t_market	id
+t_user_preference	user_id
+t_user_preference_value	user_id,kind,value_text
+t_user_favorite	user_id,product_id
+t_product_search_version	product_id
+t_product_search_outbox	event_id
+t_product_search_delivery	event_id
+t_product_search_relay_target	singleton_id

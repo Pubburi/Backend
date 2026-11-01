@@ -108,6 +108,10 @@ jobs:
           ./mvnw --batch-mode --no-transfer-progress -f tools/postgresql-migration/pom.xml verify
           mkdir -p target
           python3 scripts/postgresql_schema.py validate > target/postgresql-schema-report.json
+      - name: Verify isolated read-only source snapshot and failure recovery
+        env:
+          PUBBURI_SOURCE_CI_RUN: source-snapshot-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 scripts/source_snapshot_ci.py
       - name: Initialize disposable database
         env:
           MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
@@ -154,6 +158,9 @@ jobs:
             target/api-smoke-report.json
             target/search-smoke-report.json
             target/postgresql-schema-report.json
-            tools/postgresql-migration/target/surefire-reports/*.xml
+            target/source-snapshot-report.json
+            tools/postgresql-migration/target/surefire-reports/TEST-com.pubburi.migration.PostgresSchemaToolTests.xml
+            tools/postgresql-migration/target/surefire-reports/TEST-com.pubburi.migration.PostgresSchemaIntegrationTests.xml
+            tools/postgresql-migration/target/surefire-reports/TEST-com.pubburi.migration.IdentityReservationsTests.xml
           if-no-files-found: ignore
           retention-days: 7

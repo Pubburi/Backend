@@ -167,3 +167,30 @@ API 테스트는 새 계정/주문을 남기므로 검증 후 폐기 컨테이�
 CI는 Maven `target/surefire-reports/*.xml`과 자격정보/요청 원문이 없는
 `target/api-smoke-report.json`을 성공/실패와 관계없이 아티팩트로 7일 보존한다.
 개인 설정·DB 원본·서버 원문 로그는 업로드하지 않는다. 테스트 개수나 CI 시간은 앱 성능 지표가 아니다.
+
+## DB02 원본 읽기 전용 추출
+
+[Source snapshot 계약](SOURCE-SNAPSHOT.md)의 별도 모듈은 정확한 타입/승인 receipt·사설 출력·
+명시 TLS/작업 창·읽기 전용 권한과 소유 컨테이너 guard를 검증한다. DB없는 기본 check는
+SourceContractTests를 실행하고 실제 원본 통합은 skip한다. 이는 PG import/전체 복사 검증이 아니다.
+
+required backend-ci는 기존 PG모듈9개(단위5+실PG4)/현재 MySQL HTTP14/실엔진 검사를 유지하면서 다음을 추가한다.
+
+~~~bash
+PUBBURI_SOURCE_CI_RUN=source-snapshot-unique-run python3 scripts/source_snapshot_ci.py
+~~~
+
+도구는 cached mysql:8.4에서 새 labelled tmpfs/동적127포트 컨테이너를 직접 생성한다. 새 CA/SAN·
+VERIFY_IDENTITY·SELECT/SHOW VIEW reader·DB 한정 fixture control을 만들며 기존 API 서비스의
+CA/권한/DB를 바꾸지 않는다. 실제 source 통합에서 RR 중 두 표 DML·원값 복원, 고수위 변경
+거절(no reset), maintenance marker 변경/NUL/schema drift 거절과 실패 receipt·최종 행 보존을
+검사한다. unescaped DB grant의 underscore wildcard가 허구 shadow DB에 닿는 반례와
+정상 escaped-literal reader의 shadow 접근 거절/자체 source 접근 유지를 구분해 확인한다.
+wrapper의 export/두 번 offline validate·같은 출력 재사용 거절도 실제 실행한다.
+모든 경로에서 label/CID를 재확인한 뒤 자기 컨테이너/private CA·로그·snapshot을 정리한다.
+기존 container/volume 채택이나 source 원본 초기화는 제공하지 않는다.
+
+원본 snapshot/SourceIntegrationTests XML/원문 오류 로그에는 개인값·password hash가 포함될 수
+있으므로 **업로드하지 않는다**. CI artifact는 고정 오류/안전한 집계의 source-snapshot-report.json과
+기존 PG 테스트 세 클래스의 XML만 명시하며 원본·CA/private key·.env는 제외한다. CI 준비/수신
+거절을 서비스 성능이나 실제 이관 데이터 손실 개선율로 계산하지 않는다.

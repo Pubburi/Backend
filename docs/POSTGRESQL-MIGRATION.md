@@ -12,7 +12,7 @@ DB01–DB06은 기존 필수20기능의 기술 선행 조건이지 추가 사용
   유지하고 엔티티를 HTTP에 직접 노출하지 않는다. OSIV는 끄고 Hibernate ddl-auto=validate를 쓴다.
 - PostgreSQL 전용 versioned Flyway SQL이 스키마 정본이다. 기존 MySQL001–008이나 data.sql을
   PostgreSQL 문법으로 덮어쓰지 않는다. 새 설치·복사 이관·런타임 cutover는 각각 검증한다.
-- 현재 증가분은 독립 `tools/postgresql-migration`의 실제 스키마 installer와 검증이다. API에
+- 현재 증가분은 독립 `tools/postgresql-migration`의 실제 스키마 installer/검증과 [원본 snapshot export](SOURCE-SNAPSHOT.md)다. API에
   반쪽 PostgreSQL profile/비사용 JPA entity를 추가하지 않으며 root POM/현재 jar는 바꾸지 않는다.
 - Java17과 기존 Boot3.5.0을 보존한다. 현재 BOM의 Hibernate6.6.15.Final/JDBC42.7.5를 확인했다.
   독립 도구는 Flyway OSS13.12.0 + PostgreSQL plugin13.12.0과 보안 수정된 JDBC42.7.14를 고정한다.
@@ -87,7 +87,8 @@ baseline으로 조용히 채택하지 않는다. 실패한 transactional DDL의 
 
 명시 ID 복사만으로 identity sequence가 따라오지 않는다. 살아 있는 행의 MAX+1만 쓰면 원본에서
 삭제된 ID를 재사용할 수 있으므로 원본 AUTO_INCREMENT의 다음 값도 읽기 전용으로 수집해야 한다.
-이번은 다음 manifest의 엄격 검증/예약 기능이며 실제 전체 MySQL export/import는 후속이다.
+원본의 실제 읽기 전용 export와 고수위 검수는 [별도 도구](SOURCE-SNAPSHOT.md)로 제공한다. 다음
+identity manifest를 PG 예약에 연결하는 실제 import/전체 행 복사는 후속이다.
 
 ~~~text
 pubburi-identities-v1
