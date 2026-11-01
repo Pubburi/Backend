@@ -1,0 +1,30 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "analysis": {
+      "analyzer": {
+        "pubburi_ko": {"type": "custom", "tokenizer": "nori_tokenizer", "filter": ["lowercase"]}
+      }
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "_source": {"enabled": true},
+    "_meta": {"owner": "pubburi", "schema": "products-v1"},
+    "properties": {
+      "product_id": {"type": "integer", "coerce": false},
+      "source_version": {"type": "long", "coerce": false},
+      "deleted": {"type": "boolean"},
+      "name": {"type": "text", "analyzer": "pubburi_ko", "fields": {"raw": {"type": "keyword"}}},
+      "category": {"type": "keyword"},
+      "price_krw": {"type": "integer", "coerce": false},
+      "abv_percent": {"type": "float", "coerce": false},
+      "order_count": {"type": "integer", "coerce": false},
+      "taste_known": {"type": "boolean"},
+      "aroma_known": {"type": "boolean"},
+      "taste_tags": {"type": "keyword"},
+      "aroma_tags": {"type": "keyword"}
+    }
+  }
+}
