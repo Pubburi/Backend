@@ -158,7 +158,13 @@ def main():
         try:
             if state["container_id"]:
                 owned_container()
-                (private / "engine.log").write_text(docker("logs", state["container_id"]).stdout)
+                try:
+                    logs = docker("logs", state["container_id"])
+                    (private / "engine.log").write_text(logs.stdout + logs.stderr)
+                except Exception as error:
+                    report["status"] = "failed"
+                    report["diagnostic_error"] = type(error).__name__
+                # Diagnostic IO must not bypass cleanup of the already verified owner.
                 docker("rm", "-f", state["container_id"])
             if state["volume"]:
                 volume = json.loads(docker("volume", "inspect", state["volume"]).stdout)[0]

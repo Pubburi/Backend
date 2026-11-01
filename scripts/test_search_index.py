@@ -134,7 +134,7 @@ class SearchProtocolTests(unittest.TestCase):
                 def write_receipt(path, report):
                     if final_failure and report["completed"]: raise OSError("private-path-must-not-leak")
                     return real_receipt(path, report)
-                effects = ["applied", "duplicate"] if final_failure else ["applied", search.SearchError("index_write_failed")]
+                effects = ["applied", "duplicate"] if final_failure else ["applied", search.SearchError("engine_response_length_mismatch")]
                 output = io.StringIO()
                 with patch.object(search.sys, "argv", args), patch.object(search.Engine, "ready"), patch.object(search.Engine, "apply", side_effect=effects), patch.object(search, "receipt", side_effect=write_receipt), patch("sys.stderr", output):
                     self.assertEqual(search.main(), 2)
@@ -163,6 +163,9 @@ class SearchTransportTests(unittest.TestCase):
                 if test.mode == "partial":
                     self.send_header("Content-Length", "1000"); self.end_headers()
                     self.wfile.write(b"{"); self.wfile.flush(); test.started.set(); test.release.wait(2); return
+                if test.mode == "short_length":
+                    self.send_header("Content-Length", "12"); self.end_headers()
+                    self.wfile.write(b"{}"); self.wfile.flush(); self.close_connection = True; return
                 if test.mode in ("at_cap", "chunked_overflow"):
                     content = b"{}" + b" " * (search.MAX_RESPONSE_BYTES - 2 + (test.mode == "chunked_overflow"))
                     self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
@@ -193,6 +196,11 @@ class SearchTransportTests(unittest.TestCase):
         self.mode = "partial"; self.http.deadline = 0.2
         with self.assertRaises(search.SearchError): self.http.request("GET", "/")
         self.assertTrue(self.started.is_set()); self.assertFalse(self.release.is_set())
+
+    def test_complete_json_cannot_hide_a_premature_eof_before_declared_length(self):
+        self.mode = "short_length"
+        with self.assertRaisesRegex(search.SearchError, "response_length_mismatch"):
+            self.http.request("GET", "/")
 
 
 if __name__ == "__main__": unittest.main()

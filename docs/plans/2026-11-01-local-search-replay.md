@@ -37,6 +37,14 @@ metadata는 JSON 타입을 보존해 비교하며 ack 실패 수는 정확한 in
 alias fixture도 기대 정의와 공유하던 참조를 deepcopy로 분리했다. 보강 뒤 전체 Python38개와
 같은 실제 엔진 lifecycle을 다시 통과했고 Java/앱 jar는 변경하지 않았다.
 
+독립 정적 검토는 두 P2를 추가로 지적했고 수정 전에 재현했다. 실제 HTTPResponse의 선언12B/
+수신2B인 완결 JSON EOF가 성공하던 조건, 가짜 Docker 경계에서 로그 조회/파일쓰기 실패가
+컨테이너/볼륨 정리를 건너뛰던 두 조건의 회귀가 실패했다. 수신 길이 일치 검사와 진단/정리
+분리를 적용했다. 검증 본문이 성공한 뒤에도 로그/삭제 실패는 실패 상태이며, 소유 CID/볼륨 정리·
+비소유 보호·삭제 실패 보류를 확인했다. 이후 전체 Python43개와 최종 실제 엔진 lifecycle이
+통과했다. 불완전 응답은 부분 적용 receipt도 incomplete로 남는다. 이는 새 도구의 개발 중
+검수/수정 근거이며 기존 서비스의 실제 truncation/자원 누출 사고를 주장하지 않는다.
+
 최종 실제 검증은 공식 base/nori image, 512MiB heap·1.5GiB 컨테이너 상한, 새 전용 volume과
 동적 loopback 포트에서 다음을 통과했다. 설정 상한은 실측 사용량이 아니다.
 
@@ -48,8 +56,8 @@ alias fixture도 기대 정의와 공유하던 참조를 deepcopy로 분리했�
 6. 새 색인의 실제 CLI 이벤트 이력 재생, 반복 시 적용0/중복2/오래된2와 complete receipt.
 7. 정지 엔진에서 exit2와 incomplete receipt. 소유 label을 확인한 컨테이너/volume 정리.
 
-최종 관리 client SHA-256은 `ef74e1a9694f66bb8c73f52dd3ec08303735b9e1d920ba2e70a6f60bc688aa9a`이며
-실제 report의 hash와 일치했다. 초기 독립 probe와 세 전체 lifecycle 실행의 컨테이너/volume을
+최종 관리 client SHA-256은 `db258961ab00737277bc7584d0894748b8aaacc63e2d411cda9f31e4b3c2079b`이며
+실제 report의 hash와 일치했다. 초기 독립 probe와 네 전체 lifecycle 실행의 컨테이너/volume을
 모두 정리했고, 같은 label의 잔여 자원0을 확인했다. ID/포트/PID·원문 로그·가상 입력은 ignored에
 보존하며 공개 artifact에는 가상 검증의 집계/버전·client hash만 둔다. 원본 업무/추천 데이터는 사용하지 않았다.
 

@@ -172,6 +172,7 @@ class Http:
                 length = response.getheader("Content-Length")
                 if length is not None and (not length.isascii() or not length.isdigit() or int(length) > MAX_RESPONSE_BYTES):
                     raise SearchError("engine_response_length_rejected")
+                declared_length = None if length is None else int(length)
                 content = bytearray()
                 while True:
                     remaining = end - time.monotonic()
@@ -186,6 +187,8 @@ class Http:
                         raise SearchError("engine_response_exceeds_2_mib")
                     if not chunk:
                         break
+                if declared_length is not None and len(content) != declared_length:
+                    raise SearchError("engine_response_length_mismatch")
                 return response.status, decode(content)
         except SearchError:
             raise

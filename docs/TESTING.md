@@ -17,6 +17,9 @@ pinned base/nori를 준비한다. 기존 서버·DB/볼륨을 채택하지 않�
 가상 ID 이력의 중복/역전·동일 버전/동시 충돌·strict schema·tombstone/GET 차이·volume 재시작·
 부분 실패 receipt를 확인하며 outbox·실제 업무 동기화·검색 품질/시간 성능으로 확대하지 않는다.
 [실제 조건과 초기 실패](plans/2026-11-01-local-search-replay.md)를 따른다.
+실제 HTTPResponse fixture는 Content-Length보다 짧은 완결 JSON EOF를 거절하고 chunked/본문
+상한·전체 deadline을 유지한다. 검증 본문 성공 뒤의 로그 IO 실패도 소유 자원 정리를 막지 않으며
+비소유/삭제 실패 보호·실패 상태와 partial receipt를 별도 단위 경계로 확인한다.
 
 상품 page offset은 음수/0/양수 래핑과 첫 지원 범위 초과를 SQL 전에400으로 거절한다.
 MockMvc와 실제 상품 서비스/fake DAO는 미지원 조건의 DAO 호출0·정상/최대 근처·0/음수/
