@@ -288,8 +288,23 @@ def verify_product_filter_openapi(document):
         value = parameters[name]
         assert value["style"] == "form" and value["explode"] is True
         assert value["schema"]["type"] == "array" and value["schema"]["maxItems"] == 20
+    assert "2147483647 OFFSET" in parameters["page"]["description"]
+    assert "400 BAD_REQUEST" in parameters["page"]["description"]
     assert parameters["minPriceKrw"]["schema"]["type"] == "integer"
     assert parameters["maxAbvPercent"]["schema"]["maximum"] == 100
+
+
+
+def product_page_offset_contract(client):
+    """Fixed invalid integer offsets must not wrap into SQL or a different page."""
+    for page, size in ((2147483647, 100), (1073741825, 4), (42949674, 100), (21474838, 100)):
+        error = client.request("GET", f"/products?page={page}&size={size}", 400, error_code="BAD_REQUEST")["error"]
+        assert error["message"] == "Product page offset exceeds the supported range" and error["fields"] == {}
+    for page, size, normalized_size in ((0, 0, 12), (-5, -5, 12), (1, 1000, 100),
+                                         (-2147483648, 2147483647, 100)):
+        query = f"/products?page={page}&size={size}&sort=priceAsc"
+        expected = f"/products?page=1&size={normalized_size}&sort=priceAsc"
+        assert client.request("GET", query, 200)["data"] == client.request("GET", expected, 200)["data"]
 
 
 def default_recommendation_contract(client, expected_source=None):
@@ -930,6 +945,8 @@ def main():
         client = ApiClient(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         product = read_only_contract(client)
         report["completed"].append("read-only HTTP envelope, pagination, auth and validation")
+        product_page_offset_contract(client)
+        report["completed"].append("checked product page offsets and preserved normalization")
         documentation_contract(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         report["completed"].append("runtime OpenAPI feature paths/schemas and Swagger UI")
         default_recommendation_contract(client, os.environ.get("PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE"))
