@@ -97,6 +97,8 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 각 요청은 최대6초와 전체 남은120초 중 짧은 예산을 사용한다. 실행 supervisor는 작업 종료 뒤에도
 소유 session의 식별을 유지해 자식 정리 후 leader를 reap한다. 정상/오류·SIGTERM·기한 초과는
 같은 정리 경로를 사용하며 startup/cleanup 시간은 HTTP 지연 성능 수치가 아니다.
+group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제를 제한 시간 안에 관찰한다.
+기한 뒤 점유와 다른 bind 오류는 계속 실패하며 supervisor wait를 모든 자식의 즉시 회수로 해석하지 않는다.
 
 남은 DB03은 다른 업무 DAO/API의 실제 JPA 이전과 전체 MyBatis runtime 제거다. 거래·필터/정렬·
 outbox/relay·웹 전체 인수와 최종 cutover/rollback은 DB04–DB06에서 별도로 검증한다. 이번의 실제

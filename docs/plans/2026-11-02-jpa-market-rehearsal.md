@@ -132,6 +132,22 @@ Java/POM/JAR/V1/V2는 바꾸지 않아 기존 Maven/실DB 근거를 유지했다
 API mock/예상외 API 오류/pageerror는 없었다. 이 신규 JPA 연동1회는 기존 MySQL 화면의
 전후 오류 세 조건과 합산하지 않는다. 전체 FE03/C04·상품/주문 인수가 아니다.
 
+### Native 검토 — 종료 후 socket 관찰
+
+PR27의 후속 native 검토는 session에 SIGKILL을 보낸 뒤 supervisor만 wait하면 모든 자식의
+스케줄링 종료/socket 회수가 그 즉시 끝나는 것은 아니라고 지적했다. 조정자의 전체 check와
+해당 단독12번째 실행에서 즉시 bind가 EADDRINUSE로 실패했다. 작업자의 별도 focused50회는
+재발하지 않았고 이를 반증/안정성 보장으로 쓰지 않는다.
+
+새로 소유한 socket을 잠시 점유한 뒤 해제하는 결정적 fixture에서 원래 즉시 단언의 EADDRINUSE를
+확인했다. 테스트의 종료 판정만 최대2초 안에 실제 해제를 관찰하도록 바꿨다. EADDRINUSE에만
+짧은 간격의 관찰을 허용하고 계속 점유하면 기한에 실패한다. EACCES 같은 다른 오류는 즉시
+실패한다. 지연 해제/영구 점유/다른 오류를 각각 회귀로 구분했으며 CI 전체를 재실행해 우연히
+통과시키는 방식이 아니다. 실행 command·Java/POM/JAR/DB는 바꾸지 않았다.
+
+이 OS 종료 관찰은 서비스 지연·성능 개선이나 새로운 사용자 오류 감소가 아니다. 종료 signal을
+보냈다는 사실과 자원 회수의 관측을 구분하며 같은 조건의 Python3.12 도구86개를 통과했다.
+
 ## 불변 artifact와 한계
 
 - 최종 새 JPA JAR SHA256: `8cef8a1bcddd9bc6d24ddf22a70bb2a1075a87d5699c36659f13970403e2d0ae`.

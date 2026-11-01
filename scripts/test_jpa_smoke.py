@@ -1,5 +1,6 @@
 import unittest
 import io
+import errno
 import subprocess
 import signal
 import os
@@ -124,9 +125,19 @@ class JpaOwnedCommandTests(unittest.TestCase):
         end={"zero":"sys.exit(0)","nonzero":"sys.exit(2)","sigterm":"os.kill(os.getpid(),signal.SIGTERM)","waiting":"time.sleep(60)"}[outcome]
         code="import os,signal,subprocess,sys,time;from pathlib import Path;subprocess.Popen([sys.executable,'-c',"+repr(child)+","+repr(str(status))+"]);\nwhile not Path("+repr(str(status))+").exists():time.sleep(.01)\n"+end
         return status,[sys.executable,"-c",code]
-    def assert_stopped(self,status):
+    def assert_stopped(self,status,budget=2):
         value=json.loads(status.read_text())
-        with socket.socket() as probe:probe.bind(("127.0.0.1",value["port"]))
+        end=time.monotonic()+budget
+        while True:
+            try:
+                with socket.socket() as probe:probe.bind(("127.0.0.1",value["port"]))
+                return
+            except OSError as error:
+                # killpg is asynchronous: observe the owned listener's actual release.
+                # Only this shutdown condition is polled; a persistent socket still fails.
+                remaining=end-time.monotonic()
+                if error.errno!=errno.EADDRINUSE or remaining<=0:raise
+                time.sleep(min(.01,remaining))
     def emergency_cleanup(self,status):
         if status.exists():
             value=json.loads(status.read_text())
@@ -163,3 +174,26 @@ class JpaOwnedCommandTests(unittest.TestCase):
                 jpa_rehearsal_ci.command(args,dict(os.environ),self.root/"deadline.log",budget=.5)
             self.assert_stopped(status)
         finally:self.emergency_cleanup(status)
+
+    def test_shutdown_observation_accepts_a_delayed_release_inside_its_bound(self):
+        listener=socket.socket();listener.bind(("127.0.0.1",0));status=self.root/"delayed.json"
+        status.write_text(json.dumps({"port":listener.getsockname()[1]}));release=threading.Event()
+        thread=threading.Thread(target=lambda:(release.wait(.04),listener.close()));thread.start()
+        try:self.assert_stopped(status,budget=.5)
+        finally:release.set();thread.join(2);listener.close()
+
+    def test_shutdown_observation_keeps_a_persistent_listener_as_failure(self):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1",0));status=self.root/"persistent.json"
+            status.write_text(json.dumps({"port":listener.getsockname()[1]}));start=time.monotonic()
+            with self.assertRaises(OSError) as failure:self.assert_stopped(status,budget=.05)
+            self.assertEqual(failure.exception.errno,errno.EADDRINUSE)
+            self.assertLess(time.monotonic()-start,.5)
+
+    def test_shutdown_observation_does_not_retry_other_bind_failures(self):
+        status=self.root/"denied.json";status.write_text(json.dumps({"port":1}))
+        with patch("test_jpa_smoke.socket.socket") as factory:
+            bind=factory.return_value.__enter__.return_value.bind
+            bind.side_effect=PermissionError(errno.EACCES,"authored bind rejection")
+            with self.assertRaises(PermissionError):self.assert_stopped(status)
+            self.assertEqual(bind.call_count,1)
