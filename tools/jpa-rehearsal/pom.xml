@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.5.16</version><relativePath/></parent>
+  <groupId>com.pubburi</groupId><artifactId>pubburi-jpa-rehearsal</artifactId><version>0.0.1-SNAPSHOT</version>
+  <properties><java.version>17</java.version><tomcat.version>10.1.61</tomcat.version><jackson-bom.version>2.21.8</jackson-bom.version><postgresql.version>42.7.14</postgresql.version><flyway.version>13.12.0</flyway.version></properties>
+  <dependencies>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
+    <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-crypto</artifactId></dependency>
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId></dependency>
+    <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
+    <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-database-postgresql</artifactId><version>${flyway.version}</version></dependency>
+    <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId><version>2.8.9</version></dependency>
+    <!-- Real legacy annotation types at compile time only; never an annotation stub or runtime mapper. -->
+    <dependency><groupId>org.mybatis</groupId><artifactId>mybatis</artifactId><version>3.5.19</version><scope>provided</scope></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <resources>
+      <resource><directory>src/main/resources</directory></resource>
+      <resource><directory>../postgresql-migration/src/main/resources</directory><includes><include>db/postgresql/**</include></includes></resource>
+    </resources>
+    <plugins>
+      <plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.6.1</version><executions><execution><id>shared-contract-source</id><phase>generate-sources</phase><goals><goal>add-source</goal></goals><configuration><sources><source>../../src/main/java</source></sources></configuration></execution></executions></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><includes>
+        <include>com/pubburi/rehearsal/**/*.java</include>
+        <include>com/pubburi/pub/controller/api/*.java</include><include>com/pubburi/pub/controller/auth/*.java</include><include>com/pubburi/pub/controller/response/*.java</include>
+        <include>com/pubburi/pub/controller/request/LoginRequest.java</include><include>com/pubburi/pub/controller/request/MarketRequest.java</include><include>com/pubburi/pub/controller/rest/MarketRestController.java</include>
+        <include>com/pubburi/pub/model/dto/*.java</include><include>com/pubburi/pub/model/dao/UserDao.java</include><include>com/pubburi/pub/model/dao/MarketDao.java</include>
+        <include>com/pubburi/pub/model/service/UserService.java</include><include>com/pubburi/pub/model/service/UserServiceImpl.java</include><include>com/pubburi/pub/model/service/PasswordHasher.java</include>
+        <include>com/pubburi/pub/model/service/MarketService.java</include><include>com/pubburi/pub/model/service/MarketServiceImpl.java</include><include>com/pubburi/pub/config/CorsConfig.java</include>
+      </includes></configuration></plugin>
+      <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><configuration><excludes><exclude><groupId>org.mybatis</groupId><artifactId>mybatis</artifactId></exclude></excludes></configuration></plugin>
+    </plugins>
+  </build>
+</project>

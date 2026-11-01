@@ -27,6 +27,12 @@ def prepare(environ):
     if any("PUBBURI_PG_IMPORT_" + purpose + "_DB_NAME" in environ for purpose in ("FRESH", "RECOVERY", "CONFLICT", "TYPED")):
         for purpose in ("FRESH", "RECOVERY", "CONFLICT", "TYPED"):
             databases.append((environ["PUBBURI_PG_IMPORT_" + purpose + "_DB_NAME"], environ["PUBBURI_PG_IMPORT_" + purpose + "_RUN_TOKEN"]))
+    if "PUBBURI_PG_JPA_DB_NAME" in environ or "PUBBURI_PG_JPA_FAILURE_DB_NAME" in environ:
+        databases.extend([(environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_RUN_TOKEN"]),
+                          (environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_RUN_TOKEN"])])
+    runtime = environ.get("PUBBURI_PG_JPA_RUNTIME_USER") if "PUBBURI_PG_JPA_DB_NAME" in environ else None
+    if "PUBBURI_PG_JPA_DB_NAME" in environ and (runtime is None or not re.fullmatch(r"[a-z][a-z0-9_]{0,50}", runtime) or runtime in (role,admin) or not environ.get("PUBBURI_PG_JPA_RUNTIME_PASSWORD")):
+        raise ValueError("postgresql_ci_runtime_role_rejected")
     if len({item[0] for item in databases}) != len(databases) or any(not re.fullmatch(r"[a-z][a-z0-9_]*_ci", name)
             or not re.fullmatch(r"[A-Za-z0-9_-]{12,100}", token) for name, token in databases):
         raise ValueError("postgresql_ci_databases_rejected")
@@ -97,11 +103,15 @@ def prepare(environ):
 
     sql("SET standard_conforming_strings='on';\nSET password_encryption='scram-sha-256';\nCREATE ROLE " + role + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
         "NOREPLICATION NOBYPASSRLS PASSWORD " + literal(environ["PUBBURI_PG_PASSWORD"]) + ";", tls=True)
+    if runtime is not None:
+        sql("SET standard_conforming_strings='on'; SET password_encryption='scram-sha-256'; CREATE ROLE " + runtime + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD " + literal(environ["PUBBURI_PG_JPA_RUNTIME_PASSWORD"]) + ";", tls=True)
     for database, token in databases:
         sql("CREATE DATABASE " + database + " ENCODING 'UTF8' TEMPLATE template0;\nGRANT CONNECT,CREATE ON DATABASE " + database + " TO " + role + ";", tls=True)
         sql("REVOKE CREATE ON SCHEMA public FROM PUBLIC;\nCREATE TABLE public.pubburi_pg_migration_guard(token VARCHAR(100) PRIMARY KEY);\n"
             "INSERT INTO public.pubburi_pg_migration_guard VALUES (" + literal(token) + ");\n"
             "GRANT SELECT ON public.pubburi_pg_migration_guard TO " + role + ";", database, tls=True)
+        if runtime is not None and database in (environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"]):
+            sql("GRANT SELECT ON public.pubburi_pg_migration_guard TO " + runtime + ";", database, tls=True)
     # No process needs the CA signing key or CSR after the fresh service has been configured.
     for name in ("ca.key", "server.key", "server.csr", "server.ext", "ca.srl"):
         (directory / name).unlink(missing_ok=True)

@@ -142,7 +142,11 @@ def run(environ):
             if result.returncode:
                 raise ValueError("source_ci_postgresql_import_failed")
             imported = True
-        return {"status": "passed", "postgresql_import_verified": imported, "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
+        jpa = False
+        if environ.get("PUBBURI_JPA_CI") == "1":
+            from jpa_rehearsal_ci import run as run_jpa
+            jpa = run_jpa(source, directory / "accepted", directory)
+        return {"status": "passed", "jpa_rehearsal_verified": jpa, "postgresql_import_verified": imported, "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
                 "api_jpa_cutover": False, "source_original_touched": False}
     finally:
         # Diagnostic failures never bypass cleanup; never remove a non-owned container.

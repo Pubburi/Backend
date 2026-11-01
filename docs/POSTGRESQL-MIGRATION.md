@@ -12,12 +12,14 @@ DB01–DB06은 기존 필수20기능의 기술 선행 조건이지 추가 사용
   유지하고 엔티티를 HTTP에 직접 노출하지 않는다. OSIV는 끄고 Hibernate ddl-auto=validate를 쓴다.
 - PostgreSQL 전용 versioned Flyway SQL이 스키마 정본이다. 기존 MySQL001–008이나 data.sql을
   PostgreSQL 문법으로 덮어쓰지 않는다. 새 설치·복사 이관·런타임 cutover는 각각 검증한다.
-- 현재 증가분은 독립 `tools/postgresql-migration`의 실제 스키마 installer/검증과 [원본 snapshot export](SOURCE-SNAPSHOT.md) 및
-  [승인 snapshot의 빈 target 복사/검증](SOURCE-IMPORT.md)다. API에
-  반쪽 PostgreSQL profile/비사용 JPA entity를 추가하지 않으며 root POM/현재 jar는 바꾸지 않는다.
+- DB02는 독립 `tools/postgresql-migration`의 실제 스키마 installer/검증과 [원본 snapshot export](SOURCE-SNAPSHOT.md) 및
+  [승인 snapshot의 빈 target 복사/검증](SOURCE-IMPORT.md)를 제공한다. 이 단계는 root POM/API를
+  바꾸지 않았다. DB03은 별도 `tools/jpa-rehearsal`에서 [실제 세션·매장 JPA 제공자](JPA-REHEARSAL.md)를
+  제공한다. 미제공 API는 등록하지 않으며 비사용 entity/stub로 전체 전환을 주장하지 않는다.
 - Java17과 기존 Boot3.5.0을 보존한다. 현재 BOM의 Hibernate6.6.15.Final/JDBC42.7.5를 확인했다.
   독립 도구는 Flyway OSS13.12.0 + PostgreSQL plugin13.12.0과 보안 수정된 JDBC42.7.14를 고정한다.
-  전체 JPA runtime/Boot 자동구성과의 결합은 DB03의 실제 기동 검증이며 이번 완료에 포함하지 않는다.
+  별도 JPA 제공자는 Boot3.5.16/Spring Data JPA3.5.13/Hibernate6.6.53.Final과 실제 기동을
+  검증한다. 기본 API Boot3.5.0/기존 jar와 전체 JPA 전환 상태는 구분한다.
 
 근거: [Flyway13.12.0](https://github.com/flyway/flyway/releases/tag/flyway-13.12.0),
 [Java17/14부터 Java21](https://documentation.red-gate.com/fd/api-java-277579358.html),
@@ -124,6 +126,9 @@ DB02는 승인 snapshot의16표 전체 행/원문 payload·PK/FK/epoch·시간/�
 한계는 [import 기록](plans/2026-11-02-postgresql-source-import.md)을 따른다. 원본 규모/권한/문자열
 질의 동등성과 실제 서비스 재인수·전환까지 전체 DB02/프로젝트 완료로 일반화하지 않는다. DB03은 MyBatis/MySQL 최종 runtime 제거와 실제 JPA API, DB04는 거래/계정 수명,
 DB05는 Psycopg3·DB 실제시각 lease/ACK·검색 대체, DB06은 전체 로컬/CI/웹 인수·cutover/rollback이다.
+DB03의 현재 세션·매장 증분은 별도 폐기 PG/TLS·최소 runtime 역할에서 기존 DTO/서비스·Repository·
+projection·비밀번호 CAS와 사용자 전체 잠금의 실제 의미를 확인한다. 전체 미제공 DAO/업무 API는
+후속이며 [제공 범위/검증 기록](plans/2026-11-02-jpa-market-rehearsal.md)을 따른다.
 DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.

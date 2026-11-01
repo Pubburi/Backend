@@ -59,6 +59,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | JSON | Jackson BOM 2.21.8 · 문자셋/엄격 입력 계약 |
 | 현재 API 저장 | MyBatis 3.0.3, MySQL 8.4 · 이관 전 기준 |
 | 확정 저장 전환 | PostgreSQL 18.6 · Spring Data JPA(Hibernate) · Flyway Community |
+| 별도 JPA 제공자 | Boot 3.5.16 · Spring Data JPA 3.5.13 · Hibernate 6.6.53.Final · 세션/매장 범위 |
 | 로컬 색인 | OpenSearch 3.9.0 · analysis-nori 3.9.0 · 명시 관리 CLI |
 | API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
@@ -66,6 +67,8 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 
 PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 원본 추출 도구](docs/SOURCE-SNAPSHOT.md), [승인 자료의 빈 대상 복사·검증 도구](docs/SOURCE-IMPORT.md)를 제공합니다. 전체 데이터 이관과 JPA API 전환은
 [전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따르며, 현재 API 실행 경로와 과거 검증을 보존합니다.
+별도 [세션·매장 JPA 제공자](docs/JPA-REHEARSAL.md)는 복사한 PostgreSQL에서 기존 계약으로
+로그인과 매장 CRUD를 실행합니다. 다른 업무 API와 기본 로컬 스택의 전환은 후속입니다.
 
 <a id="architecture"></a>
 
