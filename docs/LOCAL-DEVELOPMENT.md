@@ -29,7 +29,9 @@ DB 이름·포트를 바꾸면 `PUBBURI_DB_URL`도 같은 값으로 맞춘다.
 `up`은 전용 Compose 프로젝트 `pubburi-local`의 MySQL을 기동하고 세 서버를 실행한다.
 기존 일반 Compose 프로젝트의 DB 볼륨을 이동하거나 삭제하지 않는다.
 기존 볼륨의 스키마를 자동 전환하지 않는다. 새 상품 쓰기는 검색 outbox도 필요하므로 기존 DB는
-백업/쓰기 중단 후 001–006의 적용 상태와 [007 수동 전환](SEARCH-OUTBOX.md)을 확인한다.
+백업/쓰기 중단 후 001–006의 적용 상태와 [007 outbox 전환](SEARCH-OUTBOX.md),
+[008 delivery 전환](SEARCH-RELAY.md)을 순서대로 확인한다. relay는 별도 환경에서 명시 실행하며
+기본 통합 실행이 Python relay나 OpenSearch 기동을 요구하지 않는다.
 현재 data.sql은 빈 새 DB용이며 기존 데이터에 다시 실행하거나 reset으로 전환하지 않는다.
 소스를 수정한 경우 개발 서버의 반영 방식을 확인하고 Java 변경은 재시작한다.
 
@@ -77,5 +79,6 @@ DB 초기화는 **전용 로컬 DB의 모든 변경을 삭제**한다. 앱을 �
 ./scripts/local-stack.sh reset-db --confirm-delete-local-data
 ```
 
-추천 서버는 현재 헬스 체크만 제공한다. 통합 실행 성공은 추천 모델·회원 흐름 전체의
+기본 추천 API는 로컬 추천 서버의 B0를 호출하며 미기동/장애에는 현재 DB의 기본 목록을 제공한다.
+추천 서버는 B0/B1 계약을 제공하지만 통합 실행 성공은 추천 모델·회원 흐름 전체의
 완성을 의미하지 않는다. [개발 계획](DELIVERY-PLAN.md)의 기능별 검증을 별도로 진행한다.

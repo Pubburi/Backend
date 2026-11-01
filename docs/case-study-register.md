@@ -12,7 +12,7 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 
 | ID | README 사례 | 채용 관점의 선정 이유 | 근거 범위 | 실측 성능 |
 |---|---|---|---|---|
-| BE-CS05 | 업무 변경과 검색 outbox의 원자적 생산 | 단일 업무TX·현재 특성 snapshot·상품별 버전·삭제 수명·외부 저장소 재생과 global commit 순서의 차이를 설명한다. | 실제 MySQL 원값 보존/실패·동시성, 실제 업무 API→CLI→OpenSearch 재생/재시작 | 신규 설계 정확성이며 지연 성능 미측정 |
+| BE-CS05 | 업무 원자 생산과 검색 릴레이의 상태 경계 | 단일 업무TX·상품별 버전·삭제 수명과 외부 IO 분리·lease/token ACK·source/target 수명·commit 순서의 차이를 설명한다. | 실제 MySQL 원값 보존/실패·동시성, API→CLI와 relay→OpenSearch의 별도 검증 | 신규 설계 정확성이며 지연 성능 미측정 |
 | BE-CS02 | 같은 ID 재가입·권한 변경의 기존 세션 구분 | 계정 인스턴스와 자격 수명, 실권한·표시·DB 실패·세션 경합을 구분하고 재발급의 버전 경계를 설명한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·003 전환, 제어한 단위 인터리빙 | 독립 경계 각각 1/1→0/1은 정확성; 성능 미측정 |
 | BE-CS03 | 중복 주문 상품 정규화 | 입력 단위와 저장·집계 단위의 차이, 여러 쓰기의 책임 경계를 드러낸다. | 서비스·SQL 및 기존 가짜 DAO 검증 | 미측정 |
 | BE-CS04 | 가격·참조 삭제에서 주문 이력 분리 | 업무 기록과 활성 상품/회원의 수명·잠금·스냅샷·nullable/권한·개인정보·FK 전환 판단을 연결한다. | 실제 MySQL 8.4/불변 jar HTTP 전후·기존 스키마 전환 | 가격 3/3→0/3, 상세 2/3→0/3·주문 유실 3/3→0/3은 각 실험의 정확성; 성능 미측정 |
@@ -36,7 +36,9 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 - 구현: [업무 쓰기](../src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java), [상품별 영속 버전/현재 투영](../src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java), [SQL](../src/main/resources/mappers/productSearchOutbox.xml), [007](migrations/007-product-search-outbox.sql).
 - 근거: [작업 계획](plans/2026-11-01-product-search-outbox.md)의 실제 MySQL 8.4/Java17/불변 jar·기존12업무표+guard 원값 보존, 실패 주입 rollback·두 동시 수정·삭제/상한·같은ID 후속버전, 실제 API 이벤트의 strict CLI/엔진 재생과 volume 재시작.
 - 선택: afterCommit만의 전송 틈·업무 안의 외부 IO·상품과 함께 사라지는 카운터·global autoID commit 순서를 구분했다. 값/태그의 원천 권리를 추가 승인하거나 비공개 회원/주문을 색인하지 않는다.
-- 경계: 신규 예방 설계의 제어된 정확성 검증이다. 과거 실사용자 사고·서비스 속도 개선이 아니며 자동 dispatcher/공개 검색은 미완료다. 추가 쓰기/잠금/보관 비용과 relay·재색인 세대 전환은 후속이다.
+- 추가 구현: [008](migrations/008-search-outbox-delivery.sql)·[relay](../scripts/search_relay.py)는 같은 업무TX의 PENDING 예약, DB 시각 claim/ack/retry, source·물리 target binding을 제공한다. [진행 근거](plans/2026-11-01-durable-search-relay.md)에 실제 실행과 준비 실패를 구분한다.
+- 추가 결과: 기존80 backfill을 포함한 업무114행을 watch가 ACK했으며 낮은ID 지연commit·두 worker·실제 종료 후 중복 재전달·물리 target 교체의 미ACK를 확인했다. 같은 사례의 전달 상태/운영 경계가 깊어져 BE-CS05만 보강했다. 다른 세 사례와 순서·총4개는 보존하며 성능/과거 사용자 사고로 바꾸지 않는다.
+- 경계: 신규 예방 설계의 제어된 정확성 검증이다. 과거 실사용자 사고·서비스 속도 개선이 아니며 기본 자동 기동/공개 검색은 미완료다. 추가 쓰기/잠금/보관·중복전달 비용과 재색인/정리·유실 복구는 후속이다.
 
 ### BE-CS02
 
@@ -99,7 +101,8 @@ BE03은 현재 계정/권한 확인과 세션 자격 버전·재가입 경계를
 후속 [업무 생산 증가분](plans/2026-11-01-product-search-outbox.md)은 위 관리 도구만의 검수를 넘어
 업무TX·현재 특성/영속 버전·실제 rollback/동시성·수동 전환과 API→CLI→엔진 재생까지 연결했다.
 이 추가 근거로 BE-CS05를 선정해 기존 BE-CS01만 교체했다. 다른 세 사례와 총4개는 유지한다.
-자동 엔진 전달/공개 검색을 구현했다거나 같은 기반 작업을 여러 사례로 나눴다는 뜻은 아니다.
+이 선정 당시에는 자동 엔진 전달/공개 검색이 미구현이었다. 이후 별도 실행 relay의 근거는 같은
+BE-CS05를 보강하며 다른 사례를 교체하거나 같은 기반을 다섯 번째로 나누지 않는다.
 
 ### 상품 페이지 offset 정확성 비교
 

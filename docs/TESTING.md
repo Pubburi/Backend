@@ -13,11 +13,19 @@ PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `d
 상품 검색 outbox는 [생산 계약](SEARCH-OUTBOX.md)의 업무 TX와 카운터/불변 payload를 검증한다.
 단위는 현재 투영의 승인 필드·null/[]/태그 정렬·삭제/상한/저장 실패를 검사하고, 폐기 HTTP는 실제
 생성·수정·특성·주문수·삭제 버전과 DB trigger 실패의 상품/특성/주문 rollback을 확인한다.
-관리 CLI의 backend_product_events 입력을 소비할 수 있는지도 검사하며 자동 전송·검색 품질로
-확대하지 않는다. 수동007의 기존 전체 데이터 보존·현재상태 backfill은 별도 전용 DB에서 확인한다.
+관리 CLI의 backend_product_events 입력을 소비할 수 있는지도 검사한다. 같은 TX의 delivery
+예약을 포함하며 자동 전송의 사용자 검색 품질로 확대하지 않는다. 수동007·008의 기존 전체
+데이터 보존·현재상태/미전달 backfill은 별도 전용 DB에서 확인한다.
 CI의 다음 엔진 단계는 `PUBBURI_SEARCH_OUTBOX_INPUT`으로 이 HTTP가 만든 private 가상 batch를
 받는다. 실제 CLI 재생·삭제 뒤 old version 차단·재시작 뒤 유지가 필수 성공 조건이다. 원문 입력은
 artifact에 넣지 않으며 입력은 검증용 private 복사본으로 고정한다.
+선택 relay 검증 환경은 Python3.12·해시 고정 의존성을 별도 설치하고, 공개 MySQL CA만 복사한다.
+독립 `*_ci` queue DB의 CID/marker·빈 schema를 먼저 확인하며 기존 DB를 자동 초기화하지 않는다.
+실제 최소 DB계정/TLS·낮은ID 지연commit·두 worker claim/원격IO 전 commit·429/5xx와 영구4xx·
+DB backoff·만료 token·엔진쓰기 직후 프로세스 종료/중복 재전달·source/target 교체를 확인한다.
+별도로 실제 HTTP fixture 이벤트와 backfill delivery를 watch 프로세스로 소비하고 volume 재시작 후
+같은 binding/tombstone을 확인한다. lease/재시도 시간은 폐기 DB에서 제어한 정합성 실험이며
+운영 부하·자동 복구 SLA·검색 refresh 완료·성능 결과가 아니다. [relay 계약](SEARCH-RELAY.md)을 따른다.
 앱·조회는 DB 전용 CI 계정으로 실행한다. binlog가 켜진 MySQL은 DB의 ALL 권한만으로 TRIGGER
 생성을 허용하지 않을 수 있어, 폐기 DB/CID/marker 검사 후 고정 실패 주입 CREATE/DROP에만
 별도 `PUBBURI_DB_ROOT_PASSWORD`를 사용한다. 값은 child MYSQL_PWD로만 전달하며 Java 앱
@@ -30,7 +38,8 @@ SUPER 부여나 글로벌 log_bin_trust 변경으로 검사를 우회하지 않�
 pinned base/nori를 준비한다. 기존 서버·DB/볼륨을 채택하지 않으며 결과는 target/search-smoke-report.json,
 원문 engine 로그/입력·CID/port/PID는 ignored에만 남긴다. 필수 backend-ci에도 같은 실행을 포함한다.
 가상 ID 이력의 중복/역전·동일 버전/동시 충돌·strict schema·tombstone/GET 차이·volume 재시작·
-부분 실패 receipt를 확인하며 outbox·실제 업무 동기화·검색 품질/시간 성능으로 확대하지 않는다.
+부분 실패 receipt를 확인한다. 별도 relay 검증이 실제 업무 전달을 확인하지만 공개 검색 품질/
+시간 성능과 재색인 전체 인수로 확대하지 않는다.
 [실제 조건과 초기 실패](plans/2026-11-01-local-search-replay.md)를 따른다.
 실제 HTTPResponse fixture는 Content-Length보다 짧은 완결 JSON EOF를 거절하고 chunked/본문
 상한·전체 deadline을 유지한다. 검증 본문 성공 뒤의 로그 IO 실패도 소유 자원 정리를 막지 않으며

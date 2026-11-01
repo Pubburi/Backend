@@ -45,6 +45,7 @@ jobs:
       PUBBURI_RECOMMENDATION_BASE_URL: http://127.0.0.1:8000
       PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE: FALLBACK
       PUBBURI_SMOKE_RUN_TOKEN: pubburi-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_RELAY_DB_CA: .pubburi/mysql-ca.pem
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +57,10 @@ jobs:
           cache: maven
       - name: Check repository contents
         run: python3 scripts/check_repository.py
+      - name: Install isolated relay validation dependencies
+        run: |
+          python3 -m venv .venv-relay
+          .venv-relay/bin/python -m pip install --require-hashes -r tools/search-relay/requirements.lock
       - name: Verify local ownership and lifecycle tools
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Initialize disposable database
@@ -68,6 +73,11 @@ jobs:
           docker exec -e MYSQL_PWD="$PUBBURI_DB_ROOT_PASSWORD" "$MYSQL_CONTAINER_ID" \
             mysql -uroot "$PUBBURI_DB_NAME" --execute \
             "CREATE TABLE pubburi_ci_smoke_guard (token VARCHAR(80) PRIMARY KEY); INSERT INTO pubburi_ci_smoke_guard VALUES ('$PUBBURI_SMOKE_RUN_TOKEN');"
+          docker exec -e MYSQL_PWD="$PUBBURI_DB_ROOT_PASSWORD" "$MYSQL_CONTAINER_ID" \
+            mysql -uroot --execute \
+            "CREATE DATABASE pubburi_relay_ci; GRANT ALL ON pubburi_relay_ci.* TO 'ci_user'@'%'; CREATE TABLE pubburi_relay_ci.pubburi_ci_smoke_guard (token VARCHAR(80) PRIMARY KEY); INSERT INTO pubburi_relay_ci.pubburi_ci_smoke_guard VALUES ('${PUBBURI_SMOKE_RUN_TOKEN}-relay');"
+          mkdir -p .pubburi
+          docker exec "$MYSQL_CONTAINER_ID" cat /var/lib/mysql/ca.pem > .pubburi/mysql-ca.pem
       - name: Validate local database configuration
         run: docker compose config --quiet
       - name: Test and package
@@ -85,7 +95,10 @@ jobs:
         env:
           PUBBURI_SEARCH_VALIDATION_RUN: search-ci-${{ github.run_id }}-${{ github.run_attempt }}
           PUBBURI_SEARCH_OUTBOX_INPUT: .pubburi/search-outbox-smoke-events.json
-        run: python3 scripts/smoke_search.py
+          PUBBURI_RELAY_SMOKE_DB_NAME: pubburi_relay_ci
+          PUBBURI_SMOKE_MUTATING: '1'
+          PUBBURI_SMOKE_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: .venv-relay/bin/python scripts/smoke_search.py
       - name: Preserve validation reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

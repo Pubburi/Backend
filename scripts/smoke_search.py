@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 import uuid
 
 from search_index import Engine, Http, SearchError, document, batch, MAX_INPUT_BYTES
@@ -162,6 +163,13 @@ def main():
         if os.environ.get("PUBBURI_SEARCH_OUTBOX_INPUT"):
             outbox = exercise_outbox(http, os.environ["PUBBURI_SEARCH_OUTBOX_INPUT"], private, endpoint)
             report["completed"].append("actual disposable business outbox CLI replay and old update rejected after deletion")
+        relay_state = None
+        if os.environ.get("PUBBURI_RELAY_SMOKE_DB_NAME"):
+            from relay_smoke import exercise as exercise_relay, consume_business
+            relay_state = exercise_relay(http, endpoint, private, os.environ)
+            report["completed"].append("durable relay late commits, concurrent claims, retry, fencing, crash redelivery and source binding")
+            business_relay = consume_business(http, endpoint, private, os.environ)
+            report["completed"].append("actual business API events and backfill consumed by the durable watch process")
         docker("restart", state["container_id"])
         # Dynamic host ports can change when Docker restarts a container.
         raw = owned_container(); state.update(port=int(raw["NetworkSettings"]["Ports"]["9200/tcp"][0]["HostPort"]), container_pid=raw["State"]["Pid"]); save()
@@ -174,6 +182,11 @@ def main():
             assert outbox_engine.apply(outbox[1][0]) == "stale_ignored" and visible(http, outbox_engine.alias) == []
             assert http.request("GET", f"/{outbox_engine.index}/_doc/{outbox[1][-1]['product_id']}")[1]["_source"] == outbox[1][-1]
             report["completed"].append("business outbox tombstone persists across engine restart")
+        if relay_state is not None:
+            from relay_smoke import after_restart, business_after_restart
+            business_after_restart(http, business_relay)
+            after_restart(http, relay_state)
+            report["completed"].append("relay binding survives restart and refuses a replaced physical index before ack")
         source = private / "events.json"
         source.write_text(json.dumps({"schemaVersion": 1, "dataKind": "authored_fixture", "events": events}))
         base = [sys.executable, "scripts/search_index.py"]
@@ -196,6 +209,10 @@ def main():
         report["status"] = "passed"
     except Exception as error:
         report["error_code"] = str(error) if isinstance(error, SearchError) else type(error).__name__
+        try:
+            (private / "failure.log").write_text(traceback.format_exc())
+        except OSError:
+            report["diagnostic_error"] = "failure_trace_write_failed"
     finally:
         try:
             if state["container_id"]:

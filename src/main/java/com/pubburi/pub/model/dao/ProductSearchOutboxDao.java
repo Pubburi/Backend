@@ -13,4 +13,5 @@ public interface ProductSearchOutboxDao {
     Long selectVersionForUpdate(int productId);
     int append(@Param("productId") int productId, @Param("sourceVersion") long sourceVersion,
                @Param("deleted") boolean deleted, @Param("payload") String payload);
+    int schedule(@Param("productId") int productId, @Param("sourceVersion") long sourceVersion);
 }
