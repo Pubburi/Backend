@@ -40,7 +40,7 @@
 | 기본 주류 목록 | 비개인 ID순 B0 연결, 전체 응답 대기·크기 제한, 현재 DB 재조회와 장애 대체 |
 | 상품 | 목록·이름/주종 검색, 가격·도수·명시 맛/향 AND 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 상품 특성 | 별도 조회·관리자 전체 교체 API, 용량·설명·맛/향 태그·출처, 미확인/검수된 빈 태그 구분 |
-| 색인 관리 | 업무 트랜잭션의 상품 버전·변경 기록, 선택적 로컬 OpenSearch·nori와 명시 재생·중복/역전 처리·삭제 표식. 자동 전달은 후속 |
+| 색인 관리 | 업무 트랜잭션의 상품 버전·변경 기록과 전송 예약, 별도 실행 relay의 claim/ack·재전달, 선택적 로컬 OpenSearch·nori와 삭제 표식. 공개 검색 전환은 후속 |
 | 후기 | 상품별 평점·후기 조회와 작성·수정·삭제 |
 | 데모 주문 | 주문 생성·내역·상세, 주문 시점 상품/가격 스냅샷·총액, 상품·회원 삭제 후 이력 보존, 관리자 완료 처리·스탬프 |
 | 관리자 | 상품·회원·후기·매장·주문 관리 |
@@ -87,7 +87,7 @@ flowchart LR
 업무와 검색의 상태 경계·입력 정규화·세션의 계정 수명·주문 이력 보존에서 내린 판단을 정리했습니다.
 아래 결과는 현재 구현의 동작 범위이며, 응답 시간·처리량의 전후 개선 수치는 아직 측정하지 않았습니다.
 
-### 1. 상품 변경과 검색 변경 기록을 같은 트랜잭션에 남기기
+### 1. 상품 변경 기록의 원자성부터 검색 엔진 재전달까지 연결하기
 
 #### 문제
 
@@ -99,15 +99,15 @@ flowchart LR
 
 #### 해결
 
-생성·수정·특성 교체·주문 수 증가·삭제를 기존 업무 트랜잭션 안의 MANDATORY producer에 연결했습니다. 현재 상품·특성을 잠금 조회한 뒤 영속 상품별 버전과 불변 투영을 함께 기록합니다. 삭제는 더 높은 버전의 tombstone이며 카운터와 이력은 상품 삭제로 없어지지 않습니다. 엔진 전송은 업무 트랜잭션에 넣지 않았습니다.
+생성·수정·특성 교체·주문 수 증가·삭제를 기존 업무 트랜잭션 안의 MANDATORY producer에 연결했습니다. 현재 상품·특성을 잠금 조회한 뒤 영속 상품별 버전·불변 투영·PENDING 예약을 함께 기록합니다. 별도 relay는 짧은 DB claim을 commit한 뒤 엔진에 보내고, DB 시각 lease와 token이 유효할 때만 ACK합니다. 삭제는 영속 tombstone으로 남기며 엔진 전송 중 업무 잠금을 유지하지 않습니다.
 
 #### 결과
 
-실제 MySQL에서 기록 저장 실패 시 상품·특성·주문·스탬프가 함께 롤백되고, 같은 상품의 동시 수정은 서로 다른 버전을 남겼습니다. 기존 80개 상품의 초기 기록을 만들면서 기존 업무 데이터는 보존했습니다. 실제 API가 만든 가상 상품 이력을 CLI로 재생한 뒤에도 삭제 표식과 오래된 입력 차단이 엔진 재시작 후 유지됐습니다. [원자성·전환·재생 조건과 한계](docs/plans/2026-11-01-product-search-outbox.md)를 함께 남겼습니다.
+실제 MySQL에서 기록 저장 실패 시 업무가 함께 롤백되고, 같은 상품의 동시 수정은 서로 다른 버전을 남겼습니다. 기존 80개 상품을 포함한 가상 업무 이벤트 114개는 별도 watch가 모두 전달했습니다. 높은 ID보다 늦게 commit한 낮은 ID도 누락되지 않았고, 엔진쓰기 직후 worker를 종료한 조건은 재기동 후 중복으로 판정해 ACK했습니다. 재시작 후 삭제 표식은 유지됐으며, 전달 도중 물리 색인을 교체한 조건은 ACK를 거절했습니다. [생산 근거](docs/plans/2026-11-01-product-search-outbox.md)와 [relay의 제어 조건·결과·한계](docs/plans/2026-11-01-durable-search-relay.md)를 구분했습니다.
 
 #### 대체안/회고
 
-afterCommit 전달은 기록 유실 틈을 남기고, 업무 안의 엔진 전송은 장애와 잠금 시간을 결합하므로 선택하지 않았습니다. 추가 DB 쓰기·잠금·이력 보관 비용이 생기며 지연 성능은 아직 측정하지 않았습니다. 자동 relay의 claim/ack·재처리와 공개 검색은 후속입니다. 개별 이벤트 ID를 완료 watermark로 쓰거나 명시 재생을 자동 동기화 완료로 표현하지 않습니다.
+afterCommit 전달은 기록 유실 틈을 남기고, 업무 안의 엔진 전송은 장애와 잠금 시간을 결합하므로 선택하지 않았습니다. 전송은 at-least-once이며 중복은 버전/정본으로 판정합니다. source·물리 색인 UUID를 묶어 다른 target을 조용히 채택하지 않지만 DB와 엔진을 분산 트랜잭션으로 묶는 것은 아닙니다. 추가 조회·DB 쓰기·보관·재전달 비용이 있고 지연은 미측정입니다. 재색인/유실 복구·정리 정책과 공개 검색은 후속이며 event ID를 완료 watermark로 쓰지 않습니다.
 
 #### 코드
 
@@ -141,13 +141,34 @@ private void append(int productId, boolean deleted, Map<String, Object> projecti
     try {
         if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
             throw new IllegalStateException("Search outbox event could not be recorded");
+        if (outbox.schedule(productId, version) != 1)
+            throw new IllegalStateException("Search delivery could not be scheduled");
     } catch (JsonProcessingException error) {
         throw new IllegalStateException("Search projection cannot be serialized", error);
     }
 }
 ~~~
 
-[업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml)
+~~~python
+result = self.engine.apply(claim_document(claim))
+if result not in ("applied", "duplicate", "stale_ignored"):
+    raise SearchError("relay_write_outcome_invalid")
+self.engine.ready()
+if target_identity(self.engine, self.source_id) != before:
+    raise SearchError("relay_target_changed_during_delivery")
+accepted = self.store.ack(claim)
+return {"status": "delivered" if accepted else "lease_lost", "outcome": result}
+~~~
+
+~~~sql
+UPDATE t_product_search_delivery
+SET status='DELIVERED', delivered_at=NOW(6),
+    claim_token=NULL, lease_until=NULL, last_error=NULL
+WHERE event_id=%s AND status='IN_FLIGHT'
+  AND claim_token=%s AND lease_until>NOW(6)
+~~~
+
+[업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml) · [claim·target 확인·조건부 ACK](scripts/search_relay.py) · [전송·운영 경계](docs/SEARCH-RELAY.md)
 
 ### 2. 같은 ID 재가입과 권한 변경에서 기존 세션을 구분하기
 
@@ -388,7 +409,8 @@ public int removeUser(String id) {
 
 Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니다.
 기존 DB는 [주문 가격 스냅샷 전환](docs/ORDER-PRICE-SNAPSHOT.md)부터 필요한 선행 전환과
-[007 검색 변경 기록 전환](docs/SEARCH-OUTBOX.md)을 확인하세요. 초기화 SQL을 다시 실행하지 않습니다.
+[007 검색 변경 기록 전환](docs/SEARCH-OUTBOX.md)과 [008 전송 예약 전환](docs/SEARCH-RELAY.md)을
+순서대로 확인하세요. 초기화 SQL을 다시 실행하지 않습니다.
 
 웹·추천 서버까지 함께 실행하려면 [로컬 통합 실행](docs/LOCAL-DEVELOPMENT.md)을 따릅니다. AWS 계정이나 외부 AI 키 없이 사용할 수 있습니다.
 

@@ -33,6 +33,7 @@ class ProductSearchOutboxTests {
         when(events.advanceVersion(7)).thenReturn(1);
         when(events.selectVersionForUpdate(7)).thenReturn(9L);
         when(events.append(eq(7), eq(9L), anyBoolean(), anyString())).thenReturn(1);
+        when(events.schedule(7, 9L)).thenReturn(1);
     }
 
     @Test void currentSnapshotPreservesUnknownReviewedEmptyAndOnlyApprovedIndexFields() throws Exception {
@@ -52,6 +53,7 @@ class ProductSearchOutboxTests {
         order.verify(events).advanceVersion(7);
         order.verify(events).selectVersionForUpdate(7);
         order.verify(events).append(eq(7), eq(9L), eq(false), payload.capture());
+        order.verify(events).schedule(7, 9L);
         JsonNode event = json.readTree(payload.getValue());
         assertThat(event.size()).isEqualTo(4);
         assertThat(event.path("sourceVersion").asLong()).isEqualTo(9);
@@ -95,6 +97,12 @@ class ProductSearchOutboxTests {
         verify(events, never()).append(anyInt(), anyLong(), anyBoolean(), anyString());
         writable(); when(events.append(eq(7), eq(9L), eq(true), anyString())).thenReturn(0);
         assertThatThrownBy(() -> outbox.recordDeleted(7)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test void unscheduledDeliveryAbortsTheSameBusinessTransaction() {
+        writable(); when(events.schedule(7, 9L)).thenReturn(0);
+        assertThatThrownBy(() -> outbox.recordDeleted(7)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("scheduled");
     }
 
     @Test void publisherRejectsNoTransactionAndJoinsTheCallersRollback() throws Exception {

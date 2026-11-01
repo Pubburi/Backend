@@ -1,0 +1,2 @@
+# The opt-in relay requires CA-verified local MySQL TLS. No RSA/caching shortcut or Java dependency.
+PyMySQL==1.2.3

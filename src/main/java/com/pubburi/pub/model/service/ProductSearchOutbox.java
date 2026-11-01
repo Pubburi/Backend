@@ -65,6 +65,8 @@ public class ProductSearchOutbox {
         try {
             if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
                 throw new IllegalStateException("Search outbox event could not be recorded");
+            if (outbox.schedule(productId, version) != 1)
+                throw new IllegalStateException("Search delivery could not be scheduled");
         } catch (JsonProcessingException error) {
             throw new IllegalStateException("Search projection cannot be serialized", error);
         }

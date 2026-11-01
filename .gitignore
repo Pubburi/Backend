@@ -65,6 +65,7 @@ pnpm-debug.log*
 
 # Python and local tools
 .venv/
+.venv-relay/
 __pycache__/
 *.py[cod]
 .pytest_cache/

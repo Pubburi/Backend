@@ -15,6 +15,7 @@ import socket
 import sys
 import threading
 import time
+import uuid
 from urllib.parse import urlsplit
 
 VERSION = "3.9.0"
@@ -217,7 +218,7 @@ class _DeadlineConnection(http.client.HTTPConnection):
 
 
 class Http:
-    def __init__(self, endpoint, deadline=5.0):
+    def __init__(self, endpoint, deadline=5.0, status_guard=None):
         try:
             url = urlsplit(endpoint)
             valid = (url.scheme == "http" and ipaddress.ip_address(url.hostname).is_loopback
@@ -228,6 +229,7 @@ class Http:
         if not valid or not 1 <= url.port <= 65535 or not 0 < deadline <= 5:
             raise SearchError("explicit_loopback_http_origin_required")
         self.host, self.port, self.deadline = url.hostname, url.port, deadline
+        self.status_guard = status_guard
 
     def request(self, method, path, body=None):
         connection = _DeadlineConnection(self.host, self.port, self.deadline)
@@ -237,6 +239,8 @@ class Http:
             transport = connection.sock
             transport.settimeout(connection.remaining())
             with connection.getresponse() as response:
+                if self.status_guard is not None:
+                    self.status_guard(method, path, response.status)
                 if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
                     raise SearchError("engine_response_not_json")
                 length = response.getheader("Content-Length")
@@ -268,13 +272,21 @@ class Http:
 
 
 class Engine:
-    def __init__(self, http, index="pubburi-products-v1", kind="authored_fixture"):
-        if not re.fullmatch(r"pubburi-products-v1(?:-[a-z0-9]{1,32})?", index) or kind not in KINDS:
+    def __init__(self, http, index="pubburi-products-v1", kind="authored_fixture", source_id=None, refresh="wait_for"):
+        if not re.fullmatch(r"pubburi-products-v1(?:-[a-z0-9]{1,32})?", index) or kind not in KINDS or refresh not in ("wait_for", "false"):
             raise SearchError("owned_index_and_data_kind_required")
         self.http, self.index, self.kind = http, index, kind
+        self.refresh = refresh
         self.alias = index + "-visible"
         self.schema = decode(SCHEMA.read_bytes())
         self.schema["mappings"]["_meta"]["data_kind"] = kind
+        if source_id is not None:
+            try:
+                if str(uuid.UUID(source_id)) != source_id:
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError) as error:
+                raise SearchError("canonical_source_uuid_required") from error
+            self.schema["mappings"]["_meta"]["source_id"] = source_id
         self.alias_definition = {"is_write_index": True, "filter": {"term": {"deleted": False}}}
 
     def ready(self, create=False):
@@ -309,7 +321,7 @@ class Engine:
 
     def apply(self, value):
         product_id, version = value["product_id"], value["source_version"]
-        path = f"/{self.alias}/_doc/{product_id}?version={version}&version_type=external&require_alias=true&timeout=2s&refresh=wait_for"
+        path = f"/{self.alias}/_doc/{product_id}?version={version}&version_type=external&require_alias=true&timeout=2s&refresh={self.refresh}"
         status, result = self.http.request("PUT", path, value)
         if status in (200, 201):
             failed = result.get("_shards", {}).get("failed")
@@ -346,6 +358,7 @@ def main():
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--index", default="pubburi-products-v1")
     parser.add_argument("--data-kind", choices=sorted(KINDS), required=True)
+    parser.add_argument("--source-id", help="Explicit source UUID for a source-bound index; never inferred")
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
@@ -354,7 +367,7 @@ def main():
     try:
         if ".pubburi" not in args.output_dir.resolve().parts:
             raise SearchError("private_receipt_directory_required")
-        engine = Engine(Http(args.endpoint), args.index, args.data_kind)
+        engine = Engine(Http(args.endpoint), args.index, args.data_kind, args.source_id)
         events = []
         if args.command == "replay":
             if args.input is None:

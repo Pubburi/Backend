@@ -1,8 +1,8 @@
 # 로컬 상품 색인과 명시 이벤트 재생
 
 현재 S02 증가분은 **로컬 엔진·관리 CLI·버전 있는 ID 문서와 삭제 표식**이다.
-[업무 outbox 생산](SEARCH-OUTBOX.md)은 별도로 연결했다. 자동 동기화, 재색인 중 변경 재생·alias
-세대 전환과 공개 검색 전환은 미구현이다.
+[업무 outbox 생산](SEARCH-OUTBOX.md)과 [별도 실행 durable relay](SEARCH-RELAY.md)를 연결했다.
+기본 기동의 자동 실행, 재색인 중 변경 재생·alias 세대 전환과 공개 검색 전환은 미구현이다.
 `GET /api/products`는 기존 MySQL 필터를 사용하고 엔진이 없어도 앱은 그대로 기동한다.
 
 ## 고정 버전과 기동
@@ -82,7 +82,7 @@ python3 scripts/search_index.py replay --endpoint http://127.0.0.1:9200 \
 [물리 삭제 버전 보존](https://docs.opensearch.org/latest/api-reference/document-apis/delete-document/)은
 gc_deletes 기본60초에 제한되므로, 삭제 표식을 유지해 오래된 갱신의 재생이 문서를 부활시키지
 않게 한다. tombstone을 지우거나 색인을 재생성하면 이 장벽도 사라진다. 완전한 이벤트 이력/
-업무 outbox의 버전/삭제 보존은 연결했지만 relay·재색인/정리 정책은 후속이다. 활성 상품만 복사해
+업무 outbox의 버전/삭제 보존과 개별 relay는 연결했지만 재색인/정리 정책은 후속이다. 활성 상품만 복사해
 완전한 이력이 복구됐다고 주장하지 않는다.
 
 filtered alias는 deleted=false의 **검색**을 제공하며 보안/권한 경계가 아니다.

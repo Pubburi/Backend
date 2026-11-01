@@ -1,7 +1,8 @@
 # 상품 검색 API·색인 동기화 계획
 
 2026-10-31 승인된 구현 계획과 현재 증가분이다. [로컬 엔진·명시 ID 재생](LOCAL-SEARCH.md)을
-구현하고 [업무 outbox 생산](SEARCH-OUTBOX.md)을 연결했다. 자동 동기화·공개 검색 전환과
+구현하고 [업무 outbox 생산](SEARCH-OUTBOX.md) 및 [명시 실행 relay](SEARCH-RELAY.md)를 연결했다.
+기본 기동 자동 실행·재색인 세대 전환·공개 검색 전환과
 S02 전체 완료는 구분한다.
 기존 2027-02-05 기한, 로컬 개발, 세 영역 담당과 PR 게이트를 유지한다.
 S01–S05는 F02·R06·R02의 기술 작업이며 R 8개 + F 12개 = 20개 기능과 중복 합산하지 않는다.
@@ -59,7 +60,8 @@ bulk의 개별 실패를 처리하고 재색인은 변경 재생을 완료한 �
 현재 구현 범위는 기존 MySQL 목록의 가격/도수·명시 태그 필수조건과 기존 페이지/정렬 계약 증가분이다.
 선택적 OpenSearch3.9.0/nori·strict ID 문서/버전·삭제 표식·명시 재생은
 [S02 기록](plans/2026-11-01-local-search-replay.md)에 둔다. 원자적 업무 버전/outbox 생산은
-[후속 증가분](plans/2026-11-01-product-search-outbox.md)이며 자동 동기화·공개 엔진 검색·
+[생산 증가분](plans/2026-11-01-product-search-outbox.md), 개별 claim/ack·lease 재전달은
+[relay 증가분](plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·공개 엔진 검색·
 개인화 검색·성능 개선은 미구현이다.
 추천 데이터·학습·평가와 관련된 DAT01–DAT04·AI01–AI04의 상세 진행은 Recommendation 정본에서 관리한다.
 

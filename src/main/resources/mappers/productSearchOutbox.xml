@@ -24,4 +24,9 @@
         INSERT INTO t_product_search_outbox (product_id, source_version, deleted, payload)
         VALUES (#{productId}, #{sourceVersion}, #{deleted}, CAST(#{payload} AS JSON))
     </insert>
+    <insert id="schedule">
+        INSERT INTO t_product_search_delivery(event_id)
+        SELECT event_id FROM t_product_search_outbox
+        WHERE product_id = #{productId} AND source_version = #{sourceVersion}
+    </insert>
 </mapper>
