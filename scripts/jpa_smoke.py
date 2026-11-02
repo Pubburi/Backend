@@ -187,9 +187,30 @@ def run(environ):
         if market_id<int(environ.get("PUBBURI_JPA_EXPECTED_MARKET_NEXT","1")):raise ValueError("jpa_runtime_identity_reused")
         if set(created["data"])!={"id","name","latitude","longitude","image"}:raise ValueError("jpa_runtime_market_shape_changed")
         payload["name"]="Authored packaged edited";expect(request(admin,base,"PUT","/api/admin/markets/"+str(market_id),payload)[0],200)
-        expect(request(admin,base,"GET","/api/products")[0],404);expect(request(admin,base,"GET","/api/orders")[0],404)
+        status,catalog=request(anonymous,base,"GET","/api/products?size=12");expect(status,200)
+        page=catalog["data"]
+        if set(page)!={"items","page","size","total","totalPages","hasNext"} or len(page["items"])>12:
+            raise ValueError("jpa_runtime_product_page_shape_changed")
+        product_fields={"id","name","type","price","img","abv","orderCount"}
+        if any(set(item)!=product_fields for item in page["items"]):raise ValueError("jpa_runtime_product_shape_changed")
+        status,popular=request(anonymous,base,"GET","/api/products/popular");expect(status,200)
+        if popular["data"]!=page["items"]:raise ValueError("jpa_runtime_product_order_changed")
+        if page["items"]:
+            first_product=page["items"][0]
+            status,detail=request(anonymous,base,"GET","/api/products/"+str(first_product["id"]));expect(status,200)
+            if detail["data"]!=first_product:raise ValueError("jpa_runtime_product_detail_changed")
+            status,features=request(anonymous,base,"GET","/api/products/"+str(first_product["id"])+"/features");expect(status,200)
+            if set(features["data"])!={"productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"} or features["data"]["productId"]!=first_product["id"]:
+                raise ValueError("jpa_runtime_product_feature_shape_changed")
+        expect(request(anonymous,base,"GET","/api/products/0")[0],404)
+        expect(request(anonymous,base,"GET","/api/products/0/features")[0],404)
+        expect(request(anonymous,base,"GET","/api/products?page=2147483647&size=12")[0],400)
+        expect(request(anonymous,base,"GET","/api/products?minAbvPercent=5.555")[0],400)
+        expect(request(admin,base,"POST","/api/admin/products",{})[0],404)
+        expect(request(admin,base,"GET","/api/orders")[0],404)
         status,docs=request(admin,base,"GET","/v3/api-docs");expect(status,200)
-        if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}"}:raise ValueError("jpa_runtime_route_scope_changed")
+        if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
+                "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features"}:raise ValueError("jpa_runtime_route_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
@@ -198,7 +219,8 @@ def run(environ):
         expect(request(admin,base,"GET","/api/markets/"+str(market_id))[0],404)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":7,"restart_data_preserved":True,"session_relogin_after_restart":True,"full_cutover":False}
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":11,
+            "product_reads":True,"product_detail_and_features_checked":bool(page["items"]),"restart_data_preserved":True,"session_relogin_after_restart":True,"full_cutover":False}
     finally:
         with defer_termination():
             cleanup_failed=False

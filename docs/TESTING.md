@@ -10,7 +10,7 @@ PUBBURI_PG_INTEGRATION=1이 실제 통합 조건이며 CI에서 빠지면 성공
 이 결과는 전체 JPA API·이관·Psycopg relay/사용자 흐름의 통과가 아니다. 기존 MySQL
 아래 회귀는 baseline으로 계속 유지하고 전체 cutover 게이트에서 PostgreSQL로 대체한다.
 
-## DB03 세션·매장 JPA 제공자
+## DB03 세션·매장·상품 읽기 JPA 제공자
 
 기본 check는 별도 `tools/jpa-rehearsal`의 단위/패키징도 수행한다. DB가 없으면 실제 통합은
 skip하며, [JPA 제공 계약](JPA-REHEARSAL.md)의 부분 범위를 전체 DB03 성공으로 세지 않는다.
@@ -27,6 +27,14 @@ CAS/epoch·역할·사용자 전체 잠금·SQL 실패 rollback·CREATE/ALTER/DR
 소량 HTTP fixture는 idle timeout보다 짧은 헤더/본문 trickle도 절대 기한에 중단하고 정상
 Content-Length·chunked close의 cookie를 보존하는지 검사한다. 실제 자식 listener의 정상/오류/
 SIGTERM 종료와 부모 SIGTERM·deadline도 supervisor의 전체 session 정리 경계로 검사한다.
+
+상품 읽기 증분의 `JpaProductReadIntegrationTests`는 세 테이블 SELECT만 가진 runtime으로 실제
+Product7/특성8·필수 범위/태그AND·unknown/[]·쉼표 literal·REAL bound·네 sort/ID tie·페이지/offset·
+빈 결과/404/잘못된 입력·허용 GET/OpenAPI를 확인한다. 소유 control 연결로 `ci_jpa_read_`의 자체
+상품/특성/태그만 만들고 삭제하며 원본 행을 바꾸지 않는다. 테스트 전용 statement gate는 items/count와
+특성/태그 사이에 실제 별도 commit을 넣어 RR snapshot을 확인한다. 상품 DML/sequence 권한은
+없으며 실패한 SQL을 빈 성공으로 바꾸지 않는다. 새 packaged JAR도 네 GET과 기존 세션·매장/
+기동 거절·재시작을 함께 검사한다. [조건·결과·한계](plans/2026-11-02-jpa-product-reads.md)는 별도다.
 
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.

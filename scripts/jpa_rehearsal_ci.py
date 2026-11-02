@@ -84,6 +84,7 @@ def run(environ,snapshot,directory):
         runtime=environ["PUBBURI_PG_JPA_RUNTIME_USER"]
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,50}",runtime) or runtime==env["PUBBURI_PG_USER"]:raise ValueError("jpa_ci_runtime_role_rejected")
         grants=("GRANT USAGE ON SCHEMA pubburi TO "+runtime+"; GRANT SELECT,INSERT,UPDATE,DELETE ON pubburi.t_user,pubburi.t_market TO "+runtime+"; "
+                "GRANT SELECT ON pubburi.t_product,pubburi.t_product_feature,pubburi.t_product_feature_tag TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_market_id_seq TO "+runtime+"; GRANT SELECT ON pubburi.flyway_schema_history,pubburi.migration_source_receipt,pubburi.t_product_search_relay_target TO "+runtime+"; "
                 "GRANT SELECT(user_id),UPDATE(order_table) ON pubburi.t_order TO "+runtime+";")
         control=dict(env,PGPASSWORD=env["PUBBURI_PG_PASSWORD"],PGSSLMODE="verify-full",PGSSLROOTCERT="/tmp/pubburi-pg-ci-tls/ca.pem")

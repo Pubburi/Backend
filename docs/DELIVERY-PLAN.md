@@ -35,6 +35,8 @@ Python relay는 Psycopg3다. [DB01–DB06 계약](POSTGRESQL-MIGRATION.md)을 �
 DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 완성 단위로 제공한다.
 승인 snapshot의 [빈 PG 복사/전행 검수](SOURCE-IMPORT.md)도 제공한다. DB03의
 [세션·매장 JPA 제공자](JPA-REHEARSAL.md)는 별도 명시 모듈에서 실제 API를 실행한다.
+해당 제공자에 상품 목록/인기/상세·특성 GET도 실제 projection/Criteria로 연결했다.
+상품/특성 쓰기와 outbox는 아직 등록하지 않으며 [읽기 검증 범위](plans/2026-11-02-jpa-product-reads.md)를 구분한다.
 미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
 원본/업무 재인수·relay·cutover 완료와 구분한다.
 

@@ -57,7 +57,7 @@ class JpaHttpIntegrationTests {
         var anonymous=client();assertEquals(401,request(anonymous,"POST","/api/admin/markets",market("Authored unauthorized")).status());
         var ordinary=client();login(ordinary,required("PUBBURI_JPA_USER_ID"),required("PUBBURI_JPA_USER_PASSWORD"));assertEquals(403,request(ordinary,"POST","/api/admin/markets",market("Authored forbidden")).status());
         var admin=client();login(admin,adminId,adminPass);Reply page=request(admin,"GET","/api/markets?page=1&size=2",null);assertEquals(200,page.status());assertTrue(page.body().path("data").path("items").size()<=2);
-        assertEquals(404,request(admin,"GET","/api/products",null).status());assertEquals(404,request(admin,"GET","/api/users/anything/profile",null).status());
+        assertEquals(200,request(admin,"GET","/api/products",null).status());assertEquals(404,request(admin,"GET","/api/users/anything/profile",null).status());
         var created=request(admin,"POST","/api/admin/markets",market("Authored JPA market"));assertEquals(201,created.status());int id=created.body().path("data").path("id").intValue();assertTrue(id>0);
         var keys=new HashSet<String>();created.body().path("data").fieldNames().forEachRemaining(keys::add);assertEquals(Set.of("id","name","latitude","longitude","image"),keys);
         assertEquals(37.123456789,created.body().path("data").path("latitude").doubleValue());
@@ -75,7 +75,8 @@ class JpaHttpIntegrationTests {
         finally {users.modifyUser(adminId,new UserUpdate(original.getName(),null,original.getStamps(),original.getRole()));}
         assertEquals(200,request(admin,"DELETE","/api/admin/markets/"+id,null).status());assertEquals(404,request(admin,"GET","/api/markets/"+id,null).status());
         var docs=request(admin,"GET","/v3/api-docs",null);assertEquals(200,docs.status());var paths=new HashSet<String>();docs.body().path("paths").fieldNames().forEachRemaining(paths::add);
-        assertEquals(Set.of("/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}"),paths);
+        assertEquals(Set.of("/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
+            "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features"),paths);
         assertEquals(200,request(admin,"POST","/api/auth/logout",null).status());assertEquals(401,request(admin,"GET","/api/auth/me",null).status());
     }
     @Test void passwordCasCurrentProjectionAndFullUserLockRespectCredentialIncarnation()throws Exception {
