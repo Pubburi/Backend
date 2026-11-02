@@ -1,4 +1,4 @@
-# PostgreSQL·JPA 계정/프로필·매장·상품·주문 제공자
+# PostgreSQL·JPA 계정/프로필·매장·상품·주문·후기 제공자
 
 `tools/jpa-rehearsal`은 PostgreSQL18.6에 복사한 데이터로 실제 로그인·계정/프로필·매장 CRUD·상품/특성 읽기를
 실행하고 상품/특성 쓰기와 같은 TX의 version/outbox/delivery를 생산하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 통합 로컬 스택은 현재
@@ -36,10 +36,15 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | GET | `/api/admin/users` | 현재 관리자 사용자 페이지·공개 DTO |
 | PUT | `/api/admin/users/{id}` | 잠금 뒤 생략 필드 유지·자격 변경 시 epoch 회전 |
 | DELETE | `/api/admin/users/{id}` | 본인 삭제409·타계정 수명 정리/주문 이력 보존 |
+| GET | `/api/products/{productId}/comments` | 공개 후기·ID 내림차순 페이지·없는 상품은 빈 페이지 |
+| POST | `/api/comments` | 현재 사용자 작성·단정도 평점/본문·201·원본 next ID 보존 |
+| PUT | `/api/comments/{id}` | 작성자/현재 관리자만 평점·본문 수정 |
+| DELETE | `/api/comments/{id}` | 작성자/현재 관리자만 삭제·없는 후기404 |
+| GET | `/api/admin/comments` | 현재 관리자만 전체 후기 페이지 |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 후기·취향·찜
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 취향·찜
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 스물다섯 개/스물여덟 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 스물아홉 개/서른세 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
@@ -110,7 +115,15 @@ hash/epoch는 공개 DTO에 넣지 않는다. 관리자 생략 필드는 기존 
 현재 세션에 반영하고 다른 세션은 회수한다. 사용자 삭제는 메모 정리→계정 삭제와 FK의
 개인 자식 cascade/주문 참조 null을 같은 TX로 처리한다. 새 권한/테이블은 추가하지 않는다.
 
-Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
+후기는 원래 CommentRestController/CommentServiceImpl·요청/응답 DTO와 실제 Comment Repository를
+연결한다. 평점은 기존0.5–5.0 범위의 float32/REAL이며0.5 단위나 정수로 반올림하지 않는다.
+HTTP 본문은 NotBlank/최대200자 검증을 유지하고, 과거 nullable 본문은 GET에서 그대로 읽는다.
+JPQL DTO projection은 페이지·count·ID 내림차순을 유지한다. UPDATE는 rating/comment만 바꾸고
+DELETE는 affected-row 수를 반환해 없어진 행을 다시 만들지 않는다. 부모 사용자/상품 삭제의
+FK cascade와 full FOR UPDATE/KEY SHARE 관계는 실제 별도 연결로 검증한다.
+후기 쓰기는 상품/회원 합계나 검색 producer를 호출하지 않는다.
+
+Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp/Comment 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
 JPA 매핑을 검증했다거나 스키마 검사만으로 전체 업무 동등성이 확보됐다고 해석하지 않는다.
 
@@ -131,6 +144,7 @@ createrole/replication/bypassrls·역할 membership·schema CREATE·객체 소�
   스탬프 SELECT·INSERT, 주문/상세/스탬프 sequence USAGE.
 - 상품/특성 SELECT·INSERT·UPDATE·DELETE, 태그 SELECT·INSERT·DELETE와 `UPDATE(tag)`만.
 - version SELECT·INSERT·UPDATE, outbox/delivery SELECT·INSERT, 상품/outbox sequence USAGE.
+- 후기 SELECT·INSERT·DELETE와 `UPDATE(rating,comment)`, 후기 identity sequence USAGE.
 - 태그 표 전체 UPDATE·product_id/kind UPDATE, version DELETE·outbox/delivery UPDATE/DELETE,
   모든 업무표 TRIGGER/TRUNCATE와 상품/outbox sequence SELECT/UPDATE는 기동 guard에서 거절한다.
 
@@ -139,6 +153,7 @@ createrole/replication/bypassrls·역할 membership·schema CREATE·객체 소�
 
 주문의 소유자/유형/시각/출처·PK UPDATE, 상세 UPDATE와 스탬프 UPDATE/DELETE, 세 sequence의
 SELECT/UPDATE도 기동 guard에서 거절한다. 사용자 삭제의 메모 정리는 order_table 권한을 함께 사용한다.
+후기의 전체 UPDATE·id/user_id/product_id UPDATE·TRIGGER/TRUNCATE와 sequence SELECT/UPDATE도 거절한다.
 마이그레이션/실패 trigger는 별도 migrator/control 연결에서만 수행한다. runtime 역할의 실제
 업무 schema CREATE/ALTER/DROP 거절도 확인하며 non-super라는 이름만으로 최소 권한을 주장하지 않는다.
 
@@ -178,7 +193,9 @@ group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제
 
 주문/후반 단계 rollback·동시성·시각/권한·실행 JAR의 검증은 [주문 기록](plans/2026-11-02-jpa-order-transactions.md)을 따른다.
 [계정/프로필 검증](plans/2026-11-03-jpa-account-profile.md)은 전체 사용자 화면 인수와 구분한다.
-남은 DB03은 후기·취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
+[후기 검증](plans/2026-11-03-jpa-comments.md)은 단정도·소유권·실패/경합·부모 수명과 실행 JAR을 다룬다.
+검증 도구의 PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment를 사용한다.
+남은 DB03은 취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
 전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
 lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.
