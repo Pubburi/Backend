@@ -10,26 +10,52 @@ import java.util.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 
-/** Actual PG queries only. No ProductDao write stub or unused outbox bean is registered. */
+/** Existing DTO projections reused by the actual JPA DAO adapters. */
 @Service
 @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
 public class JpaProductQueries {
     @PersistenceContext private EntityManager entityManager;
 
-    public PageResponse<Product> page(String type,String q,String sort,ProductSearchFilters filters,PageCriteria criteria) {
-        long offset=((long)criteria.page()-1)*criteria.size();
-        if(offset<0 || offset>Integer.MAX_VALUE)
-            throw new IllegalArgumentException("Product page offset exceeds the supported range");
+    public List<Product> filtered(String type,String q,String sort,ProductSearchFilters filters,int limit,int offset) {
+        if(limit<0 || offset<0)throw new IllegalArgumentException("Product page bounds must be nonnegative");
         String safeType=blankToNull(type),safeQ=blankToNull(q),safeSort=blankToNull(sort);
         var cb=entityManager.getCriteriaBuilder();
         var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
         query.select(projection(cb,product)).where(predicates(cb,query,product,safeType,safeQ,filters));
         query.orderBy(order(cb,product,safeSort));
-        var items=entityManager.createQuery(query).setFirstResult((int)offset).setMaxResults(criteria.size()).getResultList();
+        return entityManager.createQuery(query).setFirstResult(offset).setMaxResults(limit).getResultList();
+    }
+
+    public int count(String type,String q,ProductSearchFilters filters) {
+        var cb=entityManager.getCriteriaBuilder();
         var countQuery=cb.createQuery(Long.class);var counted=countQuery.from(JpaProduct.class);
-        countQuery.select(cb.count(counted)).where(predicates(cb,countQuery,counted,safeType,safeQ,filters));
-        int count=Math.toIntExact(entityManager.createQuery(countQuery).getSingleResult());
-        return PageResponse.of(items,criteria,count);
+        countQuery.select(cb.count(counted)).where(predicates(cb,countQuery,counted,blankToNull(type),blankToNull(q),filters));
+        return Math.toIntExact(entityManager.createQuery(countQuery).getSingleResult());
+    }
+
+    public List<Product> byIdOrder(int limit) {
+        var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
+        query.select(projection(cb,product)).orderBy(cb.asc(product.get("id")));
+        return entityManager.createQuery(query).setMaxResults(limit).getResultList();
+    }
+
+    public List<Product> currentByIds(List<Integer> ids) {
+        if(ids.isEmpty())return List.of();
+        var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
+        query.select(projection(cb,product)).where(product.get("id").in(ids));
+        return entityManager.createQuery(query).getResultList();
+    }
+
+    public Product exactName(String name) {
+        var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
+        query.select(projection(cb,product)).where(cb.equal(product.get("name"),name));
+        return entityManager.createQuery(query).setMaxResults(1).getResultList().stream().findFirst().orElse(null);
+    }
+
+    public List<Product> topByTypeExcludingName(String type,String name,int limit) {
+        var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
+        query.select(projection(cb,product)).where(cb.equal(product.get("type"),type),cb.notEqual(product.get("name"),name)).orderBy(order(cb,product,"popular"));
+        return entityManager.createQuery(query).setMaxResults(limit).getResultList();
     }
 
     public List<Product> popular() {
@@ -45,7 +71,7 @@ public class JpaProductQueries {
         return entityManager.createQuery(query).getResultList().stream().findFirst().orElse(null);
     }
 
-    public ProductFeatures features(int id) {
+    public ProductFeatures featureHeader(int id) {
         if(id<=0)return null;
         var rows=entityManager.createQuery("""
             select new com.pubburi.rehearsal.persistence.ProductFeatureView(p.id,f.volumeMl,f.description,
@@ -53,14 +79,14 @@ public class JpaProductQueries {
             from RehearsalProduct p left join RehearsalProductFeature f on f.productId=p.id where p.id=:id
             """,ProductFeatureView.class).setParameter("id",id).getResultList();
         if(rows.isEmpty())return null;
-        ProductFeatures value=rows.get(0).dto();
-        var tags=entityManager.createQuery("""
+        return rows.get(0).dto();
+    }
+
+    public List<ProductFeatureTag> tags(int id) {
+        return entityManager.createQuery("""
             select new com.pubburi.pub.model.dto.ProductFeatureTag(t.kind,t.tag)
             from RehearsalProductTag t where t.productId=:id
             """,ProductFeatureTag.class).setParameter("id",id).getResultList();
-        value.setTasteTags(value.isTasteKnown()?tagsOf(tags,"TASTE"):null);
-        value.setAromaTags(value.isAromaKnown()?tagsOf(tags,"AROMA"):null);
-        return value;
     }
 
     private static Selection<Product> projection(CriteriaBuilder cb,Root<JpaProduct> p) {
@@ -108,8 +134,5 @@ public class JpaProductQueries {
         return List.of(first,cb.asc(p.get("id")));
     }
 
-    private static List<String> tagsOf(List<ProductFeatureTag> tags,String kind) {
-        return tags.stream().filter(t->kind.equals(t.kind())).map(ProductFeatureTag::tag).sorted().toList();
-    }
     private static String blankToNull(String value) {return value==null || value.trim().isEmpty()?null:value.trim();}
 }

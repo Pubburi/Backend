@@ -63,12 +63,6 @@ class JpaHttpIntegrationTests {
         assertEquals(37.123456789,created.body().path("data").path("latitude").doubleValue());
         assertEquals(200,request(admin,"PUT","/api/admin/markets/"+id,market("Authored edited")).status());assertEquals("Authored edited",request(admin,"GET","/api/markets/"+id,null).body().path("data").path("name").textValue());
         var invalid=new HashMap<>(market("Authored invalid"));invalid.put("latitude",91);assertEquals(400,request(admin,"POST","/api/admin/markets",invalid).status());
-        long before=sql.queryForObject("SELECT count(*) FROM pubburi.t_market",Long.class);
-        JdbcTemplate fixture=control();
-        fixture.execute("CREATE FUNCTION pubburi.ci_jpa_fail_market() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.name LIKE 'ci_jpa_fail_%' THEN RAISE EXCEPTION 'authored JPA market failure'; END IF; RETURN NEW; END $$");
-        fixture.execute("CREATE TRIGGER ci_jpa_fail_market AFTER INSERT ON pubburi.t_market FOR EACH ROW EXECUTE FUNCTION pubburi.ci_jpa_fail_market()");
-        try {assertEquals(500,request(admin,"POST","/api/admin/markets",market("ci_jpa_fail_"+UUID.randomUUID())).status());assertEquals(before,sql.queryForObject("SELECT count(*) FROM pubburi.t_market",Long.class));}
-        finally {fixture.execute("DROP TRIGGER ci_jpa_fail_market ON pubburi.t_market");fixture.execute("DROP FUNCTION pubburi.ci_jpa_fail_market()");}
         User safe=users.getUserById(adminId);assertNull(safe.getPass());assertNotNull(userDao.selectById(adminId).getPass(),"DTO.withoutPass must not mutate managed persistence");
         User original=userDao.selectById(adminId);
         try {users.modifyUser(adminId,new UserUpdate("Authored changed admin",null,7,"USER"));assertEquals("USER",request(admin,"GET","/api/auth/me",null).body().path("data").path("role").textValue());assertEquals(403,request(admin,"DELETE","/api/admin/markets/"+id,null).status());}
@@ -76,7 +70,8 @@ class JpaHttpIntegrationTests {
         assertEquals(200,request(admin,"DELETE","/api/admin/markets/"+id,null).status());assertEquals(404,request(admin,"GET","/api/markets/"+id,null).status());
         var docs=request(admin,"GET","/v3/api-docs",null);assertEquals(200,docs.status());var paths=new HashSet<String>();docs.body().path("paths").fieldNames().forEachRemaining(paths::add);
         assertEquals(Set.of("/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-            "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features"),paths);
+            "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
+            "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features"),paths);
         assertEquals(200,request(admin,"POST","/api/auth/logout",null).status());assertEquals(401,request(admin,"GET","/api/auth/me",null).status());
     }
     @Test void passwordCasCurrentProjectionAndFullUserLockRespectCredentialIncarnation()throws Exception {

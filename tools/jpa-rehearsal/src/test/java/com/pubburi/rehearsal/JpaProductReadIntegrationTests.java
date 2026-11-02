@@ -127,7 +127,7 @@ class JpaProductReadIntegrationTests {
         }
     }
 
-    @Test void featureUnknownAndReviewedEmptyAreDifferentAndUnregisteredWritesStayUnavailable()throws Exception {
+    @Test void featureUnknownAndReviewedEmptyStayDifferentAndProducerCannotRewriteQueue()throws Exception {
         try(var f=new Fixture()) {
             var known=get("/api/products/"+f.a+"/features");assertEquals(200,known.status());var value=known.body().path("data");
             assertEquals(Set.of("productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"),keys(value));
@@ -135,15 +135,19 @@ class JpaProductReadIntegrationTests {
             for(int id:List.of(f.c,f.e)) {var unknown=get("/api/products/"+id+"/features");assertEquals(200,unknown.status());assertTrue(unknown.body().path("data").path("tasteTags").isNull());assertTrue(unknown.body().path("data").path("aromaTags").isNull());}
             var empty=get("/api/products/"+f.d+"/features");assertTrue(empty.body().path("data").path("tasteTags").isArray());assertTrue(empty.body().path("data").path("tasteTags").isEmpty());
             assertEquals(406,request("GET","/api/products/"+f.a+"/features","text/plain").status());
-            assertEquals(404,request("POST","/api/admin/products",null).status());assertEquals(404,request("PUT","/api/admin/products/"+f.a+"/features",null).status());
+            assertEquals(404,get("/api/orders").status());assertEquals(404,get("/api/users/anything/profile").status());
             f.sql.update("DELETE FROM pubburi.t_product WHERE id=? AND name LIKE ?",f.a,f.prefix+"%");
             for(String path:List.of("/api/products/"+f.a,"/api/products/"+f.a+"/features","/api/products/0","/api/products/0/features"))assertEquals(404,get(path).status());
-            for(String statement:List.of("UPDATE pubburi.t_product SET price=price WHERE FALSE","DELETE FROM pubburi.t_product WHERE FALSE",
-                    "INSERT INTO pubburi.t_product(name,type,price,img,abv,order_count) SELECT 'ci_jpa_forbidden','test',1,'test',0,0 WHERE FALSE",
-                    "UPDATE pubburi.t_product_feature SET taste_known=taste_known WHERE FALSE","DELETE FROM pubburi.t_product_feature_tag WHERE FALSE")) {
+            for(String statement:List.of("UPDATE pubburi.t_product_search_outbox SET payload=payload WHERE FALSE",
+                    "DELETE FROM pubburi.t_product_search_outbox WHERE FALSE", "DELETE FROM pubburi.t_product_search_version WHERE FALSE",
+                    "UPDATE pubburi.t_product_search_delivery SET status=status WHERE FALSE", "DELETE FROM pubburi.t_product_search_delivery WHERE FALSE",
+                    "UPDATE pubburi.t_product_feature_tag SET product_id=product_id WHERE FALSE")) {
                 var denied=assertThrows(org.springframework.dao.DataAccessException.class,()->runtime.execute(statement));assertEquals("42501",((SQLException)denied.getMostSpecificCause()).getSQLState());
             }
-            assertFalse(runtime.queryForObject("SELECT has_sequence_privilege('pubburi.t_product_id_seq','USAGE,SELECT,UPDATE')",Boolean.class));
+            assertTrue(runtime.queryForObject("SELECT has_column_privilege('pubburi.t_product_feature_tag','tag','UPDATE')",Boolean.class));
+            assertFalse(runtime.queryForObject("SELECT has_table_privilege('pubburi.t_product_feature_tag','UPDATE')",Boolean.class));
+            assertTrue(runtime.queryForObject("SELECT has_sequence_privilege('pubburi.t_product_id_seq','USAGE')",Boolean.class));
+            assertFalse(runtime.queryForObject("SELECT has_sequence_privilege('pubburi.t_product_id_seq','SELECT,UPDATE')",Boolean.class));
         }
     }
 
@@ -183,6 +187,9 @@ class JpaProductReadIntegrationTests {
     @Test void runtimeOpenApiRetainsProductAndFeatureSchemasAndRepeatedTagQuery()throws Exception {
         var response=get("/v3/api-docs");assertEquals(200,response.status());var spec=response.body();var paths=spec.path("paths");
         for(String path:List.of("/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features"))assertEquals(Set.of("get"),keys(paths.path(path)));
+        assertEquals(Set.of("post"),keys(paths.path("/api/admin/products")));
+        assertEquals(Set.of("put","delete"),keys(paths.path("/api/admin/products/{id}")));
+        assertEquals(Set.of("put"),keys(paths.path("/api/admin/products/{id}/features")));
         assertEquals(Set.of("id","name","type","price","img","abv","orderCount"),keys(spec.path("components").path("schemas").path("ProductResponse").path("properties")));
         assertEquals(Set.of("productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"),keys(spec.path("components").path("schemas").path("ProductFeaturesResponse").path("properties")));
         for(String name:List.of("tasteTag","aromaTag")) {

@@ -33,6 +33,21 @@
 별도 정합성 복구 계획을 세운다. 재시도한 업무 명령을 동일 명령으로 판별하는 기능은 아니므로,
 같은 PUT도 새 버전을 만들 수 있다. 이것을 exactly-once 주문 처리로 표현하지 않는다.
 
+
+## 별도 PostgreSQL/JPA producer
+
+[명시 JPA 제공자](JPA-REHEARSAL.md)는 상품 생성/수정/삭제와 특성 전체 교체에서 동일 공통
+`ProductSearchOutbox`를 실제 JPA DAO와 함께 실행한다. 일반 Repository와 full native FOR UPDATE,
+`ON CONFLICT DO NOTHING`의 version 생성·상한 증가·bound JSON INSERT·PENDING 예약을 사용한다.
+JSONB 변환·기존 event 재직렬화·source UUID/binding·ACK 초기화는 하지 않는다. 이 모듈은 주문 API를
+등록하지 않아 PostgreSQL 주문수 증가의 전체 업무 검증을 완료로 세지 않는다.
+
+기본 쓰기는 PostgreSQL READ COMMITTED다. 앞선 RR snapshot과 다르게 갱신된 행을 나중에
+잠그면 serialization failure가 발생할 수 있으므로 MySQL current read 의미를 모든 격리에
+일반화하지 않는다. 상품/태그 full 잠금·실패 뒤 업무/삭제 FK·version/event/delivery rollback·
+같은 ID 후속 버전·raw JSON 조건은 [실제 작업 기록](plans/2026-11-02-jpa-product-writes.md)에 둔다.
+현재 기본 API/relay는 MySQL 기준을 보존하며 Psycopg3 relay·로컬 기본 전환은 후속이다.
+
 ## 007 수동 전환
 
 1. 001–006까지 적용된 MySQL 8.4의 원본 전체와 현재 테이블/UTF-8 값을 백업·기록한다.
