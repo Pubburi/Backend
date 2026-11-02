@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify one explicitly owned local JPA rehearsal JAR, HTTP session/market flow and restart."""
+"""Verify one explicitly owned local JPA rehearsal JAR, HTTP session/market/product writes and restart."""
 import hashlib
 from contextlib import contextmanager
 import http.client
@@ -96,7 +96,7 @@ def verify_jar(path):
         names=archive.namelist()
     if any(name.startswith("BOOT-INF/lib/") and any(bad in name.lower() for bad in ("mybatis","mysql-connector","h2-")) for name in names):
         raise ValueError("jpa_runtime_legacy_driver_rejected")
-    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","UserRestController.class","ProductRestController.class","OrderRestController.class")):
+    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","UserRestController.class","OrderRestController.class")):
         raise ValueError("jpa_runtime_unregistered_scope_rejected")
     if not any("spring-data-jpa-" in name for name in names) or not any("hibernate-core-" in name for name in names):
         raise ValueError("jpa_runtime_provider_missing")
@@ -206,20 +206,40 @@ def run(environ):
         expect(request(anonymous,base,"GET","/api/products/0/features")[0],404)
         expect(request(anonymous,base,"GET","/api/products?page=2147483647&size=12")[0],400)
         expect(request(anonymous,base,"GET","/api/products?minAbvPercent=5.555")[0],400)
-        expect(request(admin,base,"POST","/api/admin/products",{})[0],404)
+        authored_product={"name":"ci_jpa_packaged_"+uuid.uuid4().hex,"type":"증류주","price":1200,"img":"authored.png","abv":15.5,"orderCount":0}
+        expect(request(anonymous,base,"POST","/api/admin/products",authored_product)[0],401)
+        expect(request(ordinary,base,"POST","/api/admin/products",authored_product)[0],403)
+        status,created_product=request(admin,base,"POST","/api/admin/products",authored_product);expect(status,201);product_id=created_product["data"]["id"]
+        if set(created_product["data"])!=product_fields:raise ValueError("jpa_runtime_product_shape_changed")
+        authored_product["price"]=2300
+        expect(request(admin,base,"PUT","/api/admin/products/"+str(product_id),authored_product)[0],200)
+        status,reviewed=request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"tasteTags":[" DRY ","fruity"],"aromaTags":[],"sourceName":"Authored packaged verification"});expect(status,200)
+        if reviewed["data"]["tasteTags"]!=["dry","fruity"] or reviewed["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_features_changed")
+        expect(request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"volumeMl":"750","sourceName":"authored"})[0],400)
         expect(request(admin,base,"GET","/api/orders")[0],404)
         status,docs=request(admin,base,"GET","/v3/api-docs");expect(status,200)
         if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-                "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
+                "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features"}:raise ValueError("jpa_runtime_route_scope_changed")
+        operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
+        if operations!=16:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
         expect(request(admin,base,"GET","/api/auth/me")[0],401)  # In-memory sessions are not persisted across restart.
         login(admin,base,"ADMIN");expect(request(admin,base,"DELETE","/api/admin/markets/"+str(market_id))[0],200)
         expect(request(admin,base,"GET","/api/markets/"+str(market_id))[0],404)
+        status,persisted_product=request(client(),base,"GET","/api/products/"+str(product_id));expect(status,200)
+        if persisted_product["data"]["price"]!=2300:raise ValueError("jpa_runtime_product_restart_lost_data")
+        status,persisted_features=request(client(),base,"GET","/api/products/"+str(product_id)+"/features");expect(status,200)
+        if persisted_features["data"]["tasteTags"]!=["dry","fruity"] or persisted_features["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_restart_lost_features")
+        expect(request(admin,base,"DELETE","/api/admin/products/"+str(product_id))[0],200)
+        expect(request(client(),base,"GET","/api/products/"+str(product_id))[0],404)
+        expect(request(client(),base,"GET","/api/products/"+str(product_id)+"/features")[0],404)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":11,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":14,"registered_api_operations":operations,
+            "product_writes_and_feature_replacement":True,
             "product_reads":True,"product_detail_and_features_checked":bool(page["items"]),"restart_data_preserved":True,"session_relogin_after_restart":True,"full_cutover":False}
     finally:
         with defer_termination():

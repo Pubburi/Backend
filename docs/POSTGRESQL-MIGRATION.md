@@ -130,8 +130,10 @@ DB03의 현재 세션·매장 증분은 별도 폐기 PG/TLS·최소 runtime 역
 projection·비밀번호 CAS와 사용자 전체 잠금의 실제 의미를 확인한다. 전체 미제공 DAO/업무 API는
 후속이며 [제공 범위/검증 기록](plans/2026-11-02-jpa-market-rehearsal.md)을 따른다.
 이후 [상품/특성 읽기 증분](plans/2026-11-02-jpa-product-reads.md)은 네 기존 GET의 실제 JPA 조회·
-AND 필터/정렬/페이지·단정도/unknown·RR snapshot을 제공한다. 최소 runtime에 상품/특성/태그 SELECT만
-추가하며 상품 쓰기/outbox·나머지 업무와 기본 실행 경로 전환은 미완료다.
+AND 필터/정렬/페이지·단정도/unknown·RR snapshot을 제공한다. 당시 최소 runtime에는 상품/특성/태그 SELECT만 추가했다.
+이어 [상품 쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md)은 기존 상품/특성 Controller·서비스와
+실제 Repository를 연결하고 같은 TX의 version/event/PENDING·삭제 이력·롤백/잠금을 검증한다.
+원문 JSON과 source UUID/binding·ACK를 유지하며 relay·다른 업무와 기본 실행 경로 전환은 미완료다.
 DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.

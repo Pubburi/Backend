@@ -1,7 +1,7 @@
-# PostgreSQL·JPA 세션/매장·상품 읽기 제공자
+# PostgreSQL·JPA 세션/매장·상품 읽기·쓰기 제공자
 
 `tools/jpa-rehearsal`은 PostgreSQL18.6에 복사한 데이터로 실제 로그인·세션·매장 CRUD·상품/특성 읽기를
-실행하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 통합 로컬 스택은 현재
+실행하고 상품/특성 쓰기와 같은 TX의 version/outbox/delivery를 생산하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 통합 로컬 스택은 현재
 MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 DB03 전환 완료로 표시하지 않는다.
 
 ## 제공하는 계약
@@ -20,10 +20,14 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | GET | `/api/products/popular` | 기존 주문수 내림차순·ID tie-break·최대12개 |
 | GET | `/api/products/{id}` | 기존 ProductResponse 일곱 필드·없는 ID404 |
 | GET | `/api/products/{id}/features` | 기존 특성 여덟 필드·unknown/검수[]·없는 상품404 |
+| POST | `/api/admin/products` | 현재 관리자만 생성·201·같은 TX의 최초 이벤트 |
+| PUT | `/api/admin/products/{id}` | 현재 관리자만 전체 수정·boolean·후속 버전 |
+| DELETE | `/api/admin/products/{id}` | 현재 관리자만 삭제·이력 FK null·tombstone |
+| PUT | `/api/admin/products/{id}/features` | 엄격 입력·특성/태그 전체 교체·같은 TX 이벤트 |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 상품/특성 **쓰기**·주문·취향·찜·
-사용자 관리 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 열한 개/열두 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 주문·취향·찜·사용자 관리
+경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
+위 열네 개/열여섯 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController는 미제공 주문 서비스까지
@@ -31,15 +35,15 @@ UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestContro
 서비스 stub를 등록하지 않는다. 공통 DAO 인터페이스의 실제 MyBatis `@Param` 타입은 컴파일에만
 사용하고 repackage에서 명시 제외한다. 실행 JAR에는 MyBatis/MySQL 드라이버가 없다.
 
-원래 상품/특성 Controller는 아직 이전하지 않은 쓰기/outbox 서비스에 결합한다. 그 전체를
-등록하거나 미구현 DAO/쓰기 bean으로 채우지 않고, 네 GET만 가진 `JpaProductReadController`와
-실제 `JpaProductQueries`를 사용한다. 공통 `ProductSearchFilters`, `PageCriteria/PageResponse`,
-`ResponseMapper`, `ProductResponse/ProductFeaturesResponse`를 재사용한다. 원래 쓰기 서비스나
-루트 MySQL Controller는 수정하지 않는다. 전체 업무 이전 뒤 중복 transport의 통합은 후속이다.
+상품/특성은 원래 ProductRestController·ProductFeatureRestController·ProductServiceImpl·
+ProductFeatureServiceImpl·ProductSearchOutbox를 소스 whitelist로 재사용한다. 이전 네 GET의
+얇은 Controller는 제거했다. 실제 JPA DAO/Repository와 기존 Criteria DTO 조회를 연결하며
+루트 MySQL 구현을 수정하거나 미구현 쓰기 bean을 등록하지 않는다. 특성 GET만 짧은 RR override로
+앞선 메타/태그 snapshot 계약을 보존한다.
 
 ## 영속성과 잠금
 
-- `JpaUser/JpaMarket`와 Spring Data Repository가 일반 생성·변경·삭제를 담당한다. 읽기는
+- `JpaUser/JpaMarket/JpaProduct/JpaProductFeature/JpaProductTag`와 Spring Data Repository가 일반 생성·변경·삭제를 담당한다. 읽기는
   JPQL projection에서 기존 mutable DTO로 옮기며 엔티티를 HTTP에 노출하지 않는다.
 - 문자열 사용자 ID는 `Persistable`의 신규 상태와 `@PostLoad/@PostPersist`로 insert-only를
   구분한다. 단순 `save`의 merge로 같은 ID·대소문자 동등 ID를 덮어쓰지 않는다.
@@ -55,7 +59,9 @@ UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestContro
 - 상품 목록은 Criteria constructor projection으로 기존 DTO만 반환한다. 동적 AND 조건과
   태그별 EXISTS를 items/count 양쪽에 적용해 태그로 행/개수를 증식시키지 않는다. 지원 sort와
   ID tie-break, int OFFSET 범위·페이지 정규화는 [기존 검색 계약](PRODUCT-SEARCH.md)과 같다.
-- 상품·특성·태그는 실제 읽기 전용 immutable 매핑이다. 특성의 product-left-join scalar projection은
+- 상품 identity는 DB에서 생성한다. 특성·태그의 할당 PK는 Persistable 신규 상태로 persist하고,
+  전체 태그 교체는 flush된 bulk DELETE 뒤 persistence context를 비워 같은 키의 오래된 엔티티를
+  재사용하지 않는다. 특성의 product-left-join scalar projection은
   특성 행이 없는 기존 상품도 unknown으로 반환하며 known 플래그가 false인 잔존 태그는 숨긴다.
   검수된 태그는 기존 Java 문자열 정렬을 유지한다. 엔티티·lazy 연관을 JSON으로 직렬화하지 않는다.
 - 도수 bound만 float32로 맞추고 REAL 상품 값은 반올림하지 않는다. 이름/type의 설치된 ICU
@@ -65,6 +71,14 @@ UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestContro
 - 상품 items/count와 특성 메타/태그는 각각 짧은 read-only REPEATABLE READ snapshot에서 읽는다.
   실제 별도 연결의 삽입/특성 교체 commit을 두 SELECT 사이에 넣어 같은/다음 요청을 구분한다.
   다른 페이지·다음 요청의 최신 상태까지 동결하거나 외부 검색/추천 IO를 이 트랜잭션에 넣지 않는다.
+
+- 상품/특성 쓰기는 같은 상품의 full native FOR UPDATE로 직렬화한다. PostgreSQL 기본 Hibernate
+  잠금으로 약화하지 않으며 FK KEY SHARE와 실제 충돌하는지 확인한다. version은 충돌 안전 INSERT,
+  BIGINT 상한의 원자 증가와 잠금 조회로 처리한다. 삭제 후 같은 ID가 새로 생겨도 version은 남는다.
+- 공통 producer의 승인 projection·unknown/null/검수[]·정렬을 그대로 사용한다. outbox는 bound String을
+  `CAST(... AS json)`으로 저장해 원문을 보존하고 같은 TX에서 PENDING을 INSERT한다. 업무/특성/태그·
+  version·event·delivery 중 어느 단계가 실패해도 전체 rollback한다. 삭제의 FK SET NULL/태그 cascade도
+  같은 경계다. relay/ACK·OpenSearch 쓰기는 이 모듈에 등록하지 않는다.
 
 Hibernate는 실제 사용한 User/Market/Product/Feature/Tag 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
@@ -84,10 +98,15 @@ createrole/replication/bypassrls·역할 membership·schema CREATE·객체 소�
 - `pubburi` USAGE, User/Market SELECT·INSERT·UPDATE·DELETE, 매장 sequence USAGE.
 - marker·Flyway history·import receipt·relay source binding SELECT.
 - 공유 사용자 삭제의 자유 입력 정리에 필요한 주문 `user_id` SELECT·`order_table` UPDATE.
-- 상품·특성·태그 세 테이블 SELECT만. 이 세 테이블 DML·TRIGGER/TRUNCATE와 상품 sequence의
-  USAGE/SELECT/UPDATE 권한은 기동 guard에서 거절한다.
+- 상품/특성 SELECT·INSERT·UPDATE·DELETE, 태그 SELECT·INSERT·DELETE와 `UPDATE(tag)`만.
+- version SELECT·INSERT·UPDATE, outbox/delivery SELECT·INSERT, 상품/outbox sequence USAGE.
+- 태그 표 전체 UPDATE·product_id/kind UPDATE, version DELETE·outbox/delivery UPDATE/DELETE,
+  모든 업무표 TRIGGER/TRUNCATE와 상품/outbox sequence SELECT/UPDATE는 기동 guard에서 거절한다.
 
-마지막 권한은 공유 서비스의 수명 정리용이다. 이 권한으로 주문 API를 제공한다는 뜻은 아니다.
+태그의 한 컬럼 UPDATE 권한은 PostgreSQL의 [행 잠금 SELECT 요구사항](https://www.postgresql.org/docs/18/sql-select.html)이다.
+태그 교체 구현은 계속 DELETE/INSERT이며 이 권한을 이벤트나 전달 ACK까지 넓히지 않는다.
+
+주문 두 컬럼 권한은 공유 서비스의 수명 정리용이다. 이 권한으로 주문 API를 제공한다는 뜻은 아니다.
 마이그레이션/실패 trigger는 별도 migrator/control 연결에서만 수행한다. runtime 역할의 실제
 업무 schema CREATE/ALTER/DROP 거절도 확인하며 non-super라는 이름만으로 최소 권한을 주장하지 않는다.
 
@@ -117,7 +136,7 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 
 필수 CI는 기존 MySQL HTTP·검색·snapshot/import 검사와 함께 새 PG 두 DB에서 실제 이 제공자를
 실행한다. 안전한 요약만 보존하고 통합 XML/원문 SQL·서버 로그/자격·복사 artifact는 업로드하지
-않는다. 실제 조건·실패·회귀의 상세 근거는 [작업 기록](plans/2026-11-02-jpa-market-rehearsal.md)에 둔다.
+않는다. 실제 조건·실패·회귀의 상세 근거는 [최신 상품 쓰기 기록](plans/2026-11-02-jpa-product-writes.md)에 둔다.
 검증 HTTP는 연결·쓰기·헤더·본문에 요청 소유 절대 기한을 적용하며 cookie를 유지한다.
 각 요청은 최대6초와 전체 남은120초 중 짧은 예산을 사용한다. 실행 supervisor는 작업 종료 뒤에도
 소유 session의 식별을 유지해 자식 정리 후 leader를 reap한다. 정상/오류·SIGTERM·기한 초과는
@@ -125,6 +144,7 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제를 제한 시간 안에 관찰한다.
 기한 뒤 점유와 다른 bind 오류는 계속 실패하며 supervisor wait를 모든 자식의 즉시 회수로 해석하지 않는다.
 
-남은 DB03은 상품/특성 쓰기·다른 업무 DAO/API의 실제 JPA 이전과 전체 MyBatis runtime 제거다. 거래·
-outbox/relay·웹 전체 인수와 최종 cutover/rollback은 DB04–DB06에서 별도로 검증한다. 이번의 실제
-세션/매장·상품 읽기 성공을 그 범위의 완료·운영 성능 개선으로 확대하지 않는다.
+남은 DB03은 주문·후기·계정 관리·취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
+전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
+lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
+이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.
