@@ -77,7 +77,8 @@ def run(environ,snapshot,directory):
         env=dict(environ,**roles,PUBBURI_PG_DB_NAME=database,PUBBURI_PG_RUN_TOKEN=token,PUBBURI_PG_URL=environ["PUBBURI_PG_URL"].rsplit("/",1)[0]+"/"+database,
             PUBBURI_SOURCE_SNAPSHOT_DIR=str(snapshot),PUBBURI_PG_MUTATING="1",PUBBURI_PG_IMPORT_WRITES_STOPPED="1",PUBBURI_PG_IMPORT_SHA256=receipt["sha256"],
             PUBBURI_PG_IMPORT_SOURCE_ID=metadata["sourceId"],PUBBURI_PG_IMPORT_WINDOW_UUID=metadata["window"],PUBBURI_JPA_REHEARSAL="1",PUBBURI_JPA_SOURCE_ID=metadata["sourceId"],
-            PUBBURI_JPA_EXPECTED_MARKET_NEXT=metadata["sourceNext"]["t_market"],PUBBURI_JPA_PORT="0")
+            PUBBURI_JPA_EXPECTED_MARKET_NEXT=metadata["sourceNext"]["t_market"],
+            PUBBURI_JPA_EXPECTED_COMMENT_NEXT=metadata["sourceNext"]["t_comment"],PUBBURI_JPA_PORT="0")
         verify_owned_postgres(env)
         command(["python3","scripts/postgresql_schema.py","migrate"],env,directory/(purpose+"-migrate.log"))
         command(["python3","scripts/postgresql_import.py","import-source"],env,directory/(purpose+"-import.log"))
@@ -94,6 +95,9 @@ def run(environ,snapshot,directory):
                 "GRANT SELECT,INSERT,DELETE ON pubburi.t_order,pubburi.t_order_detail TO "+runtime+"; "
                 "GRANT UPDATE(completed,total_price,order_table) ON pubburi.t_order TO "+runtime+"; "
                 "GRANT SELECT,INSERT ON pubburi.t_stamp TO "+runtime+"; "
+                "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment TO "+runtime+"; "
+                "GRANT UPDATE(rating,comment) ON pubburi.t_comment TO "+runtime+"; "
+                "GRANT USAGE ON SEQUENCE pubburi.t_comment_id_seq TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_order_o_id_seq,pubburi.t_order_detail_d_id_seq,pubburi.t_stamp_id_seq TO "+runtime+";")
         control=dict(env,PGPASSWORD=env["PUBBURI_PG_PASSWORD"],PGSSLMODE="verify-full",PGSSLROOTCERT="/tmp/pubburi-pg-ci-tls/ca.pem")
         result=subprocess.run(["docker","exec","-i","-e","PGPASSWORD","-e","PGSSLMODE","-e","PGSSLROOTCERT",environ["PUBBURI_PG_CONTAINER_ID"],

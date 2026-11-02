@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify an owned JPA JAR, session/market/product/order contracts and restart."""
+"""Verify an owned JPA JAR, account/market/product/order/comment contracts and restart."""
 import hashlib
 from contextlib import contextmanager
 import http.client
@@ -117,6 +117,8 @@ def cleanup_owned(processes,stop):
 def run(environ):
     if environ.get("PUBBURI_JPA_SMOKE_MUTATING")!="1" or environ.get("PUBBURI_JPA_REHEARSAL")!="1":
         raise ValueError("jpa_smoke_explicit_fixture_required")
+    if not re.fullmatch(r"[1-9][0-9]{0,9}",environ.get("PUBBURI_JPA_EXPECTED_COMMENT_NEXT","")) or int(environ["PUBBURI_JPA_EXPECTED_COMMENT_NEXT"])>2147483647:
+        raise ValueError("jpa_smoke_comment_source_next_required")
     verify_owned_postgres(environ)
     for role in ("ADMIN","USER"):
         if not re.fullmatch(r"ci_jpa_[a-zA-Z0-9_]{1,80}",environ.get("PUBBURI_JPA_"+role+"_ID","")) or not environ.get("PUBBURI_JPA_"+role+"_PASSWORD"):
@@ -232,6 +234,16 @@ def run(environ):
         status,reviewed=request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"tasteTags":[" DRY ","fruity"],"aromaTags":[],"sourceName":"Authored packaged verification"});expect(status,200)
         if reviewed["data"]["tasteTags"]!=["dry","fruity"] or reviewed["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_features_changed")
         expect(request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"volumeMl":"750","sourceName":"authored"})[0],400)
+        authored_comment={"productId":product_id,"rating":3.7,"comment":"Authored packaged review"}
+        expect(request(anonymous,base,"POST","/api/comments",authored_comment)[0],401)
+        status,created_comment=request(ordinary,base,"POST","/api/comments",authored_comment);expect(status,201);comment_id=created_comment["data"]["id"]
+        if comment_id<int(environ["PUBBURI_JPA_EXPECTED_COMMENT_NEXT"]) or set(created_comment["data"])!={"id","userId","productId","rating","comment"} or created_comment["data"]["rating"]!=3.7 or created_comment["data"]["userId"]!=environ["PUBBURI_JPA_USER_ID"]:raise ValueError("jpa_runtime_comment_identity_or_shape_changed")
+        status,edited_comment=request(ordinary,base,"PUT","/api/comments/"+str(comment_id),{"rating":1.25,"comment":"Authored edited review"});expect(status,200)
+        comment_data=edited_comment["data"]
+        status,public_comments=request(anonymous,base,"GET","/api/products/"+str(product_id)+"/comments");expect(status,200)
+        if public_comments["data"]["items"]!=[comment_data]:raise ValueError("jpa_runtime_comment_edit_not_public")
+        expect(request(ordinary,base,"GET","/api/admin/comments")[0],403)
+        expect(request(admin,base,"GET","/api/admin/comments")[0],200)
         authored_order={"details":[{"productId":product_id,"quantity":1},{"productId":product_id,"quantity":2}]}
         expect(request(anonymous,base,"POST","/api/orders",authored_order)[0],401)
         expect(request(ordinary,base,"POST","/api/orders",dict(authored_order,userId=environ["PUBBURI_JPA_ADMIN_ID"]))[0],403)
@@ -249,9 +261,10 @@ def run(environ):
                 "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
                 "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
                 "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
-                "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
+                "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=28:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=33:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
@@ -267,6 +280,12 @@ def run(environ):
         status,persisted_features=request(client(),base,"GET","/api/products/"+str(product_id)+"/features");expect(status,200)
         if persisted_features["data"]["tasteTags"]!=["dry","fruity"] or persisted_features["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_restart_lost_features")
         login(ordinary,base,"USER")
+        status,persisted_comments=request(client(),base,"GET","/api/products/"+str(product_id)+"/comments");expect(status,200)
+        if persisted_comments["data"]["items"]!=[comment_data]:raise ValueError("jpa_runtime_restart_lost_comment")
+        expect(request(ordinary,base,"DELETE","/api/comments/"+str(comment_id))[0],200)
+        expect(request(ordinary,base,"DELETE","/api/comments/"+str(comment_id))[0],404)
+        status,cascade_comment=request(ordinary,base,"POST","/api/comments",dict(authored_comment,rating=2.75,comment="Authored cascade review"));expect(status,201)
+        cascade_comment_id=cascade_comment["data"]["id"]
         status,persisted_order=request(ordinary,base,"GET","/api/orders/"+str(order_id));expect(status,200)
         if persisted_order["data"]!=order_data:raise ValueError("jpa_runtime_order_restart_lost_snapshot")
         status,user_orders=request(ordinary,base,"GET","/api/users/"+environ["PUBBURI_JPA_USER_ID"]+"/orders");expect(status,200)
@@ -276,6 +295,9 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/products/"+str(product_id))[0],200)
         expect(request(client(),base,"GET","/api/products/"+str(product_id))[0],404)
         expect(request(client(),base,"GET","/api/products/"+str(product_id)+"/features")[0],404)
+        status,deleted_comments=request(client(),base,"GET","/api/products/"+str(product_id)+"/comments");expect(status,200)
+        if deleted_comments["data"]["items"]!=[] or deleted_comments["data"]["total"]!=0:raise ValueError("jpa_runtime_comment_parent_cascade_failed")
+        expect(request(admin,base,"DELETE","/api/comments/"+str(cascade_comment_id))[0],404)
         status,history=request(ordinary,base,"GET","/api/orders/"+str(order_id));expect(status,200)
         if history["data"]["totalPrice"]!=6900 or history["data"]["details"][0]["unitPrice"]!=2300 or history["data"]["details"][0]["productId"] is not None or history["data"]["completed"]!="Y":raise ValueError("jpa_runtime_order_deleted_product_history_changed")
         expect(request(admin,base,"DELETE","/api/admin/orders/"+str(order_id))[0],200)
@@ -290,7 +312,8 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":25,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":29,"registered_api_operations":operations,
+            "comment_reads_writes_and_parent_cascades":True,
             "account_registration_profile_and_lifecycle":True,
             "order_transactions_and_history":True,
             "product_writes_and_feature_replacement":True,
