@@ -136,6 +136,8 @@ AND 필터/정렬/페이지·단정도/unknown·RR snapshot을 제공한다. 당
 원문 JSON과 source UUID/binding·ACK를 유지하며 relay·다른 업무와 기본 실행 경로 전환은 미완료다.
 다음 [주문 증분](plans/2026-11-02-jpa-order-transactions.md)은 원래 여섯 주문 작업과 주문/상세/스탬프
 Repository를 연결하고 상품 수·이벤트·회원 합계까지 같은 TX로 묶는다. 전체 DB04/기본 실행 전환과 구분한다.
+이어 [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md)은 원래 가입/사용자 Controller와
+기존 실제 User/Order Repository를 연결한다. 프로필·등급·계정/세션 수명을 같은 공개 계약으로 제공한다.
 DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.

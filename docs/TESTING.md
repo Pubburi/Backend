@@ -59,6 +59,16 @@ packaged smoke는 실제 상품/특성 쓰기·재기동 후 값 보존·재로�
 실행 JAR smoke도 주문 생성·재로그인·재시작 뒤 snapshot/list·완료·상품 삭제 이력·주문 삭제를 확인한다.
 [주문 조건·결과](plans/2026-11-02-jpa-order-transactions.md)는 기본 MySQL/전체 전환과 구분한다.
 
+`JpaAccountIntegrationTests`는 원래 UserRestController의 실제 가입/ID 확인·프로필/등급·관리자
+목록/변경/삭제와 기존 세션 계약을 검증한다. 중복/대소문자 동등 ID·hash/epoch 비노출·소유권·
+최근10주문 snapshot·생략 필드 보존·현재 역할·자격 회전·본인 세션 유지·삭제/동일 ID 재가입을 확인한다.
+두 부분 수정과 주문/이름 수정의 경합에서 합계/생략 자격이 되돌아가지 않아야 한다.
+별도 failure DB의 `JpaAccountFailureIntegrationTests`는 정확한 자체 사용자의 AFTER UPDATE/DELETE
+실패 뒤 hash/epoch/세션·메모·주문 참조·스탬프·취향/찜 cascade가 전부 rollback되는지 검사한다.
+이 자식 테이블의 검증은 해당 API 제공을 뜻하지 않으며 runtime 권한을 추가하지 않는다.
+packaged smoke도 계정/프로필/변경·재시작·비밀번호 회전·삭제/재가입을 같은 JAR에서 확인한다.
+[실행 조건·결과·한계](plans/2026-11-03-jpa-account-profile.md)를 따르며 미제공 후기는 별도다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.

@@ -72,7 +72,8 @@ class JpaHttpIntegrationTests {
         assertEquals(Set.of("/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
             "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
             "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
-            "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete"),paths);
+            "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
+            "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}"),paths);
         assertEquals(200,request(admin,"POST","/api/auth/logout",null).status());assertEquals(401,request(admin,"GET","/api/auth/me",null).status());
     }
     @Test void passwordCasCurrentProjectionAndFullUserLockRespectCredentialIncarnation()throws Exception {

@@ -1,6 +1,6 @@
-# PostgreSQL·JPA 세션/매장·상품 읽기·쓰기 제공자
+# PostgreSQL·JPA 계정/프로필·매장·상품·주문 제공자
 
-`tools/jpa-rehearsal`은 PostgreSQL18.6에 복사한 데이터로 실제 로그인·세션·매장 CRUD·상품/특성 읽기를
+`tools/jpa-rehearsal`은 PostgreSQL18.6에 복사한 데이터로 실제 로그인·계정/프로필·매장 CRUD·상품/특성 읽기를
 실행하고 상품/특성 쓰기와 같은 TX의 version/outbox/delivery를 생산하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 통합 로컬 스택은 현재
 MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 DB03 전환 완료로 표시하지 않는다.
 
@@ -30,15 +30,22 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | GET | `/api/admin/orders` | 현재 관리자 전체 페이지·보존된 삭제 이력 |
 | PATCH | `/api/admin/orders/{id}/complete` | 현재 관리자 완료 처리·없는 주문404 |
 | DELETE | `/api/admin/orders/{id}` | 현재 관리자 삭제·상세/스탬프 행 cascade |
+| POST | `/api/users` | 기존 가입 검증·USER/0스탬프·새 hash/epoch·201 |
+| GET | `/api/users/id-available` | 기존 ID 사용 여부·설치된 문자열 비교 |
+| GET | `/api/users/{id}/profile` | 본인/관리자 현재 사용자·최근10주문·등급 |
+| GET | `/api/admin/users` | 현재 관리자 사용자 페이지·공개 DTO |
+| PUT | `/api/admin/users/{id}` | 잠금 뒤 생략 필드 유지·자격 변경 시 epoch 회전 |
+| DELETE | `/api/admin/users/{id}` | 본인 삭제409·타계정 수명 정리/주문 이력 보존 |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 취향·찜·사용자 관리
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 후기·취향·찜
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 스무 개/스물두 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 스물다섯 개/스물여덟 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
-UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController는 미제공 주문 서비스까지
-필요하므로 세 인증 경로의 얇은 `JpaSessionController`만 둔다. 업무 로직/DTO를 복사하거나 주문
-서비스 stub를 등록하지 않는다. 공통 DAO 인터페이스의 실제 MyBatis `@Param` 타입은 컴파일에만
+UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
+GradeService도 같은 실제 User/Order Repository에 연결한다. 초기 세 인증 경로의 얇은
+JpaSessionController는 제거하고 원래 Controller 한 곳에서 인증/계정 계약을 제공한다.
+공통 DAO 인터페이스의 실제 MyBatis `@Param` 타입은 컴파일에만
 사용하고 repackage에서 명시 제외한다. 실행 JAR에는 MyBatis/MySQL 드라이버가 없다.
 
 상품/특성은 원래 ProductRestController·ProductFeatureRestController·ProductServiceImpl·
@@ -96,6 +103,12 @@ DB 생성 시각은 Instant에서 기존 Timestamp/Date DTO로 옮기고 nullabl
 최근1/6개월 DAO는 기존 문장 시각 의미를 statement_timestamp로 보존하며 외부 TX 시작 시각으로 고정하지 않는다.
 새 주문도 Hibernate의 DB 생성 표현식 statement_timestamp()를 사용해 INSERT 문장 시각을 보존한다.
 기존 V1 default는 변경하지 않으며 JVM/요청의 시각을 저장하지 않는다.
+
+계정 프로필은 현재 사용자 DTO·최근10주문/일괄 상세·기존 GradeService 결과를 반환한다.
+hash/epoch는 공개 DTO에 넣지 않는다. 관리자 생략 필드는 기존 사용자 전체 잠금 뒤 해석하고
+비밀번호를 명시한 경우에만 hash/epoch를 바꾼다. 본인 비밀번호 수정은 해당 변경의 epoch만
+현재 세션에 반영하고 다른 세션은 회수한다. 사용자 삭제는 메모 정리→계정 삭제와 FK의
+개인 자식 cascade/주문 참조 null을 같은 TX로 처리한다. 새 권한/테이블은 추가하지 않는다.
 
 Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
@@ -164,7 +177,8 @@ group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제
 기한 뒤 점유와 다른 bind 오류는 계속 실패하며 supervisor wait를 모든 자식의 즉시 회수로 해석하지 않는다.
 
 주문/후반 단계 rollback·동시성·시각/권한·실행 JAR의 검증은 [주문 기록](plans/2026-11-02-jpa-order-transactions.md)을 따른다.
-남은 DB03은 후기·계정 관리·취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
+[계정/프로필 검증](plans/2026-11-03-jpa-account-profile.md)은 전체 사용자 화면 인수와 구분한다.
+남은 DB03은 후기·취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
 전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
 lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.
