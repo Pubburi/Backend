@@ -96,7 +96,7 @@ def verify_jar(path):
         names=archive.namelist()
     if any(name.startswith("BOOT-INF/lib/") and any(bad in name.lower() for bad in ("mybatis","mysql-connector","h2-")) for name in names):
         raise ValueError("jpa_runtime_legacy_driver_rejected")
-    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","UserRestController.class")):
+    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","JpaSessionController.class")):
         raise ValueError("jpa_runtime_unregistered_scope_rejected")
     if not any("spring-data-jpa-" in name for name in names) or not any("hibernate-core-" in name for name in names):
         raise ValueError("jpa_runtime_provider_missing")
@@ -184,6 +184,22 @@ def run(environ):
         expect(request(anonymous,base,"POST","/api/admin/markets",payload)[0],401)
         login(ordinary,base,"USER");expect(request(ordinary,base,"POST","/api/admin/markets",payload)[0],403)
         login(admin,base,"ADMIN");status,created=request(admin,base,"POST","/api/admin/markets",payload);expect(status,201);market_id=created["data"]["id"]
+        account_id="ci_jpa_packaged_account_"+uuid.uuid4().hex;account_pass="Authored-packaged-account-42";fresh_pass="Authored-packaged-fresh-84"
+        registration={"id":account_id,"name":"Authored packaged account","pass":account_pass}
+        expect(request(anonymous,base,"POST","/api/users",registration)[0],201)
+        expect(request(anonymous,base,"POST","/api/users",registration)[0],400)
+        status,available=request(anonymous,base,"GET","/api/users/id-available?id="+account_id);expect(status,200)
+        if available["data"]["available"]:raise ValueError("jpa_runtime_duplicate_account_changed")
+        account=client();expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":account_pass})[0],200)
+        expect(request(ordinary,base,"GET","/api/users/"+account_id+"/profile")[0],403)
+        expect(request(admin,base,"PUT","/api/admin/users/"+account_id,{"name":"Authored persisted account","stamps":51})[0],200)
+        status,account_profile=request(account,base,"GET","/api/users/"+account_id+"/profile");expect(status,200)
+        profile_data=account_profile["data"]
+        if set(profile_data)!={"user","orders","grade"} or set(profile_data["user"])!={"id","name","stamps","role","admin"} or profile_data["user"]["stamps"]!=51 or profile_data["grade"]["title"]!="꽃" or profile_data["orders"]!=[]:raise ValueError("jpa_runtime_profile_contract_changed")
+        expect(request(admin,base,"GET","/api/admin/users?size=100")[0],200)
+        expect(request(admin,base,"PUT","/api/admin/users/"+account_id,{"pass":fresh_pass})[0],200)
+        expect(request(account,base,"GET","/api/auth/me")[0],401)
+        expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
         if market_id<int(environ.get("PUBBURI_JPA_EXPECTED_MARKET_NEXT","1")):raise ValueError("jpa_runtime_identity_reused")
         if set(created["data"])!={"id","name","latitude","longitude","image"}:raise ValueError("jpa_runtime_market_shape_changed")
         payload["name"]="Authored packaged edited";expect(request(admin,base,"PUT","/api/admin/markets/"+str(market_id),payload)[0],200)
@@ -223,6 +239,8 @@ def run(environ):
         order_data=created_order["data"]
         if set(order_data)!={"oId","userId","orderType","orderTable","completed","orderTime","details","totalPrice","priceBasis"} or order_data["totalPrice"]!=6900 or order_data["priceBasis"]!="ORDER_SNAPSHOT" or len(order_data["details"])!=1 or order_data["details"][0]["quantity"]!=3:
             raise ValueError("jpa_runtime_order_snapshot_changed")
+        status,order_profile=request(ordinary,base,"GET","/api/users/"+environ["PUBBURI_JPA_USER_ID"]+"/profile");expect(status,200)
+        if not any(row["oId"]==order_id for row in order_profile["data"]["orders"]):raise ValueError("jpa_runtime_profile_order_missing")
         expect(request(ordinary,base,"GET","/api/admin/orders")[0],403)
         expect(request(ordinary,base,"PATCH","/api/admin/orders/"+str(order_id)+"/complete")[0],403)
         expect(request(admin,base,"GET","/api/orders")[0],405)
@@ -230,14 +248,19 @@ def run(environ):
         if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
                 "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
                 "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
-                "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
+                "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=22:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=28:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
         expect(request(admin,base,"GET","/api/auth/me")[0],401)  # In-memory sessions are not persisted across restart.
         login(admin,base,"ADMIN");expect(request(admin,base,"DELETE","/api/admin/markets/"+str(market_id))[0],200)
+        expect(request(account,base,"GET","/api/auth/me")[0],401)
+        expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
+        status,persisted_profile=request(account,base,"GET","/api/users/"+account_id+"/profile");expect(status,200)
+        if persisted_profile["data"]!=profile_data:raise ValueError("jpa_runtime_profile_restart_lost_data")
         expect(request(admin,base,"GET","/api/markets/"+str(market_id))[0],404)
         status,persisted_product=request(client(),base,"GET","/api/products/"+str(product_id));expect(status,200)
         if persisted_product["data"]["price"]!=2300:raise ValueError("jpa_runtime_product_restart_lost_data")
@@ -257,9 +280,18 @@ def run(environ):
         if history["data"]["totalPrice"]!=6900 or history["data"]["details"][0]["unitPrice"]!=2300 or history["data"]["details"][0]["productId"] is not None or history["data"]["completed"]!="Y":raise ValueError("jpa_runtime_order_deleted_product_history_changed")
         expect(request(admin,base,"DELETE","/api/admin/orders/"+str(order_id))[0],200)
         expect(request(ordinary,base,"GET","/api/orders/"+str(order_id))[0],404)
+        dormant=client();expect(request(dormant,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
+        expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
+        expect(request(anonymous,base,"POST","/api/users",registration)[0],201)
+        expect(request(dormant,base,"GET","/api/users/"+account_id+"/profile")[0],401)
+        expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":account_pass})[0],200)
+        status,rejoined_profile=request(account,base,"GET","/api/users/"+account_id+"/profile");expect(status,200)
+        if rejoined_profile["data"]["orders"]!=[] or rejoined_profile["data"]["user"]["stamps"]!=0:raise ValueError("jpa_runtime_rejoined_profile_inherited_state")
+        expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":20,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":25,"registered_api_operations":operations,
+            "account_registration_profile_and_lifecycle":True,
             "order_transactions_and_history":True,
             "product_writes_and_feature_replacement":True,
             "product_reads":True,"product_detail_and_features_checked":bool(page["items"]),"restart_data_preserved":True,"session_relogin_after_restart":True,"full_cutover":False}

@@ -135,7 +135,7 @@ class JpaProductReadIntegrationTests {
             for(int id:List.of(f.c,f.e)) {var unknown=get("/api/products/"+id+"/features");assertEquals(200,unknown.status());assertTrue(unknown.body().path("data").path("tasteTags").isNull());assertTrue(unknown.body().path("data").path("aromaTags").isNull());}
             var empty=get("/api/products/"+f.d+"/features");assertTrue(empty.body().path("data").path("tasteTags").isArray());assertTrue(empty.body().path("data").path("tasteTags").isEmpty());
             assertEquals(406,request("GET","/api/products/"+f.a+"/features","text/plain").status());
-            assertEquals(405,get("/api/orders").status());assertEquals(404,get("/api/users/anything/profile").status());
+            assertEquals(405,get("/api/orders").status());assertEquals(401,get("/api/users/anything/profile").status());
             f.sql.update("DELETE FROM pubburi.t_product WHERE id=? AND name LIKE ?",f.a,f.prefix+"%");
             for(String path:List.of("/api/products/"+f.a,"/api/products/"+f.a+"/features","/api/products/0","/api/products/0/features"))assertEquals(404,get(path).status());
             for(String statement:List.of("UPDATE pubburi.t_product_search_outbox SET payload=payload WHERE FALSE",

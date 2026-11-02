@@ -32,6 +32,8 @@
         <include>com/pubburi/pub/controller/request/StrictIntegerDeserializer.java</include><include>com/pubburi/pub/controller/request/StrictStringDeserializer.java</include>
         <include>com/pubburi/pub/controller/rest/ProductRestController.java</include><include>com/pubburi/pub/controller/rest/ProductFeatureRestController.java</include>
         <include>com/pubburi/pub/controller/rest/OrderRestController.java</include><include>com/pubburi/pub/controller/request/OrderCreateRequest.java</include><include>com/pubburi/pub/controller/request/OrderDetailRequest.java</include>
+        <include>com/pubburi/pub/controller/rest/UserRestController.java</include><include>com/pubburi/pub/controller/request/JoinUserRequest.java</include><include>com/pubburi/pub/controller/request/AdminUserRequest.java</include>
+        <include>com/pubburi/pub/model/service/GradeService.java</include>
         <include>com/pubburi/pub/model/dto/*.java</include><include>com/pubburi/pub/model/dao/UserDao.java</include><include>com/pubburi/pub/model/dao/MarketDao.java</include>
         <include>com/pubburi/pub/model/dao/ProductDao.java</include><include>com/pubburi/pub/model/dao/ProductFeatureDao.java</include><include>com/pubburi/pub/model/dao/ProductSearchOutboxDao.java</include>
         <include>com/pubburi/pub/model/dao/OrderDao.java</include><include>com/pubburi/pub/model/dao/OrderDetailDao.java</include><include>com/pubburi/pub/model/dao/StampDao.java</include>
