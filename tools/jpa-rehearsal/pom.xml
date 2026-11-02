@@ -31,8 +31,11 @@
         <include>com/pubburi/pub/controller/request/ProductRequest.java</include><include>com/pubburi/pub/controller/request/ProductFeaturesRequest.java</include>
         <include>com/pubburi/pub/controller/request/StrictIntegerDeserializer.java</include><include>com/pubburi/pub/controller/request/StrictStringDeserializer.java</include>
         <include>com/pubburi/pub/controller/rest/ProductRestController.java</include><include>com/pubburi/pub/controller/rest/ProductFeatureRestController.java</include>
+        <include>com/pubburi/pub/controller/rest/OrderRestController.java</include><include>com/pubburi/pub/controller/request/OrderCreateRequest.java</include><include>com/pubburi/pub/controller/request/OrderDetailRequest.java</include>
         <include>com/pubburi/pub/model/dto/*.java</include><include>com/pubburi/pub/model/dao/UserDao.java</include><include>com/pubburi/pub/model/dao/MarketDao.java</include>
         <include>com/pubburi/pub/model/dao/ProductDao.java</include><include>com/pubburi/pub/model/dao/ProductFeatureDao.java</include><include>com/pubburi/pub/model/dao/ProductSearchOutboxDao.java</include>
+        <include>com/pubburi/pub/model/dao/OrderDao.java</include><include>com/pubburi/pub/model/dao/OrderDetailDao.java</include><include>com/pubburi/pub/model/dao/StampDao.java</include>
+        <include>com/pubburi/pub/model/service/OrderService.java</include><include>com/pubburi/pub/model/service/OrderServiceImpl.java</include>
         <include>com/pubburi/pub/model/service/ProductService.java</include><include>com/pubburi/pub/model/service/ProductServiceImpl.java</include>
         <include>com/pubburi/pub/model/service/ProductFeatureService.java</include><include>com/pubburi/pub/model/service/ProductFeatureServiceImpl.java</include><include>com/pubburi/pub/model/service/ProductSearchOutbox.java</include>
         <include>com/pubburi/pub/model/service/UserService.java</include><include>com/pubburi/pub/model/service/UserServiceImpl.java</include><include>com/pubburi/pub/model/service/PasswordHasher.java</include>

@@ -37,7 +37,9 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 [세션·매장 JPA 제공자](JPA-REHEARSAL.md)는 별도 명시 모듈에서 실제 API를 실행한다.
 해당 제공자에 상품 목록/인기/상세·특성 GET도 실제 projection/Criteria로 연결했다.
 상품 CRUD·특성 전체 교체와 같은 TX의 version/outbox/PENDING도 실제 JPA로 연결했다.
-[읽기 검증](plans/2026-11-02-jpa-product-reads.md)과 [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md)을 구분하며
+기존 데모 주문 여섯 작업도 같은 제공자에서 주문/상세/스탬프와 상품 수/변경 이벤트를 한 TX로 연결한다.
+[읽기 검증](plans/2026-11-02-jpa-product-reads.md), [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md),
+[주문 증분](plans/2026-11-02-jpa-order-transactions.md)을 구분하며
 Psycopg3 relay·검색 대체·다른 업무와 전체 DB03–06은 후속이다.
 미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
 원본/업무 재인수·relay·cutover 완료와 구분한다.

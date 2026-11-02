@@ -49,6 +49,16 @@ finally 제거하며 immutable version/event/delivery는 테스트 정리를 위
 packaged smoke는 실제 상품/특성 쓰기·재기동 후 값 보존·재로그인·삭제와14경로/16작업을 확인한다.
 [사전 조건·실패·결과·한계](plans/2026-11-02-jpa-product-writes.md)는 별도로 보존한다.
 
+주문의 `JpaOrderIntegrationTests`는 실제 기존 여섯 작업의 소유권/관리자·중복 수량·금액/상품 스냅샷·
+상품/회원 삭제와 동일 ID 재가입·배치 상세·nullable/UTC·월 범위·최소 권한을 확인한다.
+외부 TX 시작 뒤의 월 경계와 새 INSERT fixture도 DB 문장 시각을 따르는지 검사한다.
+두 동시 주문의 회원/상품 합계와 event/version, 두 관리자 동시 삭제의200/404를 검사한다.
+별도 failure DB의 `JpaOrderFailureIntegrationTests`는 정확한 자체 사용자의 스탬프 INSERT 뒤와
+회원 합계 UPDATE 뒤에 예외를 주고 주문/상세/총액/상품/version/event/PENDING/스탬프/회원 전체
+상태의 rollback을 확인한다. 실패 trigger/function은 finally 제거하고 불변 queue 기록은 지우지 않는다.
+실행 JAR smoke도 주문 생성·재로그인·재시작 뒤 snapshot/list·완료·상품 삭제 이력·주문 삭제를 확인한다.
+[주문 조건·결과](plans/2026-11-02-jpa-order-transactions.md)는 기본 MySQL/전체 전환과 구분한다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.

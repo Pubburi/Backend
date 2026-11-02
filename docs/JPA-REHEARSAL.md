@@ -24,10 +24,16 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | PUT | `/api/admin/products/{id}` | 현재 관리자만 전체 수정·boolean·후속 버전 |
 | DELETE | `/api/admin/products/{id}` | 현재 관리자만 삭제·이력 FK null·tombstone |
 | PUT | `/api/admin/products/{id}/features` | 엄격 입력·특성/태그 전체 교체·같은 TX 이벤트 |
+| POST | `/api/orders` | 본인/관리자 주문·중복 수량 정규화·금액/상품 스냅샷·스탬프/원자 이벤트 |
+| GET | `/api/users/{userId}/orders` | 본인/관리자 페이지·내림차순 헤더와 일괄 상세 |
+| GET | `/api/orders/{id}` | 본인/관리자 단건·삭제된 회원 주문은 관리자만 |
+| GET | `/api/admin/orders` | 현재 관리자 전체 페이지·보존된 삭제 이력 |
+| PATCH | `/api/admin/orders/{id}/complete` | 현재 관리자 완료 처리·없는 주문404 |
+| DELETE | `/api/admin/orders/{id}` | 현재 관리자 삭제·상세/스탬프 행 cascade |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 주문·취향·찜·사용자 관리
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 취향·찜·사용자 관리
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 열네 개/열여섯 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 스무 개/스물두 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController는 미제공 주문 서비스까지
@@ -80,7 +86,18 @@ ProductFeatureServiceImpl·ProductSearchOutbox를 소스 whitelist로 재사용�
   version·event·delivery 중 어느 단계가 실패해도 전체 rollback한다. 삭제의 FK SET NULL/태그 cascade도
   같은 경계다. relay/ACK·OpenSearch 쓰기는 이 모듈에 등록하지 않는다.
 
-Hibernate는 실제 사용한 User/Market/Product/Feature/Tag 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
+주문은 원래 OrderRestController/OrderServiceImpl과 요청/응답 DTO를 재사용한다. 실제
+Order/OrderDetail/Stamp Repository와 DTO projection을 연결하며 상품 잠금·가격/수량 정수 계산·
+product count/version/event/PENDING·주문 총액·스탬프/회원 합계가 같은 TX에 속한다.
+상세는 상품을 다시 join하지 않고 주문 스냅샷을 읽으며 페이지마다 한 IN 질의로 묶는다.
+주문 완료는 completed만 바꾸고, 삭제는 한 affected-row DELETE로0/1을 판정한다.
+삭제의 detail/stamp cascade와 사용자 stamps/상품 count를 되돌리지 않는 기존 동작을 유지한다.
+DB 생성 시각은 Instant에서 기존 Timestamp/Date DTO로 옮기고 nullable 과거 값도 보존한다.
+최근1/6개월 DAO는 기존 문장 시각 의미를 statement_timestamp로 보존하며 외부 TX 시작 시각으로 고정하지 않는다.
+새 주문도 Hibernate의 DB 생성 표현식 statement_timestamp()를 사용해 INSERT 문장 시각을 보존한다.
+기존 V1 default는 변경하지 않으며 JVM/요청의 시각을 저장하지 않는다.
+
+Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
 JPA 매핑을 검증했다거나 스키마 검사만으로 전체 업무 동등성이 확보됐다고 해석하지 않는다.
 
@@ -97,7 +114,8 @@ createrole/replication/bypassrls·역할 membership·schema CREATE·객체 소�
 
 - `pubburi` USAGE, User/Market SELECT·INSERT·UPDATE·DELETE, 매장 sequence USAGE.
 - marker·Flyway history·import receipt·relay source binding SELECT.
-- 공유 사용자 삭제의 자유 입력 정리에 필요한 주문 `user_id` SELECT·`order_table` UPDATE.
+- 주문 SELECT·INSERT·DELETE와 `UPDATE(completed,total_price,order_table)`, 상세 SELECT·INSERT·DELETE,
+  스탬프 SELECT·INSERT, 주문/상세/스탬프 sequence USAGE.
 - 상품/특성 SELECT·INSERT·UPDATE·DELETE, 태그 SELECT·INSERT·DELETE와 `UPDATE(tag)`만.
 - version SELECT·INSERT·UPDATE, outbox/delivery SELECT·INSERT, 상품/outbox sequence USAGE.
 - 태그 표 전체 UPDATE·product_id/kind UPDATE, version DELETE·outbox/delivery UPDATE/DELETE,
@@ -106,7 +124,8 @@ createrole/replication/bypassrls·역할 membership·schema CREATE·객체 소�
 태그의 한 컬럼 UPDATE 권한은 PostgreSQL의 [행 잠금 SELECT 요구사항](https://www.postgresql.org/docs/18/sql-select.html)이다.
 태그 교체 구현은 계속 DELETE/INSERT이며 이 권한을 이벤트나 전달 ACK까지 넓히지 않는다.
 
-주문 두 컬럼 권한은 공유 서비스의 수명 정리용이다. 이 권한으로 주문 API를 제공한다는 뜻은 아니다.
+주문의 소유자/유형/시각/출처·PK UPDATE, 상세 UPDATE와 스탬프 UPDATE/DELETE, 세 sequence의
+SELECT/UPDATE도 기동 guard에서 거절한다. 사용자 삭제의 메모 정리는 order_table 권한을 함께 사용한다.
 마이그레이션/실패 trigger는 별도 migrator/control 연결에서만 수행한다. runtime 역할의 실제
 업무 schema CREATE/ALTER/DROP 거절도 확인하며 non-super라는 이름만으로 최소 권한을 주장하지 않는다.
 
@@ -144,7 +163,8 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제를 제한 시간 안에 관찰한다.
 기한 뒤 점유와 다른 bind 오류는 계속 실패하며 supervisor wait를 모든 자식의 즉시 회수로 해석하지 않는다.
 
-남은 DB03은 주문·후기·계정 관리·취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
+주문/후반 단계 rollback·동시성·시각/권한·실행 JAR의 검증은 [주문 기록](plans/2026-11-02-jpa-order-transactions.md)을 따른다.
+남은 DB03은 후기·계정 관리·취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
 전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
 lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.

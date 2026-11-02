@@ -53,6 +53,19 @@ class RehearsalDataSource {
                 OR has_any_column_privilege('pubburi.t_product_search_delivery','UPDATE')
                 OR has_sequence_privilege('pubburi.t_product_id_seq','SELECT,UPDATE')
                 OR has_sequence_privilege('pubburi.t_product_search_outbox_event_id_seq','SELECT,UPDATE')
+                OR has_table_privilege('pubburi.t_order','UPDATE,TRIGGER,TRUNCATE')
+                OR has_column_privilege('pubburi.t_order','o_id','UPDATE')
+                OR has_column_privilege('pubburi.t_order','user_id','UPDATE')
+                OR has_column_privilege('pubburi.t_order','order_type','UPDATE')
+                OR has_column_privilege('pubburi.t_order','order_time','UPDATE')
+                OR has_column_privilege('pubburi.t_order','price_basis','UPDATE')
+                OR has_table_privilege('pubburi.t_order_detail','UPDATE,TRIGGER,TRUNCATE')
+                OR has_any_column_privilege('pubburi.t_order_detail','UPDATE')
+                OR has_table_privilege('pubburi.t_stamp','UPDATE,DELETE,TRIGGER,TRUNCATE')
+                OR has_any_column_privilege('pubburi.t_stamp','UPDATE')
+                OR has_sequence_privilege('pubburi.t_order_o_id_seq','SELECT,UPDATE')
+                OR has_sequence_privilege('pubburi.t_order_detail_d_id_seq','SELECT,UPDATE')
+                OR has_sequence_privilege('pubburi.t_stamp_id_seq','SELECT,UPDATE')
             """)) {
             statement.setString(1,s.token());statement.setString(2,s.sourceId());try(var r=statement.executeQuery()) {
                 if(!r.next() || !s.database().equals(r.getString(1)) || !"180006".equals(r.getString(2)) || !"UTF8".equals(r.getString(3)) || !r.getBoolean(4) || r.getBoolean(5) || !r.getBoolean(6) || !r.getBoolean(7) || r.getBoolean(8) || r.getBoolean(9) || r.getBoolean(10) || r.getBoolean(11))throw new IllegalArgumentException("jpa_rehearsal_guard_rejected");

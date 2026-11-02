@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify one explicitly owned local JPA rehearsal JAR, HTTP session/market/product writes and restart."""
+"""Verify an owned JPA JAR, session/market/product/order contracts and restart."""
 import hashlib
 from contextlib import contextmanager
 import http.client
@@ -96,7 +96,7 @@ def verify_jar(path):
         names=archive.namelist()
     if any(name.startswith("BOOT-INF/lib/") and any(bad in name.lower() for bad in ("mybatis","mysql-connector","h2-")) for name in names):
         raise ValueError("jpa_runtime_legacy_driver_rejected")
-    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","UserRestController.class","OrderRestController.class")):
+    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","UserRestController.class")):
         raise ValueError("jpa_runtime_unregistered_scope_rejected")
     if not any("spring-data-jpa-" in name for name in names) or not any("hibernate-core-" in name for name in names):
         raise ValueError("jpa_runtime_provider_missing")
@@ -216,13 +216,23 @@ def run(environ):
         status,reviewed=request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"tasteTags":[" DRY ","fruity"],"aromaTags":[],"sourceName":"Authored packaged verification"});expect(status,200)
         if reviewed["data"]["tasteTags"]!=["dry","fruity"] or reviewed["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_features_changed")
         expect(request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"volumeMl":"750","sourceName":"authored"})[0],400)
-        expect(request(admin,base,"GET","/api/orders")[0],404)
+        authored_order={"details":[{"productId":product_id,"quantity":1},{"productId":product_id,"quantity":2}]}
+        expect(request(anonymous,base,"POST","/api/orders",authored_order)[0],401)
+        expect(request(ordinary,base,"POST","/api/orders",dict(authored_order,userId=environ["PUBBURI_JPA_ADMIN_ID"]))[0],403)
+        status,created_order=request(ordinary,base,"POST","/api/orders",authored_order);expect(status,201);order_id=created_order["data"]["oId"]
+        order_data=created_order["data"]
+        if set(order_data)!={"oId","userId","orderType","orderTable","completed","orderTime","details","totalPrice","priceBasis"} or order_data["totalPrice"]!=6900 or order_data["priceBasis"]!="ORDER_SNAPSHOT" or len(order_data["details"])!=1 or order_data["details"][0]["quantity"]!=3:
+            raise ValueError("jpa_runtime_order_snapshot_changed")
+        expect(request(ordinary,base,"GET","/api/admin/orders")[0],403)
+        expect(request(ordinary,base,"PATCH","/api/admin/orders/"+str(order_id)+"/complete")[0],403)
+        expect(request(admin,base,"GET","/api/orders")[0],405)
         status,docs=request(admin,base,"GET","/v3/api-docs");expect(status,200)
         if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
                 "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
-                "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
+                "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=16:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=22:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
@@ -233,12 +243,24 @@ def run(environ):
         if persisted_product["data"]["price"]!=2300:raise ValueError("jpa_runtime_product_restart_lost_data")
         status,persisted_features=request(client(),base,"GET","/api/products/"+str(product_id)+"/features");expect(status,200)
         if persisted_features["data"]["tasteTags"]!=["dry","fruity"] or persisted_features["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_restart_lost_features")
+        login(ordinary,base,"USER")
+        status,persisted_order=request(ordinary,base,"GET","/api/orders/"+str(order_id));expect(status,200)
+        if persisted_order["data"]!=order_data:raise ValueError("jpa_runtime_order_restart_lost_snapshot")
+        status,user_orders=request(ordinary,base,"GET","/api/users/"+environ["PUBBURI_JPA_USER_ID"]+"/orders");expect(status,200)
+        if not any(row["oId"]==order_id for row in user_orders["data"]["items"]):raise ValueError("jpa_runtime_order_list_changed")
+        expect(request(admin,base,"GET","/api/admin/orders")[0],200)
+        expect(request(admin,base,"PATCH","/api/admin/orders/"+str(order_id)+"/complete")[0],200)
         expect(request(admin,base,"DELETE","/api/admin/products/"+str(product_id))[0],200)
         expect(request(client(),base,"GET","/api/products/"+str(product_id))[0],404)
         expect(request(client(),base,"GET","/api/products/"+str(product_id)+"/features")[0],404)
+        status,history=request(ordinary,base,"GET","/api/orders/"+str(order_id));expect(status,200)
+        if history["data"]["totalPrice"]!=6900 or history["data"]["details"][0]["unitPrice"]!=2300 or history["data"]["details"][0]["productId"] is not None or history["data"]["completed"]!="Y":raise ValueError("jpa_runtime_order_deleted_product_history_changed")
+        expect(request(admin,base,"DELETE","/api/admin/orders/"+str(order_id))[0],200)
+        expect(request(ordinary,base,"GET","/api/orders/"+str(order_id))[0],404)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":14,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":20,"registered_api_operations":operations,
+            "order_transactions_and_history":True,
             "product_writes_and_feature_replacement":True,
             "product_reads":True,"product_detail_and_features_checked":bool(page["items"]),"restart_data_preserved":True,"session_relogin_after_restart":True,"full_cutover":False}
     finally:

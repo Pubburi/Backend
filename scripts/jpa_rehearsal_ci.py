@@ -91,7 +91,10 @@ def run(environ,snapshot,directory):
                 "GRANT SELECT,INSERT ON pubburi.t_product_search_outbox,pubburi.t_product_search_delivery TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_product_id_seq,pubburi.t_product_search_outbox_event_id_seq TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_market_id_seq TO "+runtime+"; GRANT SELECT ON pubburi.flyway_schema_history,pubburi.migration_source_receipt,pubburi.t_product_search_relay_target TO "+runtime+"; "
-                "GRANT SELECT(user_id),UPDATE(order_table) ON pubburi.t_order TO "+runtime+";")
+                "GRANT SELECT,INSERT,DELETE ON pubburi.t_order,pubburi.t_order_detail TO "+runtime+"; "
+                "GRANT UPDATE(completed,total_price,order_table) ON pubburi.t_order TO "+runtime+"; "
+                "GRANT SELECT,INSERT ON pubburi.t_stamp TO "+runtime+"; "
+                "GRANT USAGE ON SEQUENCE pubburi.t_order_o_id_seq,pubburi.t_order_detail_d_id_seq,pubburi.t_stamp_id_seq TO "+runtime+";")
         control=dict(env,PGPASSWORD=env["PUBBURI_PG_PASSWORD"],PGSSLMODE="verify-full",PGSSLROOTCERT="/tmp/pubburi-pg-ci-tls/ca.pem")
         result=subprocess.run(["docker","exec","-i","-e","PGPASSWORD","-e","PGSSLMODE","-e","PGSSLROOTCERT",environ["PUBBURI_PG_CONTAINER_ID"],
             "psql","--no-psqlrc","--no-password","-h","127.0.0.1","-U",env["PUBBURI_PG_USER"],"-d",database,"-v","ON_ERROR_STOP=1","-At"],
