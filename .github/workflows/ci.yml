@@ -92,6 +92,8 @@ jobs:
       PUBBURI_PG_JPA_RUNTIME_PASSWORD: ci_jpa_runtime_only
       PUBBURI_PG_RELAY_DB_NAME: pubburi_pg_relay_queue_ci
       PUBBURI_PG_RELAY_RUN_TOKEN: pubburi-pg-relay-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_RELAY_BUSINESS_DB_NAME: pubburi_pg_relay_business_ci
+      PUBBURI_PG_RELAY_BUSINESS_RUN_TOKEN: pubburi-pg-relay-business-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_RELAY_USER: ci_pg_relay
       PUBBURI_PG_RELAY_PASSWORD: ci_pg_relay_only
       PUBBURI_PG_RELAY_FIXTURE: .pubburi/postgresql-relay-ci.json

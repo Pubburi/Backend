@@ -155,11 +155,16 @@ DB backoff·만료 token·엔진쓰기 직후 프로세스 종료/중복 재전�
 별도로 실제 HTTP fixture 이벤트와 backfill delivery를 watch 프로세스로 소비하고 volume 재시작 후
 같은 binding/tombstone을 확인한다. lease/재시도 시간은 폐기 DB에서 제어한 정합성 실험이며
 운영 부하·자동 복구 SLA·검색 refresh 완료·성능 결과가 아니다. [relay 계약](SEARCH-RELAY.md)을 따른다.
-PostgreSQL opt-in은 `PUBBURI_PG_RELAY_CI=1`에서 기존 JPA 정상 복사본과 새 별도 queue DB를
-사용한다. source/JPA 준비 뒤 좁은 relay 역할과 별도 fixture control을 예약하고 기존 엔진 lifecycle에
+PostgreSQL opt-in은 `PUBBURI_PG_RELAY_CI=1`에서 normal/failure 회귀와 분리한 승인 source의
+business 복사본과 새 별도 queue DB를 사용한다. business는 기존 JPA의 import/권한·계정 준비만
+재사용하며 원문 저장용 부분 JSON 등 경계 fixture가 쌓인 회귀 DB를 전송 입력으로 쓰지 않는다.
+source/JPA 준비 뒤 좁은 relay 역할과 별도 fixture control을 예약하고 기존 엔진 lifecycle에
 검증을 추가한다. 이 실행 플래그는 CI의 source/JPA 준비·실제 search/relay 통합 두 step에만 둔다.
 fake 소유권/cleanup 단위는 외부 실행 환경에서 격리하고, 실제 준비 전 fixture를 열지 않아야 한다.
 새로운 V1/V2나 source UUID/ACK/sequence reset으로 재실행하지 않는다.
+DB 선택 가드는 회귀 DB의 재사용을 SQL 전에 거절한다. 기존 이벤트도 strict wire로 먼저 검사해
+부적합하면 고정 오류로 거절하며 필터/수정/삭제·가짜 ACK를 하지 않는다. 안전 요약에는 queue와
+business 단계를 나누고 상세 입력/로그는 계속 제외한다. 기존75 JPA 회귀는 normal/failure/scratch에서 유지한다.
 실제 TLS verify-full·다른 CA/SAN/non-TLS의 인증 전 거절, 기존 strict boolean/UUID·json 원문,
 늦은 낮은ID·SKIP LOCKED·IO 밖 commit·두 worker·DB 실제시각과 잠금 중 만료·이전 token·
 attempts 포화/DB backoff·HTTP400/429/503/TCP·쓰기 직후 worker 종료/중복 전달을 확인한다.

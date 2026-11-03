@@ -21,7 +21,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from postgresql_schema import verify_owned_postgres
-from search_index import Engine, Http, SearchError, document
+from search_index import Engine, Http, SearchError, document, decode
 from search_relay import PostgresStore, Relay, connect_database, database_settings, target_identity, relay_status, claim_document
 from relay_smoke import event
 from jpa_smoke import child_environment, request_json, verify_jar, cleanup_on_termination, defer_termination
@@ -394,17 +394,31 @@ def completed_ack_snapshot(owner):
     return {"count": len(rows), "sha256": hashlib.sha256(json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()}
 
 
+def validate_business_events(rows):
+    # A storage-only JSON fixture can be valid PostgreSQL json without being Engine wire.
+    # Refuse it before claiming anything; never filter, repair, or fake an acknowledgement.
+    for row in rows:
+        try:
+            value = document(decode(row["payload"]))
+            if (value["product_id"] != row["product_id"] or value["source_version"] != row["source_version"]
+                    or value["deleted"] != row["deleted"]):
+                raise SearchError("relay_outbox_metadata_mismatch")
+        except (SearchError, KeyError, TypeError, ValueError):
+            raise SearchError("pg_relay_business_event_invalid") from None
+
+
 def consume_business(http, endpoint, private, environ, index="pubburi-products-v1-pgbusiness"):
     """Original packaged JPA producer -> real watch -> real engine, without source row writes."""
     from postgresql_schema import ROOT
     store, owner, runtime = fixture(environ)
     source_id = store.source_id()
-    engine = Engine(http, index, "backend_product_events", source_id, refresh="false"); engine.ready(create=True)
     original_events = sql(owner, "SELECT event_id,payload::text AS payload,product_id,source_version,deleted,created_at FROM t_product_search_outbox ORDER BY event_id")
     original_versions = sql(owner, "SELECT product_id,source_version FROM t_product_search_version ORDER BY product_id")
     original_acks = sql(owner, "SELECT row_to_json(d)::text AS raw FROM t_product_search_delivery d WHERE status='DELIVERED' ORDER BY event_id")
     assert 0 < len(original_events) <= 1000
+    validate_business_events(original_events)
     assert sql(owner, "SELECT COUNT(*) AS n FROM t_product_search_outbox o LEFT JOIN t_product_search_delivery d USING(event_id) WHERE d.event_id IS NULL")[0]["n"] == 0
+    engine = Engine(http, index, "backend_product_events", source_id, refresh="false"); engine.ready(create=True)
     jar = Path(environ.get("PUBBURI_PG_RELAY_JPA_JAR", ROOT / "tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar"))
     verify_jar(jar)
     immutable = private / "pg-relay-business-runtime.jar"

@@ -49,7 +49,7 @@ watch로 전달해 현재 가격/태그·최종 tombstone·옛 갱신 거절을 
 18/84의 기존 완료 ACK·source UUID는 교체 뒤에도 exact였다. 이 안전 거절을 가짜 완료/자동
 색인 유실 복구로 바꾸지 않았다. 엔진 restart/교체는 조정자만 수행했다.
 
-기존 Java17 기본 check와 최종 Python 도구93개, 실제 JPA75통합+단위3이 통과했고 준비2 skip은 별도다. 첫 실제 JPA
+기존 Java17 기본 check와 최종 Python 도구95개, 실제 JPA75통합+단위3이 통과했고 준비2 skip은 별도다. 첫 실제 JPA
 실행의 기본 목록4조건은 전용 scratch가 아직80개인 준비 전제에서 실패했다. 조정자가 동결
 원래 관리자 DELETE API로 이 복사본만0개로 준비하고 같은 전체 회귀를 재실행했다. Java 제품/
 테스트/SQL은 바꾸지 않았다. 초기 전체 XML/system-out·실패4개는 재실행 전 보존했지만 private
@@ -84,6 +84,21 @@ fake cleanup 환경도 외부 값에서 격리하고 같은 유입 회귀를 추
 같은 flag를 상속한 전체 check도 Python93/Java149·이관단위18/JPA단위3으로 통과했다.
 운영 adapter/JAR와 앞의 실제 PG/MySQL 전달 결과는 변경하지 않았다. 최신 head의 fresh CI와
 Codex는 새로 확인하며, 첫 head의 리뷰 완료를 수정 head의 승인으로 대신하지 않는다.
+
+두 번째 [CI41707627953](https://github.com/Pubburi/Backend/actions/runs/41707627953)는 위 도구/
+PG 준비·source/import/JPA·기본 HTTP를 통과한 뒤 마지막 relay에서 실패했다. CI가 전체 JPA
+회귀 DB를 business 입력으로 재사용한 차이를 확인했다. 기존 원문 저장 테스트는 whitespace와
+key 순서 검증을 위해 name/tasteTags만 있는 부분 document를 의도적으로 append/schedule해
+보존한다. 같은 raw fixture가 변경 없는 strict claim_document에서 relay_outbox_payload_invalid로
+거절되는 것을 재현했다. 이를 실제 업무 producer의 결함으로 바꾸거나 기존 테스트/원문을 삭제하지 않는다.
+
+CI도 조정자의 실제 검증과 같이 별도 승인 snapshot business DB를 준비하고 기존 import·최소
+앱 권한·계정 준비만 재사용한다. 기존 normal/failure/scratch의75회귀는 그대로 수행하며 그 이벤트를 전달용으로
+필터하거나 ACK하지 않는다. business 선택이 normal/failure 등 기존 회귀 DB와 같으면 SQL 전에
+거절하고, 초기 이벤트의 strict wire/metadata 검사도 claim 전에 고정 오류로 거절한다. 안전 보고서는
+queue/business 단계를 분리한다. 별도 신규 회귀는 잘못된 DB 선택과 원래 부분 JSON의 거절/
+정상 wire 보존을 확인한다. adapter·V1/V2·원문 저장 테스트·원본 UUID/ACK와 앞의 실제 PG/MySQL
+전달 결과는 유지한다. 새 로컬 DB를 reset하지 않았다. 같은 상속 flag의 전체 check는 Python95·Java149/이관단위18/JPA단위3으로 통과했고, 수정 head의 fresh 필수 CI에서 실제 분리를 검증한다.
 
 새 부하/성능 측정·운영 복구 SLA·검색 refresh 완료나 사용자 검색 품질 성과는 미측정이다.
 최신 필수 CI/완료 Codex/미해결0·main 인수는 후속 게이트다. 공개 엔진 검색·PG 필수조건

@@ -177,8 +177,9 @@ def main():
             fixture_path.relative_to(Path(".pubburi").resolve())
             pg_fixture = json.loads(fixture_path.read_text())
             pg_relay = pg_exercise(http, endpoint, private, pg_fixture["queue"])
+            report["completed"].append("PostgreSQL queue verify-full/minimum role, exact JSON/types, DB wall clock and locked expiry, two workers, retry/fencing/crash")
             pg_business = pg_consume(http, endpoint, private, pg_fixture["business"])
-            report["completed"].append("PostgreSQL verify-full/minimum role, exact JSON/types, DB wall clock and locked expiry, two workers, retry/fencing/crash and actual packaged JPA watch")
+            report["completed"].append("separate accepted-source PostgreSQL business copy and actual packaged JPA producer/watch")
         docker("restart", state["container_id"])
         # Dynamic host ports can change when Docker restarts a container.
         raw = owned_container(); state.update(port=int(raw["NetworkSettings"]["Ports"]["9200/tcp"][0]["HostPort"]), container_pid=raw["State"]["Pid"]); save()

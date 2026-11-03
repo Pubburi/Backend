@@ -22,6 +22,11 @@ def prepare(environ, business, directory):
     token = environ["PUBBURI_PG_RELAY_RUN_TOKEN"]
     if not re.fullmatch(r"[A-Za-z0-9_-]{12,100}", token):
         raise ValueError("postgresql_relay_ci_marker_rejected")
+    business_database = environ.get("PUBBURI_PG_RELAY_BUSINESS_DB_NAME", "")
+    if (not re.fullmatch(r"[a-z][a-z0-9_]*_ci", business_database)
+            or business.get("PUBBURI_PG_DB_NAME") != business_database or business_database == database
+            or business_database in {value for key, value in environ.items() if key.endswith("DB_NAME") and key != "PUBBURI_PG_RELAY_BUSINESS_DB_NAME"}):
+        raise ValueError("postgresql_relay_ci_separate_business_required")
     path = Path(environ["PUBBURI_PG_RELAY_FIXTURE"])
     path.resolve().relative_to((ROOT / ".pubburi").resolve())
     if path.exists() or path.is_symlink():
