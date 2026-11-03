@@ -90,6 +90,13 @@ jobs:
       PUBBURI_PG_JPA_RECOMMENDATION_RUN_TOKEN: pubburi-pg-jpa-recommendation-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_JPA_RUNTIME_USER: ci_jpa_runtime
       PUBBURI_PG_JPA_RUNTIME_PASSWORD: ci_jpa_runtime_only
+      PUBBURI_PG_RELAY_DB_NAME: pubburi_pg_relay_queue_ci
+      PUBBURI_PG_RELAY_RUN_TOKEN: pubburi-pg-relay-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_RELAY_BUSINESS_DB_NAME: pubburi_pg_relay_business_ci
+      PUBBURI_PG_RELAY_BUSINESS_RUN_TOKEN: pubburi-pg-relay-business-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_RELAY_USER: ci_pg_relay
+      PUBBURI_PG_RELAY_PASSWORD: ci_pg_relay_only
+      PUBBURI_PG_RELAY_FIXTURE: .pubburi/postgresql-relay-ci.json
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,6 +139,7 @@ jobs:
           PUBBURI_PG_CONTAINER_ID: ${{ job.services.postgresql.id }}
           PUBBURI_PG_IMPORT_INTEGRATION: '1'
           PUBBURI_JPA_CI: '1'
+          PUBBURI_PG_RELAY_CI: '1'
         run: python3 scripts/source_snapshot_ci.py
       - name: Initialize disposable database
         env:
@@ -166,6 +174,7 @@ jobs:
           PUBBURI_SEARCH_VALIDATION_RUN: search-ci-${{ github.run_id }}-${{ github.run_attempt }}
           PUBBURI_SEARCH_OUTBOX_INPUT: .pubburi/search-outbox-smoke-events.json
           PUBBURI_RELAY_SMOKE_DB_NAME: pubburi_relay_ci
+          PUBBURI_PG_RELAY_CI: '1'
           PUBBURI_SMOKE_MUTATING: '1'
           PUBBURI_SMOKE_CONTAINER_ID: ${{ job.services.mysql.id }}
         run: .venv-relay/bin/python scripts/smoke_search.py

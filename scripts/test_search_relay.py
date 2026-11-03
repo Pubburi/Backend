@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 from search_index import Engine, SearchError
-from search_relay import Claim, Relay, Store, claim_document, database_settings, main
+from search_relay import Claim, Relay, Store, PostgresStore, claim_document, database_settings, database_store, connect_database, main
 
 SOURCE = "e308100e-e37e-4ccb-9af9-f9baaf692204"
 IDENTITY = {"source_id": SOURCE, "cluster_uuid": "cluster-a", "index_uuid": "index-a",
@@ -37,7 +37,7 @@ class RelayUnitTests(unittest.TestCase):
     def test_database_columns_and_strict_payload_must_describe_the_same_event(self):
         claim = claimed()
         self.assertTrue(claim_document(claim)["deleted"])
-        for changes in ({"product_id": 8}, {"source_version": 4}, {"deleted": 0}, {"payload": "[]"}, {"payload": None}):
+        for changes in ({"product_id": 8}, {"source_version": 4}, {"deleted": 0}, {"deleted": True}, {"payload": "[]"}, {"payload": None}):
             candidate = Claim(claim.event_id, claim.token, 1, dict(claim.row, **changes), claim.fingerprint, SOURCE)
             with self.assertRaises(SearchError): claim_document(candidate)
 
@@ -129,6 +129,57 @@ class RelayUnitTests(unittest.TestCase):
         self.assertEqual(Engine(None, kind="backend_product_events", source_id=SOURCE).schema["mappings"]["_meta"]["source_id"], SOURCE)
         for bad in ("", "not-uuid", SOURCE.upper(), 7):
             with self.assertRaises(SearchError): Engine(None, source_id=bad)
+
+    def test_postgresql_is_explicit_and_selects_only_its_own_adapter(self):
+        env = {"PUBBURI_DB_URL": "jdbc:postgresql://127.0.0.1:5432/demo", "PUBBURI_DB_USER": "local",
+               "PUBBURI_DB_PASSWORD": "authored-only", "PUBBURI_RELAY_DB_CA": str(self.ca)}
+        settings = database_settings(env)
+        self.assertEqual(settings["dialect"], "postgresql")
+        self.assertIsInstance(database_store(settings), PostgresStore)
+        mysql = database_settings(dict(env, PUBBURI_DB_URL="jdbc:mysql://127.0.0.1:3306/demo"))
+        self.assertNotIn("dialect", mysql)
+        self.assertIs(type(database_store(mysql)), Store)
+        for url in ("jdbc:postgresql://localhost:5432/demo", "jdbc:postgresql://example.org:5432/demo",
+                    "jdbc:postgresql://u:p@127.0.0.1:5432/demo", "jdbc:postgresql://127.0.0.1:5432/demo?sslmode=disable",
+                    "jdbc:postgresql://127.0.0.1:5432/demo#fragment", "jdbc:postgresql://127.0.0.1/demo",
+                    "jdbc:sqlite://127.0.0.1:5432/demo"):
+            with self.assertRaises(SearchError): database_settings(dict(env, PUBBURI_DB_URL=url))
+
+    def test_postgresql_tls_and_connection_policy_override_ambient_libpq_defaults(self):
+        settings = database_settings({"PUBBURI_DB_URL": "jdbc:postgresql://127.0.0.1:5432/demo", "PUBBURI_DB_USER": "local",
+            "PUBBURI_DB_PASSWORD": "authored-only", "PUBBURI_RELAY_DB_CA": str(self.ca)})
+        driver = MagicMock()
+        with patch.dict("sys.modules", {"psycopg": driver, "psycopg.rows": driver.rows}):
+            connection = connect_database(settings)
+        self.assertIs(connection, driver.connect.return_value)
+        kwargs = driver.connect.call_args.kwargs
+        self.assertEqual((kwargs["host"], kwargs["hostaddr"], kwargs["dbname"]), ("127.0.0.1", "127.0.0.1", "demo"))
+        self.assertEqual((kwargs["sslmode"], kwargs["sslrootcert"], kwargs["gssencmode"]), ("verify-full", str(self.ca), "disable"))
+        self.assertEqual(kwargs["client_encoding"], "UTF8")
+        self.assertIn("search_path=pubburi,pg_catalog", kwargs["options"])
+        self.assertIn("timezone=UTC", kwargs["options"])
+        self.assertTrue(kwargs["autocommit"])
+
+    def test_postgresql_explicit_transaction_interrupt_closes_without_a_commit(self):
+        connection = MagicMock()
+        store = PostgresStore(lambda: connection)
+        with self.assertRaises(KeyboardInterrupt):
+            with store.transaction(): raise KeyboardInterrupt()
+        connection.execute.assert_called_once_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+        connection.rollback.assert_called_once(); connection.close.assert_called_once()
+        connection.commit.assert_not_called()
+
+    def test_postgresql_cli_uses_same_initialization_and_never_logs_connection_details(self):
+        env = {"PUBBURI_DB_URL": "jdbc:postgresql://127.0.0.1:5432/demo", "PUBBURI_DB_USER": "local",
+               "PUBBURI_DB_PASSWORD": "never-print-this", "PUBBURI_RELAY_DB_CA": str(self.ca)}
+        store = Mock(); store.source_id.return_value = SOURCE
+        output = io.StringIO()
+        with patch("search_relay.os.environ", env), patch("search_relay.PostgresStore", return_value=store), \
+                patch("search_relay.Engine"), patch("search_relay.target_identity", return_value=IDENTITY), \
+                patch("sys.stdout", output), patch("search_relay.sys.argv", ["relay", "init", "--endpoint", "http://127.0.0.1:9200", "--index", "pubburi-products-v1-unit"]):
+            self.assertEqual(main(), 0)
+        self.assertEqual(json.loads(output.getvalue()), {"status": "initialized"})
+        store.bind.assert_called_once_with(IDENTITY)
 
 
 if __name__ == "__main__": unittest.main()

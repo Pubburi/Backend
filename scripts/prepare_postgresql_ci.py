@@ -32,6 +32,13 @@ def prepare(environ):
                           (environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_RUN_TOKEN"])])
         if "PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME" in environ:
             databases.append((environ["PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME"],environ["PUBBURI_PG_JPA_RECOMMENDATION_RUN_TOKEN"]))
+    relay = environ.get("PUBBURI_PG_RELAY_USER") if "PUBBURI_PG_RELAY_DB_NAME" in environ else None
+    if "PUBBURI_PG_RELAY_DB_NAME" in environ:
+        databases.append((environ["PUBBURI_PG_RELAY_DB_NAME"], environ["PUBBURI_PG_RELAY_RUN_TOKEN"]))
+        databases.append((environ["PUBBURI_PG_RELAY_BUSINESS_DB_NAME"], environ["PUBBURI_PG_RELAY_BUSINESS_RUN_TOKEN"]))
+        if (relay is None or not re.fullmatch(r"[a-z][a-z0-9_]{0,50}", relay) or relay in (role, admin, environ.get("PUBBURI_PG_JPA_RUNTIME_USER"))
+                or not environ.get("PUBBURI_PG_RELAY_PASSWORD")):
+            raise ValueError("postgresql_ci_relay_role_rejected")
     runtime = environ.get("PUBBURI_PG_JPA_RUNTIME_USER") if "PUBBURI_PG_JPA_DB_NAME" in environ else None
     if "PUBBURI_PG_JPA_DB_NAME" in environ and (runtime is None or not re.fullmatch(r"[a-z][a-z0-9_]{0,50}", runtime) or runtime in (role,admin) or not environ.get("PUBBURI_PG_JPA_RUNTIME_PASSWORD")):
         raise ValueError("postgresql_ci_runtime_role_rejected")
@@ -107,12 +114,14 @@ def prepare(environ):
         "NOREPLICATION NOBYPASSRLS PASSWORD " + literal(environ["PUBBURI_PG_PASSWORD"]) + ";", tls=True)
     if runtime is not None:
         sql("SET standard_conforming_strings='on'; SET password_encryption='scram-sha-256'; CREATE ROLE " + runtime + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD " + literal(environ["PUBBURI_PG_JPA_RUNTIME_PASSWORD"]) + ";", tls=True)
+    if relay is not None:
+        sql("SET standard_conforming_strings='on'; SET password_encryption='scram-sha-256'; CREATE ROLE " + relay + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD " + literal(environ["PUBBURI_PG_RELAY_PASSWORD"]) + ";", tls=True)
     for database, token in databases:
-        sql("CREATE DATABASE " + database + " ENCODING 'UTF8' TEMPLATE template0;\nGRANT CONNECT,CREATE ON DATABASE " + database + " TO " + role + ";", tls=True)
+        sql("CREATE DATABASE " + database + " ENCODING 'UTF8' TEMPLATE template0;\nGRANT CONNECT,CREATE ON DATABASE " + database + " TO " + role + ";\nREVOKE TEMPORARY ON DATABASE " + database + " FROM PUBLIC;", tls=True)
         sql("REVOKE CREATE ON SCHEMA public FROM PUBLIC;\nCREATE TABLE public.pubburi_pg_migration_guard(token VARCHAR(100) PRIMARY KEY);\n"
             "INSERT INTO public.pubburi_pg_migration_guard VALUES (" + literal(token) + ");\n"
             "GRANT SELECT ON public.pubburi_pg_migration_guard TO " + role + ";", database, tls=True)
-        if runtime is not None and database in (environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ.get("PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME")):
+        if runtime is not None and database in (environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ.get("PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME"),environ.get("PUBBURI_PG_RELAY_BUSINESS_DB_NAME")):
             sql("GRANT SELECT ON public.pubburi_pg_migration_guard TO " + runtime + ";", database, tls=True)
     # No process needs the CA signing key or CSR after the fresh service has been configured.
     for name in ("ca.key", "server.key", "server.csr", "server.ext", "ca.srl"):

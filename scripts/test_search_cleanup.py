@@ -51,7 +51,7 @@ class SearchCleanupTests(unittest.TestCase):
             try:
                 os.chdir(temp)
                 Path("scripts").mkdir(); Path("scripts/search_index.py").write_text("authored source marker")
-                with patch.dict(os.environ, {"PUBBURI_SEARCH_VALIDATION_RUN": label}), patch.object(smoke_search, "docker", side_effect=docker), patch.object(smoke_search, "wait_ready"), patch.object(smoke_search, "exercise", return_value=(SimpleNamespace(index="pubburi-products-v1-validation"), events)), patch.object(smoke_search.Engine, "ready"), patch.object(smoke_search.Engine, "apply", return_value="stale_ignored"), patch.object(smoke_search, "visible", return_value=[2]), patch.object(smoke_search.subprocess, "run", side_effect=cli), patch.object(Path, "write_text", new=write), patch("builtins.print"):
+                with patch.dict(os.environ, {"PUBBURI_SEARCH_VALIDATION_RUN": label}, clear=True), patch.object(smoke_search, "docker", side_effect=docker), patch.object(smoke_search, "wait_ready"), patch.object(smoke_search, "exercise", return_value=(SimpleNamespace(index="pubburi-products-v1-validation"), events)), patch.object(smoke_search.Engine, "ready"), patch.object(smoke_search.Engine, "apply", return_value="stale_ignored"), patch.object(smoke_search, "visible", return_value=[2]), patch.object(smoke_search.subprocess, "run", side_effect=cli), patch.object(Path, "write_text", new=write), patch("builtins.print"):
                     self.assertEqual(smoke_search.main(), 2)
                 report = json.loads(Path("target/search-smoke-report.json").read_text())
                 state = json.loads(next(Path(".pubburi").glob("*/runtime.json")).read_text())
@@ -87,6 +87,16 @@ class SearchCleanupTests(unittest.TestCase):
                 calls, state, report, name = self.run_failure(mode)
                 self.assertNotIn(("volume", "rm", name), calls)
                 self.assertEqual(state["phase"], "cleanup_failed")
+
+    def test_fake_cleanup_isolated_from_live_postgresql_relay_environment(self):
+        # This is the CI failure condition: enable inherited before its fixture is prepared.
+        with patch.dict(os.environ, {"PUBBURI_PG_RELAY_CI": "1", "PUBBURI_PG_RELAY_FIXTURE": ".pubburi/not-prepared.json"}):
+            calls, state, report, name = self.run_failure("log_read")
+        self.assertNotIn("error_code", report)
+        self.assertEqual(report["diagnostic_error"], "OSError")
+        self.assertIn(("rm", "-f", "ownedcid"), calls)
+        self.assertIn(("volume", "rm", name), calls)
+        self.assertEqual(state["phase"], "cleaned")
 
 
 if __name__ == "__main__": unittest.main()

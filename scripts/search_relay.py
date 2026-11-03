@@ -21,7 +21,7 @@ from search_index import Engine, Http, SearchError, decode, document, MAX_INPUT_
 def database_settings(environ):
     try:
         raw = environ.get("PUBBURI_DB_URL", "")
-        if not raw.startswith("jdbc:mysql://"): raise ValueError()
+        if not raw.startswith(("jdbc:mysql://", "jdbc:postgresql://")): raise ValueError()
         url = urlsplit(raw[5:])
         if (not ipaddress.ip_address(url.hostname).is_loopback or not url.port or not 1 <= url.port <= 65535
                 or url.username is not None or url.password is not None or url.query or url.fragment
@@ -35,10 +35,28 @@ def database_settings(environ):
     ca = environ.get("PUBBURI_RELAY_DB_CA")
     if not ca or not Path(ca).is_file():
         raise SearchError("explicit_local_database_ca_required")
-    return dict(settings, ssl_ca=ca)
+    return dict(settings, ssl_ca=ca, **({"dialect": "postgresql"} if url.scheme == "postgresql" else {}))
 
 
 def connect_database(settings):
+    if settings.get("dialect") == "postgresql":
+        import psycopg
+        from psycopg.rows import dict_row
+        # Explicit values override libpq environment defaults. No cleartext/GSS fallback,
+        # implicit schema search path, or client clock participates in delivery ownership.
+        connection = psycopg.connect(host=settings["host"], hostaddr=settings["host"], port=settings["port"],
+            dbname=settings["database"], user=settings["user"], password=settings["password"],
+            sslmode="verify-full", sslrootcert=settings["ssl_ca"], gssencmode="disable",
+            connect_timeout=2, tcp_user_timeout=5000, client_encoding="UTF8", row_factory=dict_row,
+            application_name="pubburi-search-relay", autocommit=True,
+            options="-c search_path=pubburi,pg_catalog -c timezone=UTC -c statement_timeout=5000 "
+                    "-c lock_timeout=5000 -c idle_in_transaction_session_timeout=10000")
+        try:
+            connection.isolation_level = psycopg.IsolationLevel.READ_COMMITTED
+        except BaseException:
+            connection.close()
+            raise
+        return connection
     import pymysql  # Only the opt-in relay needs the separately locked environment.
     connection = pymysql.connect(**settings, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor,
         connect_timeout=2, read_timeout=5, write_timeout=5, autocommit=False, local_infile=False,
@@ -69,11 +87,14 @@ class Store:
     def __init__(self, connection_factory):
         self.connect = connection_factory
 
+    def begin(self, connection):
+        connection.begin()
+
     @contextmanager
     def transaction(self):
         connection = self.connect()
         try:
-            connection.begin()
+            self.begin(connection)
             with connection.cursor() as cursor:
                 yield cursor
             connection.commit()
@@ -150,6 +171,95 @@ class Store:
                 WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s AND lease_until>NOW(6)""",
                 (delay, code, claim.event_id, claim.token))
             return cursor.rowcount == 1
+
+
+class PostgresStore(Store):
+    """Same delivery contract; PostgreSQL SQL/types and actual wall-clock semantics."""
+
+    def begin(self, connection):
+        connection.execute("BEGIN ISOLATION LEVEL READ COMMITTED")
+
+    def source_id(self):
+        with self.transaction() as cursor:
+            cursor.execute("SELECT source_id::text AS source_id FROM t_product_search_relay_target WHERE singleton_id=1")
+            row = cursor.fetchone()
+            if row is None or str(uuid.UUID(row["source_id"])) != row["source_id"]:
+                raise SearchError("relay_source_identity_required")
+            return row["source_id"]
+
+    def bind(self, identity):
+        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+        fingerprint = hashlib.sha256(encoded.encode()).hexdigest()
+        with self.transaction() as cursor:
+            cursor.execute("SELECT source_id::text AS source_id, fingerprint FROM t_product_search_relay_target WHERE singleton_id=1 FOR UPDATE")
+            row = cursor.fetchone()
+            if row is None or row["source_id"] != identity["source_id"]:
+                raise SearchError("relay_source_identity_mismatch")
+            if row["fingerprint"] is None:
+                cursor.execute("UPDATE t_product_search_relay_target SET fingerprint=%s, identity_json=%s::json, bound_at=clock_timestamp() WHERE singleton_id=1", (fingerprint, encoded))
+            elif row["fingerprint"] != fingerprint:
+                raise SearchError("relay_target_identity_mismatch")
+        return fingerprint
+
+    def fence_target(self, cursor, fingerprint, source_id):
+        cursor.execute("SELECT source_id::text AS source_id, fingerprint FROM t_product_search_relay_target WHERE singleton_id=1 FOR SHARE")
+        row = cursor.fetchone()
+        if row is None or row["fingerprint"] != fingerprint or row["source_id"] != source_id:
+            raise SearchError("relay_target_identity_mismatch")
+
+    def claim(self, fingerprint, source_id):
+        with self.transaction() as cursor:
+            self.fence_target(cursor, fingerprint, source_id)
+            cursor.execute("""SELECT event_id, attempts FROM t_product_search_delivery
+                WHERE (status='PENDING' AND available_at<=clock_timestamp())
+                   OR (status='IN_FLIGHT' AND lease_until<=clock_timestamp())
+                ORDER BY event_id LIMIT 1 FOR UPDATE SKIP LOCKED""")
+            pending = cursor.fetchone()
+            if pending is None: return None
+            token = str(uuid.uuid4())
+            attempts = min(pending["attempts"] + 1, 2147483647)
+            cursor.execute("""UPDATE t_product_search_delivery SET status='IN_FLIGHT', claim_token=%s::uuid,
+                lease_until=clock_timestamp()+INTERVAL '120 seconds', attempts=%s WHERE event_id=%s""",
+                (token, attempts, pending["event_id"]))
+            cursor.execute("""SELECT product_id, source_version, CASE WHEN deleted THEN 1 ELSE 0 END AS deleted,
+                CASE WHEN OCTET_LENGTH(payload::text)<=%s THEN payload::text ELSE NULL END AS payload
+                FROM t_product_search_outbox WHERE event_id=%s""", (MAX_INPUT_BYTES, pending["event_id"]))
+            row = cursor.fetchone()
+            if row is None: raise SearchError("relay_outbox_event_missing")
+            return Claim(pending["event_id"], token, attempts, row, fingerprint, source_id)
+
+    def ack(self, claim):
+        with self.transaction() as cursor:
+            self.fence_target(cursor, claim.fingerprint, claim.source_id)
+            self.lock_claim(cursor, claim)
+            cursor.execute("""UPDATE t_product_search_delivery SET status='DELIVERED', delivered_at=clock_timestamp(),
+                claim_token=NULL, lease_until=NULL, last_error=NULL
+                WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s::uuid AND lease_until>clock_timestamp()""",
+                (claim.event_id, claim.token))
+            return cursor.rowcount == 1
+
+    def lock_claim(self, cursor, claim):
+        # Qualifying a volatile clock predicate may happen before UPDATE waits for a
+        # row lock. Acquire the row first, then evaluate expiry in a new command.
+        cursor.execute("""SELECT event_id FROM t_product_search_delivery
+            WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s::uuid FOR UPDATE""",
+            (claim.event_id, claim.token))
+
+    def retry(self, claim, code):
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code): code = "relay_delivery_failed"
+        delay = min(2 ** min(claim.attempts, 6), 60)
+        with self.transaction() as cursor:
+            self.lock_claim(cursor, claim)
+            cursor.execute("""UPDATE t_product_search_delivery SET status='PENDING', claim_token=NULL,
+                lease_until=NULL, available_at=clock_timestamp()+(%s * INTERVAL '1 second'), last_error=%s
+                WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s::uuid AND lease_until>clock_timestamp()""",
+                (delay, code, claim.event_id, claim.token))
+            return cursor.rowcount == 1
+
+
+def database_store(settings):
+    kind = PostgresStore if settings.get("dialect") == "postgresql" else Store
+    return kind(lambda: connect_database(settings))
 
 
 def target_identity(engine, source_id):
@@ -243,7 +353,7 @@ def main():
     args = parser.parse_args()
     try:
         settings = database_settings(os.environ)
-        store = Store(lambda: connect_database(settings))
+        store = database_store(settings)
         source_id = store.source_id()
         engine = Engine(Http(args.endpoint), args.index, "backend_product_events", source_id, refresh="false")
         engine.ready(create=args.command == "init")
