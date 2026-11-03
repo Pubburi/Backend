@@ -73,6 +73,10 @@ class RehearsalDataSource {
                 OR has_sequence_privilege('pubburi.t_comment_id_seq','SELECT,UPDATE')
                 OR has_table_privilege('pubburi.t_user_favorite','UPDATE,TRIGGER,TRUNCATE')
                 OR has_any_column_privilege('pubburi.t_user_favorite','UPDATE')
+                OR has_table_privilege('pubburi.t_user_preference','UPDATE,DELETE,TRIGGER,TRUNCATE')
+                OR has_column_privilege('pubburi.t_user_preference','user_id','UPDATE')
+                OR has_table_privilege('pubburi.t_user_preference_value','UPDATE,TRIGGER,TRUNCATE')
+                OR has_any_column_privilege('pubburi.t_user_preference_value','UPDATE')
             """)) {
             statement.setString(1,s.token());statement.setString(2,s.sourceId());try(var r=statement.executeQuery()) {
                 if(!r.next() || !s.database().equals(r.getString(1)) || !"180006".equals(r.getString(2)) || !"UTF8".equals(r.getString(3)) || !r.getBoolean(4) || r.getBoolean(5) || !r.getBoolean(6) || !r.getBoolean(7) || r.getBoolean(8) || r.getBoolean(9) || r.getBoolean(10) || r.getBoolean(11))throw new IllegalArgumentException("jpa_rehearsal_guard_rejected");

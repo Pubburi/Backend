@@ -72,7 +72,7 @@ packaged smoke는 실제 상품/특성 쓰기·재기동 후 값 보존·재로�
 두 부분 수정과 주문/이름 수정의 경합에서 합계/생략 자격이 되돌아가지 않아야 한다.
 별도 failure DB의 `JpaAccountFailureIntegrationTests`는 정확한 자체 사용자의 AFTER UPDATE/DELETE
 실패 뒤 hash/epoch/세션·메모·주문 참조·스탬프·취향/찜 cascade가 전부 rollback되는지 검사한다.
-이 자식 테이블의 검증은 해당 API 제공을 뜻하지 않으며 runtime 권한을 추가하지 않는다.
+이 자식 테이블의 계정 수명 검증은 별도 취향/찜 API 인수와 구분한다.
 packaged smoke도 계정/프로필/변경·재시작·비밀번호 회전·삭제/재가입을 같은 JAR에서 확인한다.
 [실행 조건·결과·한계](plans/2026-11-03-jpa-account-profile.md)를 따른다.
 
@@ -96,6 +96,16 @@ PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment에�
 실패 뒤 관계/시각·계정/주문/상품·producer/UUID를 보존하고 실패 DDL을 finally 제거한다.
 packaged smoke는 같은 JAR의 단건/페이지·반복 요청·재시작·현재 상품·상품 cascade를 확인한다.
 [찜 조건·결과·한계](plans/2026-11-03-jpa-favorites.md)는 F01 신규 완료나 전체 DB 전환과 구분한다.
+
+`JpaPreferenceIntegrationTests`는 본인/타인/관리자·두 세션, 미입력/null/[]/0·soft/hard·상태와
+전체 교체·skip/reset·엄격 입력/정규화/정렬을 실제 HTTP/DB에서 검사한다. header/values 사이
+별도 commit의 RR, 잠금 직전 자격 회전·삭제/재가입의 구 epoch401, 사용자 잠금으로 직렬화한
+두 전체 교체를 확인한다. 헤더 DELETE/PK UPDATE·값 UPDATE·TRUNCATE는 계속 거절한다.
+`JpaPreferenceFailureIntegrationTests`는 별도 failure DB의 정확한 자체 user_id에 header INSERT/
+UPDATE·값 DELETE/두 번째 INSERT 이후 실패를 주어 이전 헤더/값·계정/상품/producer/UUID의
+rollback을 확인한다. 실패 DDL은 finally 제거한다. packaged smoke는 같은 JAR의 재시작/재로그인·
+전체 교체/초기화·계정 삭제/재가입 격리와 기존 업무 흐름을 함께 검사한다.
+[명시취향 조건·결과·한계](plans/2026-11-03-jpa-preferences.md)를 따른다.
 
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.

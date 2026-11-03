@@ -202,6 +202,21 @@ def run(environ):
         expect(request(admin,base,"PUT","/api/admin/users/"+account_id,{"pass":fresh_pass})[0],200)
         expect(request(account,base,"GET","/api/auth/me")[0],401)
         expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
+        preference_path="/api/users/me/preferences"
+        unanswered={"surveyStatus":"NOT_STARTED","softPreferences":dict.fromkeys(("categories","tasteTags","aromaTags","targetAbvPercent")),"hardConstraints":dict.fromkeys(("minPriceKrw","maxPriceKrw","minAbvPercent","maxAbvPercent"))}
+        expect(request(anonymous,base,"GET",preference_path)[0],401)
+        status,empty_preference=request(account,base,"GET",preference_path);expect(status,200)
+        if empty_preference["data"]!=unanswered:raise ValueError("jpa_runtime_unanswered_preference_changed")
+        authored_preference={"surveyStatus":"COMPLETED","softPreferences":{"tasteTags":[" SMOKY ","dry"],"aromaTags":[],"targetAbvPercent":15.25},"hardConstraints":{"minPriceKrw":0,"maxAbvPercent":10}}
+        for _ in range(2):
+            status,saved_preference=request(account,base,"PUT",preference_path,authored_preference);expect(status,200)
+        expected_preference={"surveyStatus":"COMPLETED","softPreferences":{"categories":None,"tasteTags":["dry","smoky"],"aromaTags":[],"targetAbvPercent":15.25},"hardConstraints":{"minPriceKrw":0,"maxPriceKrw":None,"minAbvPercent":None,"maxAbvPercent":10}}
+        if saved_preference["data"]!=expected_preference:raise ValueError("jpa_runtime_preference_values_changed")
+        status,admin_preference=request(admin,base,"GET",preference_path);expect(status,200)
+        if admin_preference["data"]!=unanswered:raise ValueError("jpa_runtime_preference_owner_leaked")
+        expect(request(account,base,"PUT",preference_path,{"surveyStatus":"SKIPPED","softPreferences":{"tasteTags":[]}})[0],400)
+        status,retained_preference=request(account,base,"GET",preference_path);expect(status,200)
+        if retained_preference["data"]!=expected_preference:raise ValueError("jpa_runtime_invalid_preference_mutated")
         if market_id<int(environ.get("PUBBURI_JPA_EXPECTED_MARKET_NEXT","1")):raise ValueError("jpa_runtime_identity_reused")
         if set(created["data"])!={"id","name","latitude","longitude","image"}:raise ValueError("jpa_runtime_market_shape_changed")
         payload["name"]="Authored packaged edited";expect(request(admin,base,"PUT","/api/admin/markets/"+str(market_id),payload)[0],200)
@@ -272,9 +287,9 @@ def run(environ):
                 "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
                 "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
                 "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-                "/api/users/me/favorites","/api/users/me/favorites/{productId}"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=37:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=39:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
@@ -284,6 +299,12 @@ def run(environ):
         expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
         status,persisted_profile=request(account,base,"GET","/api/users/"+account_id+"/profile");expect(status,200)
         if persisted_profile["data"]!=profile_data:raise ValueError("jpa_runtime_profile_restart_lost_data")
+        status,persisted_preference=request(account,base,"GET",preference_path);expect(status,200)
+        if persisted_preference["data"]!=expected_preference:raise ValueError("jpa_runtime_preference_restart_lost_data")
+        for survey_status in ("SKIPPED","NOT_STARTED","COMPLETED"):
+            status,cleared_preference=request(account,base,"PUT",preference_path,{"surveyStatus":survey_status});expect(status,200)
+            if cleared_preference["data"]!=dict(unanswered,surveyStatus=survey_status):raise ValueError("jpa_runtime_preference_whole_replace_changed")
+        expect(request(account,base,"PUT",preference_path,authored_preference)[0],200)
         expect(request(admin,base,"GET","/api/markets/"+str(market_id))[0],404)
         status,persisted_product=request(client(),base,"GET","/api/products/"+str(product_id));expect(status,200)
         if persisted_product["data"]["price"]!=2300:raise ValueError("jpa_runtime_product_restart_lost_data")
@@ -326,13 +347,17 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(anonymous,base,"POST","/api/users",registration)[0],201)
         expect(request(dormant,base,"GET","/api/users/"+account_id+"/profile")[0],401)
+        expect(request(dormant,base,"GET",preference_path)[0],401)
         expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":account_pass})[0],200)
         status,rejoined_profile=request(account,base,"GET","/api/users/"+account_id+"/profile");expect(status,200)
         if rejoined_profile["data"]["orders"]!=[] or rejoined_profile["data"]["user"]["stamps"]!=0:raise ValueError("jpa_runtime_rejoined_profile_inherited_state")
+        status,rejoined_preference=request(account,base,"GET",preference_path);expect(status,200)
+        if rejoined_preference["data"]!=unanswered:raise ValueError("jpa_runtime_rejoined_preference_inherited_state")
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":31,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":32,"registered_api_operations":operations,
+            "private_preferences_and_lifecycle":True,
             "private_favorites_and_lifecycle":True,
             "comment_reads_writes_and_parent_cascades":True,
             "account_registration_profile_and_lifecycle":True,
