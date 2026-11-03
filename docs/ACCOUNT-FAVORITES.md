@@ -1,7 +1,8 @@
 # 계정 찜 API
 
 현재 로그인한 계정만 자신의 찜을 저장·해제·조회한다. 관리자의 타인 조회 예외는 없다.
-화면 연결 전의 백엔드 증가분이며 F01 전체 완료나 추천 모델·실제 인기의 근거가 아니다.
+기존 저장/조회 계약이며 추천 모델·실제 인기의 근거가 아니다. 기본 MySQL API와 별도 PostgreSQL
+JPA 제공자에서 같은 계약을 제공하며 [PG 재인수](plans/2026-11-03-jpa-favorites.md)를 전체 cutover와 구분한다.
 [부분 OpenAPI](openapi/account-favorites.json)와 실행 `/v3/api-docs`가 같은 응답 구조를 사용한다.
 
 ## HTTP 계약

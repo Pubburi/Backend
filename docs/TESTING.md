@@ -80,6 +80,16 @@ packaged smoke도 같은 JAR의 평점/본문 수정·공개 조회·재시작·
 PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment에서 받아 새 identity를 확인한다.
 [후기 조건·결과·한계](plans/2026-11-03-jpa-comments.md)는 전체 DB03–06/웹 인수와 구분한다.
 
+`JpaFavoriteIntegrationTests`는 본인/타인/관리자 격리·epoch 만료와 false/빈 결과·기존 Product7·
+숫자/offset·없는 상품·최초 추가 시각/반복 PUT·해제/재추가·동일 시각 ID 정렬과 현재 상품 값을 검사한다.
+별도 commit을 count/items 사이에 넣어 RR snapshot을 확인하고, User 잠금 직전 자격 회전 뒤
+대기한 구 요청이 새 자격의 관계를 바꾸지 않는지 검사한다. 오래된 TX의 새 INSERT도 DB 문장 시각을
+사용하며 두 PUT/DELETE는 기존 멱등 결과를 유지해야 한다. 모든 favorite UPDATE/DDL 거절도 확인한다.
+별도 failure DB의 `JpaFavoriteFailureIntegrationTests`는 정확한 자체 관계의 AFTER INSERT/DELETE
+실패 뒤 관계/시각·계정/주문/상품·producer/UUID를 보존하고 실패 DDL을 finally 제거한다.
+packaged smoke는 같은 JAR의 단건/페이지·반복 요청·재시작·현재 상품·상품 cascade를 확인한다.
+[찜 조건·결과·한계](plans/2026-11-03-jpa-favorites.md)는 F01 신규 완료나 전체 DB 전환과 구분한다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.

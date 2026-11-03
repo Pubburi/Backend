@@ -98,6 +98,7 @@ def run(environ,snapshot,directory):
                 "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment TO "+runtime+"; "
                 "GRANT UPDATE(rating,comment) ON pubburi.t_comment TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_comment_id_seq TO "+runtime+"; "
+                "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_favorite TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_order_o_id_seq,pubburi.t_order_detail_d_id_seq,pubburi.t_stamp_id_seq TO "+runtime+";")
         control=dict(env,PGPASSWORD=env["PUBBURI_PG_PASSWORD"],PGSSLMODE="verify-full",PGSSLROOTCERT="/tmp/pubburi-pg-ci-tls/ca.pem")
         result=subprocess.run(["docker","exec","-i","-e","PGPASSWORD","-e","PGSSLMODE","-e","PGSSLROOTCERT",environ["PUBBURI_PG_CONTAINER_ID"],
