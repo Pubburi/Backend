@@ -19,6 +19,27 @@ import com.pubburi.pub.model.service.UserService;
 
 class UserSessionRefreshTests {
 	@Test
+	void selfPasswordResponseCannotRestoreALoggedOutOrReplacementSession() {
+		for (boolean logout : new boolean[] {true, false}) {
+			User account = SessionFixtures.user("member", "USER");
+			AccessGuard guard = SessionFixtures.guard(account);
+			MockHttpSession session = new MockHttpSession(); guard.establishSession(session, account);
+			UserService service = (UserService) Proxy.newProxyInstance(UserService.class.getClassLoader(),
+					new Class<?>[] {UserService.class}, (proxy, method, args) -> {
+						assertThat(method.getName()).isEqualTo("modifyOwnPassword");
+						if (logout) session.invalidate();
+						else guard.establishSession(session, SessionFixtures.user("replacement", "USER"));
+						return new UserUpdateResult("member", "fixture-member", "this-update", true);
+					});
+			UserRestController controller = new UserRestController(service, null, guard, null);
+			assertThat(controller.updateOwnPassword(new com.pubburi.pub.controller.request.SelfPasswordRequest("old pass", "new pass"),
+					java.util.Map.of(), session).getBody().data()).isTrue();
+			if (logout) assertThat(session.isInvalid()).isTrue();
+			else assertThat(((SessionUser) session.getAttribute(AccessGuard.SESSION_USER)).id()).isEqualTo("replacement");
+		}
+	}
+
+	@Test
 	void selfUpdateUsesOnlyItsCapturedEpochAndNeverReadsAReplacementIdentity() {
 		User account = SessionFixtures.user("admin", "ADMIN");
 		String originalEpoch = account.getAuthEpoch();

@@ -212,6 +212,11 @@ def run(environ):
         account=client();expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":account_pass})[0],200)
         expect(request(ordinary,base,"GET","/api/users/"+account_id+"/profile")[0],403)
         expect(request(admin,base,"PUT","/api/admin/users/"+account_id,{"name":"Authored persisted account","stamps":51})[0],200)
+        expect(request(anonymous,base,"PUT","/api/users/me/profile",{"name":"Unauthorized"})[0],401)
+        expect(request(anonymous,base,"PUT","/api/users/me/password",{"currentPassword":account_pass,"newPassword":fresh_pass})[0],401)
+        expect(request(account,base,"PUT","/api/users/me/profile",{"name":"Authored self persisted account"})[0],200)
+        expect(request(account,base,"PUT","/api/users/me/profile?userId=other",{"name":"Forbidden selector"})[0],400)
+        expect(request(account,base,"PUT","/api/users/me/profile",{"name":"Forbidden role","role":"ADMIN"})[0],400)
         status,account_profile=request(account,base,"GET","/api/users/"+account_id+"/profile");expect(status,200)
         profile_data=account_profile["data"]
         if set(profile_data)!={"user","orders","grade"} or set(profile_data["user"])!={"id","name","stamps","role","admin"} or profile_data["user"]["stamps"]!=51 or profile_data["grade"]["title"]!="꽃" or profile_data["orders"]!=[]:raise ValueError("jpa_runtime_profile_contract_changed")
@@ -219,6 +224,14 @@ def run(environ):
         expect(request(admin,base,"PUT","/api/admin/users/"+account_id,{"pass":fresh_pass})[0],200)
         expect(request(account,base,"GET","/api/auth/me")[0],401)
         expect(request(account,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
+        other_account_session=client();expect(request(other_account_session,base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],200)
+        expect(request(account,base,"PUT","/api/users/me/password",{"currentPassword":"wrong pass","newPassword":"Authored-self-new-pass"})[0],403)
+        expect(request(account,base,"GET","/api/auth/me")[0],200)
+        next_self_pass=" Authored-self-new-pass "
+        expect(request(account,base,"PUT","/api/users/me/password",{"currentPassword":fresh_pass,"newPassword":next_self_pass})[0],200)
+        expect(request(account,base,"GET","/api/auth/me")[0],200);expect(request(other_account_session,base,"GET","/api/auth/me")[0],401)
+        expect(request(client(),base,"POST","/api/auth/login",{"id":account_id,"pass":fresh_pass})[0],401)
+        fresh_pass=next_self_pass
         preference_path="/api/users/me/preferences"
         unanswered={"surveyStatus":"NOT_STARTED","softPreferences":dict.fromkeys(("categories","tasteTags","aromaTags","targetAbvPercent")),"hardConstraints":dict.fromkeys(("minPriceKrw","maxPriceKrw","minAbvPercent","maxAbvPercent"))}
         expect(request(anonymous,base,"GET",preference_path)[0],401)
@@ -304,9 +317,9 @@ def run(environ):
                 "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
                 "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
                 "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=40:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=42:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         default_selection(base)
@@ -374,8 +387,9 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":33,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":35,"registered_api_operations":operations,
             "public_default_current_fallback":True,
+            "self_profile_password_and_session_rotation":True,
             "private_preferences_and_lifecycle":True,
             "private_favorites_and_lifecycle":True,
             "comment_reads_writes_and_parent_cascades":True,

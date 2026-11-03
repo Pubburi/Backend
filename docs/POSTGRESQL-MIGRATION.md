@@ -159,6 +159,9 @@ User→Product 잠금·문장 시각의 conflict-safe INSERT를 연결하며 본
 RR·사용자 잠금/epoch·헤더/값 전체 교체를 연결한다. skip/reset·미입력/null/[]/0을 보존한다.
 [공개 기본 목록 증분](plans/2026-11-03-jpa-default-recommendations.md)은 원래 B0 호출 계층과
 기존 JPA 후보/현재 상품 projection을 연결한다. 새 DB 권한 없이 짧은 TX·현재 값/삭제 fallback을 유지한다.
+[본인 이름·암호 공급](plans/2026-11-03-self-account-settings.md)은 공통 서비스의 기존 사용자 전체 잠금/
+update로 두 DB에 같은 self API를 추가한다. 역할/스탬프·자격 수명과 SQL 실패 rollback을 유지하며
+새 schema/DAO/GRANT 없이 현재 JPA 범위에 포함한다. Psycopg3 relay·최종 runtime/cutover는 후속이다.
 DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.

@@ -51,6 +51,9 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 본인 찜의 단건 상태·페이지·저장/해제도 실제 복합 PK Repository와 기존 수명/멱등 계약으로 연결한다.
 본인 명시취향 조회/전체 교체도 두 실제 Repository와 원래 서비스의 RR·사용자 잠금/epoch·원자 교체로 연결한다.
 공개 비개인 기본 목록도 원래 호출 계층과 기존 JPA의 현재 상품 projection·장애/삭제 fallback으로 연결한다.
+[F09 본인 이름·비밀번호 공급](plans/2026-11-03-self-account-settings.md)은 기존 공통 사용자 서비스와
+잠금/epoch·현재 암호 확인·세션 CAS를 사용해 기본 MySQL과 JPA에 같은 API를 제공한다.
+전체 F09 React 인수와 전체 DB03–06/기본 DB 전환 완료는 각각의 실제 연결/전환 게이트로 판정한다.
 [읽기 검증](plans/2026-11-02-jpa-product-reads.md), [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md),
 [주문 증분](plans/2026-11-02-jpa-order-transactions.md), [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md),
 [후기 증분](plans/2026-11-03-jpa-comments.md), [찜 증분](plans/2026-11-03-jpa-favorites.md),

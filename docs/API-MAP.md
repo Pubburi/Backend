@@ -28,6 +28,8 @@
 - `POST /api/auth/login`: 로그인
 - `POST /api/auth/logout`: 로그아웃
 - `GET /api/auth/me`: 현재 session 사용자 조회
+- `PUT /api/users/me/profile`: 본인 이름만 수정, `{ "name": "변경 이름" }`
+- `PUT /api/users/me/password`: 본인 현재 암호 검증 후 변경, `{ "currentPassword": "현재 암호", "newPassword": "새 암호" }`
 - `GET /api/users/me/preferences`: 현재 계정만의 명시취향·설문 상태 조회
 - `PUT /api/users/me/preferences`: 현재 계정만의 명시취향 전체 교체
 - `GET /api/users/me/favorites?page=1&size=20`: 본인 찜의 현재 상품 페이지
@@ -40,6 +42,21 @@
 - `GET /api/admin/users?page=1&size=20`: 관리자 사용자 목록
 - `PUT /api/admin/users/{id}`: 관리자 사용자 수정
 - `DELETE /api/admin/users/{id}`: 관리자 사용자 삭제
+
+두 본인 수정은 일반 회원/관리자 모두 세션의 ID와 관측 epoch만 사용한다. 성공은 기존
+`ApiResponse<Boolean>`의 `data:true`, HTTP200이다. 이름은 NotBlank/최대100 UTF-16 문자,
+현재 암호는 NotBlank/최대100(짧은 기존 암호 허용), 새 암호는 NotBlank/4–100과 UTF-8 최대72바이트이며 문자열을
+trim하지 않는다. 누락/null·잘못된 타입·추가 body 필드는 `400 VALIDATION_FAILED`, query는
+지원하지 않아 `400 BAD_REQUEST`다. ID/role/stamps/epoch 등 소유·권한 필드를 받지 않는다.
+유효 세션의 현재 암호 불일치는 `403 FORBIDDEN`이며 기존 자격과 세션을 유지한다. 비로그인·
+삭제/재가입·회전된 epoch는 `401 UNAUTHORIZED`다. 새 로그인 성공과 구세션 회수는 구분한다.
+
+서비스는 사용자 전체 잠금 뒤 epoch를 다시 대조한다. 이름 수정은 해시/epoch·역할·스탬프를
+보존하고, 암호 변경은 잠금 안에서 현재 해시 확인 후 기존 hasher와 새 epoch를 저장한다.
+commit 뒤 관측 ID/epoch와 여전히 같은 요청 세션만 갱신하고 다른 기존 세션은 다음 보호
+요청에서401이다. 동시 로그아웃/다른 계정 로그인으로 바뀐 세션을 복원하지 않는다.
+암호/해시/epoch를 응답에 넣지 않으며 새 schema/DAO·runtime 권한은 없다.
+[F09 공급·검증 범위](plans/2026-11-03-self-account-settings.md)는 실제 웹 인수와 구분한다.
 
 현재 로그인한 관리자는 자기 계정을 삭제하거나 자신의 `ADMIN` 역할을 제거할 수 없다. 관리자 수정의 `role`은 `USER` 또는 `ADMIN`만 허용한다.
 

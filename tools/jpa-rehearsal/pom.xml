@@ -34,6 +34,7 @@
         <include>com/pubburi/pub/controller/rest/OrderRestController.java</include><include>com/pubburi/pub/controller/request/OrderCreateRequest.java</include><include>com/pubburi/pub/controller/request/OrderDetailRequest.java</include>
         <include>com/pubburi/pub/controller/rest/UserRestController.java</include><include>com/pubburi/pub/controller/request/JoinUserRequest.java</include><include>com/pubburi/pub/controller/request/AdminUserRequest.java</include>
         <include>com/pubburi/pub/model/service/GradeService.java</include>
+        <include>com/pubburi/pub/controller/request/SelfProfileRequest.java</include><include>com/pubburi/pub/controller/request/SelfPasswordRequest.java</include><include>com/pubburi/pub/controller/request/Utf8ByteLength.java</include>
         <include>com/pubburi/pub/controller/rest/CommentRestController.java</include><include>com/pubburi/pub/controller/request/CommentCreateRequest.java</include><include>com/pubburi/pub/controller/request/CommentUpdateRequest.java</include>
         <include>com/pubburi/pub/model/dao/CommentDao.java</include><include>com/pubburi/pub/model/service/CommentService.java</include><include>com/pubburi/pub/model/service/CommentServiceImpl.java</include>
         <include>com/pubburi/pub/controller/rest/FavoriteRestController.java</include><include>com/pubburi/pub/model/dao/FavoriteDao.java</include>

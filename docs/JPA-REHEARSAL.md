@@ -48,10 +48,12 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | GET | `/api/users/me/preferences` | 본인 epoch의 헤더/값 RR·미입력/null/[]/0 구분 |
 | PUT | `/api/users/me/preferences` | 본인 전체 교체·skip/reset·사용자 잠금/epoch 재검증·원자 rollback |
 | GET | `/api/recommendations/default` | 공개 비개인 B0·현재 첫1000 ID순/배치 재조회·장애/삭제 시 현재 DB fallback |
+| PUT | `/api/users/me/profile` | 본인 이름만 변경·현재 역할/스탬프/자격 보존·잠금 뒤 epoch 재확인 |
+| PUT | `/api/users/me/password` | 본인 현재 암호 확인·새 hash/epoch·현재 세션 CAS 유지/다른 기존 세션 회수 |
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 개인화 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른세 개/마흔 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른다섯 개/마흔두 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
@@ -148,6 +150,13 @@ Persistable 저장을 같은 TX로 묶는다. 헤더에 불필요한 native upse
 원격 대기 밖의 짧은 읽기 TX·Product7·size/후보 상한·공개 비개인 표시·현재 상품/삭제 fallback과
 전송/본문 제한을 유지한다. 운영자 `PUBBURI_RECOMMENDATION_BASE_URL`의 기본은 원래와 같은
 `http://127.0.0.1:8000`이며 세션/취향/찜·이름/가격을 전송하지 않는다.
+
+본인 이름·비밀번호 쓰기도 원래 Controller/서비스와 기존 UserDao를 사용한다. 사용자 전체 잠금
+뒤 관측 epoch를 다시 확인하며 이름은 자격을 유지하고, 현재 암호 불일치는403·무변경이다.
+새 암호는 literal4–100/UTF-8 최대72바이트를 저장 전에 확인하고 기존 hasher와 새 epoch를 쓴다.
+현재 암호는 짧은 기존 값도 허용한다. 같은 변경 결과의 epoch만 AccessGuard에서 세션 CAS로
+반영하며 동시 로그아웃/다른 로그인 상태를 복원하지 않는다. 새 DB 권한/스키마는 없다.
+같은 공유 코드의 기본 MySQL 공급·실제 경합/rollback은 [F09 공급 기록](plans/2026-11-03-self-account-settings.md)과 구분한다.
 
 Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp/Comment/Favorite/Preference/PreferenceValue 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
