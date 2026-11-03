@@ -49,7 +49,7 @@ watch로 전달해 현재 가격/태그·최종 tombstone·옛 갱신 거절을 
 18/84의 기존 완료 ACK·source UUID는 교체 뒤에도 exact였다. 이 안전 거절을 가짜 완료/자동
 색인 유실 복구로 바꾸지 않았다. 엔진 restart/교체는 조정자만 수행했다.
 
-기존 Java17 기본 check와 최종 Python 도구92개, 실제 JPA75통합+단위3이 통과했고 준비2 skip은 별도다. 첫 실제 JPA
+기존 Java17 기본 check와 최종 Python 도구93개, 실제 JPA75통합+단위3이 통과했고 준비2 skip은 별도다. 첫 실제 JPA
 실행의 기본 목록4조건은 전용 scratch가 아직80개인 준비 전제에서 실패했다. 조정자가 동결
 원래 관리자 DELETE API로 이 복사본만0개로 준비하고 같은 전체 회귀를 재실행했다. Java 제품/
 테스트/SQL은 바꾸지 않았다. 초기 전체 XML/system-out·실패4개는 재실행 전 보존했지만 private
@@ -73,6 +73,17 @@ MySQL 전체 HTTP/relay·PG/import/JPA를 유지하고 별도 queue/최소 relay
 엔진 lifecycle에 PG를 추가한다. restart/교체 전후의 비어 있지 않은 ACK 전행 해시 대조도 CI에
 내장했다. 초기 sandbox의 DNS/기존 HTTP fixture bind 거절은 허용된 환경에서 같은 설치/검사를
 통과했으며 보호·테스트를 약화하지 않았다. 원문 로그/자격/실제 자료는 업로드하지 않는다.
+
+첫 [필수 CI41706511385](https://github.com/Pubburi/Backend/actions/runs/41706511385)는 source
+`04a071a`에서 fake cleanup의 네 assertion으로 실패했다. 새 PG relay 실행 플래그를 job 전체에
+두어 실제 fixture 준비 전 unit에도 전파했고, fake engine의 정리 단계 전에 미생성 PG 입력을
+열어 FileNotFoundError가 생긴 원인이었다. 같은 flag/미생성 조건으로 로컬의 동일4실패를
+재현한 뒤 실행 플래그를 source/JPA 준비와 실제 search/relay 통합 두 step으로 한정했다.
+fake cleanup 환경도 외부 값에서 격리하고 같은 유입 회귀를 추가해5개 테스트를 모두 통과했다.
+정리/비소유 자원 보호 assertion·필수 실PG 단계는 유지하며 임의 재시도/skip으로 처리하지 않는다.
+같은 flag를 상속한 전체 check도 Python93/Java149·이관단위18/JPA단위3으로 통과했다.
+운영 adapter/JAR와 앞의 실제 PG/MySQL 전달 결과는 변경하지 않았다. 최신 head의 fresh CI와
+Codex는 새로 확인하며, 첫 head의 리뷰 완료를 수정 head의 승인으로 대신하지 않는다.
 
 새 부하/성능 측정·운영 복구 SLA·검색 refresh 완료나 사용자 검색 품질 성과는 미측정이다.
 최신 필수 CI/완료 Codex/미해결0·main 인수는 후속 게이트다. 공개 엔진 검색·PG 필수조건

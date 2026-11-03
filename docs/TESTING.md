@@ -157,7 +157,9 @@ DB backoff·만료 token·엔진쓰기 직후 프로세스 종료/중복 재전�
 운영 부하·자동 복구 SLA·검색 refresh 완료·성능 결과가 아니다. [relay 계약](SEARCH-RELAY.md)을 따른다.
 PostgreSQL opt-in은 `PUBBURI_PG_RELAY_CI=1`에서 기존 JPA 정상 복사본과 새 별도 queue DB를
 사용한다. source/JPA 준비 뒤 좁은 relay 역할과 별도 fixture control을 예약하고 기존 엔진 lifecycle에
-검증을 추가한다. 새로운 V1/V2나 source UUID/ACK/sequence reset으로 재실행하지 않는다.
+검증을 추가한다. 이 실행 플래그는 CI의 source/JPA 준비·실제 search/relay 통합 두 step에만 둔다.
+fake 소유권/cleanup 단위는 외부 실행 환경에서 격리하고, 실제 준비 전 fixture를 열지 않아야 한다.
+새로운 V1/V2나 source UUID/ACK/sequence reset으로 재실행하지 않는다.
 실제 TLS verify-full·다른 CA/SAN/non-TLS의 인증 전 거절, 기존 strict boolean/UUID·json 원문,
 늦은 낮은ID·SKIP LOCKED·IO 밖 commit·두 worker·DB 실제시각과 잠금 중 만료·이전 token·
 attempts 포화/DB backoff·HTTP400/429/503/TCP·쓰기 직후 worker 종료/중복 전달을 확인한다.
