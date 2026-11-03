@@ -86,6 +86,8 @@ jobs:
       PUBBURI_PG_JPA_RUN_TOKEN: pubburi-pg-jpa-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_JPA_FAILURE_DB_NAME: pubburi_pg_jpa_failure_ci
       PUBBURI_PG_JPA_FAILURE_RUN_TOKEN: pubburi-pg-jpa-failure-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME: pubburi_pg_jpa_recommendation_ci
+      PUBBURI_PG_JPA_RECOMMENDATION_RUN_TOKEN: pubburi-pg-jpa-recommendation-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_JPA_RUNTIME_USER: ci_jpa_runtime
       PUBBURI_PG_JPA_RUNTIME_PASSWORD: ci_jpa_runtime_only
     steps:

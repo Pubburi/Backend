@@ -50,10 +50,12 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 공개 후기/관리자 목록과 작성·수정·삭제도 실제 Comment Repository와 원래 Controller/서비스로 연결한다.
 본인 찜의 단건 상태·페이지·저장/해제도 실제 복합 PK Repository와 기존 수명/멱등 계약으로 연결한다.
 본인 명시취향 조회/전체 교체도 두 실제 Repository와 원래 서비스의 RR·사용자 잠금/epoch·원자 교체로 연결한다.
+공개 비개인 기본 목록도 원래 호출 계층과 기존 JPA의 현재 상품 projection·장애/삭제 fallback으로 연결한다.
 [읽기 검증](plans/2026-11-02-jpa-product-reads.md), [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md),
 [주문 증분](plans/2026-11-02-jpa-order-transactions.md), [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md),
 [후기 증분](plans/2026-11-03-jpa-comments.md), [찜 증분](plans/2026-11-03-jpa-favorites.md),
-[명시취향 증분](plans/2026-11-03-jpa-preferences.md)을 구분하며
+[명시취향 증분](plans/2026-11-03-jpa-preferences.md),
+[공개 기본 목록 증분](plans/2026-11-03-jpa-default-recommendations.md)을 구분하며
 Psycopg3 relay·검색 대체·다른 업무와 전체 DB03–06은 후속이다.
 미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
 원본/업무 재인수·relay·cutover 완료와 구분한다.

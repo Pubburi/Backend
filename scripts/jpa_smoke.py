@@ -135,7 +135,7 @@ def run(environ):
     state={"jar_sha256":hashlib.sha256(immutable.read_bytes()).hexdigest(),"processes":[],"phase":"starting"}
     checkpoint=directory/"owned.json"
     def save():checkpoint.write_text(json.dumps(state));checkpoint.chmod(0o600)
-    processes=[];deadline=time.monotonic()+120
+    processes=[];deadline=time.monotonic()+120;unavailable_upstream=None
     def stop(process):
         if process.poll() is None:
             process.terminate()
@@ -146,6 +146,8 @@ def run(environ):
         save()
     def start(name,extra=None,expect_failure=None):
         env=child_environment(environ);env["PUBBURI_JPA_PORT"]="0"
+        # Keep the owned fallback target refused without borrowing a shared recommendation port.
+        env["PUBBURI_RECOMMENDATION_BASE_URL"]="http://127.0.0.1:"+str(unavailable_upstream.getsockname()[1])
         if extra:env.update(extra)
         log=directory/(name+".log");stream=log.open("w");log.chmod(0o600)
         java=str(Path(env["JAVA_HOME"])/"bin/java") if env.get("JAVA_HOME") else "java"
@@ -174,13 +176,28 @@ def run(environ):
     def login(c,base,role):
         status,body=request(c,base,"POST","/api/auth/login",{"id":environ["PUBBURI_JPA_"+role+"_ID"],"pass":environ["PUBBURI_JPA_"+role+"_PASSWORD"]});expect(status,200)
         if any(key in json.dumps(body) for key in ("password_hash","authEpoch","auth_epoch")):raise ValueError("jpa_runtime_private_field_exposed")
+    def default_selection(base):
+        status,page=request(client(),base,"GET","/api/products?size=1");expect(status,200)
+        for size in (1,4,12):
+            status,result=request(client(),base,"GET","/api/recommendations/default?size="+str(size));expect(status,200)
+            data=result["data"];ids=[p["id"] for p in data.get("items",[])]
+            if set(data)!={"items","source"} or data["source"]!="FALLBACK" or len(ids)!=min(size,page["data"]["total"]) or ids!=sorted(set(ids)):
+                raise ValueError("jpa_runtime_default_fallback_changed")
+            for product in data["items"]:
+                status,current=request(client(),base,"GET","/api/products/"+str(product["id"]));expect(status,200)
+                if product!=current["data"]:raise ValueError("jpa_runtime_default_current_product_changed")
+        for size in ("0","13","1.5","2147483648"):
+            expect(request(client(),base,"GET","/api/recommendations/default?size="+size)[0],400)
     try:
+        unavailable_upstream=socket.socket();unavailable_upstream.bind(("127.0.0.1",0))
+        state["unavailable_upstream_port"]=unavailable_upstream.getsockname()[1];save()
         # Each rejection is checked against a specific guard, not merely any process failure.
         start("implicit",{**failure_env,"PUBBURI_JPA_REHEARSAL":"0"},"jpa_rehearsal_explicit_fixture_required")
         start("auto-ddl",{**failure_env,"SPRING_JPA_HIBERNATE_DDL_AUTO":"create"},"jpa_rehearsal_schema_policy_rejected")
         start("wrong-marker",{**failure_env,"PUBBURI_PG_RUN_TOKEN":"authored-wrong-marker"},"jpa_rehearsal_fixture_or_schema_rejected")
         start("wrong-source",{**failure_env,"PUBBURI_JPA_SOURCE_ID":"00000000-0000-4000-8000-000000000000"},"jpa_rehearsal_fixture_or_schema_rejected")
         first,base=start("normal");anonymous=client();admin=client();ordinary=client()
+        default_selection(base)
         expect(request(anonymous,base,"GET","/api/markets")[0],200)
         payload={"name":"Authored packaged JPA market","latitude":37.123456789,"longitude":127.987654321,"image":"authored.png"}
         expect(request(anonymous,base,"POST","/api/admin/markets",payload)[0],401)
@@ -287,11 +304,12 @@ def run(environ):
                 "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
                 "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
                 "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=39:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=40:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
+        default_selection(base)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
         expect(request(admin,base,"GET","/api/auth/me")[0],401)  # In-memory sessions are not persisted across restart.
         login(admin,base,"ADMIN");expect(request(admin,base,"DELETE","/api/admin/markets/"+str(market_id))[0],200)
@@ -356,7 +374,8 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":32,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":33,"registered_api_operations":operations,
+            "public_default_current_fallback":True,
             "private_preferences_and_lifecycle":True,
             "private_favorites_and_lifecycle":True,
             "comment_reads_writes_and_parent_cascades":True,
@@ -369,6 +388,8 @@ def run(environ):
             cleanup_failed=False
             try:cleanup_owned(processes,stop)
             except Exception:cleanup_failed=True
+            if unavailable_upstream is not None:
+                unavailable_upstream.close();state["unavailable_upstream_closed"]=True
             state["all_owned_processes_stopped"]=all(p.poll() is not None for p,_ in processes)
             try:
                 save()

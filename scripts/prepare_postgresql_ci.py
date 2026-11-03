@@ -30,6 +30,8 @@ def prepare(environ):
     if "PUBBURI_PG_JPA_DB_NAME" in environ or "PUBBURI_PG_JPA_FAILURE_DB_NAME" in environ:
         databases.extend([(environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_RUN_TOKEN"]),
                           (environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_RUN_TOKEN"])])
+        if "PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME" in environ:
+            databases.append((environ["PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME"],environ["PUBBURI_PG_JPA_RECOMMENDATION_RUN_TOKEN"]))
     runtime = environ.get("PUBBURI_PG_JPA_RUNTIME_USER") if "PUBBURI_PG_JPA_DB_NAME" in environ else None
     if "PUBBURI_PG_JPA_DB_NAME" in environ and (runtime is None or not re.fullmatch(r"[a-z][a-z0-9_]{0,50}", runtime) or runtime in (role,admin) or not environ.get("PUBBURI_PG_JPA_RUNTIME_PASSWORD")):
         raise ValueError("postgresql_ci_runtime_role_rejected")
@@ -110,7 +112,7 @@ def prepare(environ):
         sql("REVOKE CREATE ON SCHEMA public FROM PUBLIC;\nCREATE TABLE public.pubburi_pg_migration_guard(token VARCHAR(100) PRIMARY KEY);\n"
             "INSERT INTO public.pubburi_pg_migration_guard VALUES (" + literal(token) + ");\n"
             "GRANT SELECT ON public.pubburi_pg_migration_guard TO " + role + ";", database, tls=True)
-        if runtime is not None and database in (environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"]):
+        if runtime is not None and database in (environ["PUBBURI_PG_JPA_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ.get("PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME")):
             sql("GRANT SELECT ON public.pubburi_pg_migration_guard TO " + runtime + ";", database, tls=True)
     # No process needs the CA signing key or CSR after the fresh service has been configured.
     for name in ("ca.key", "server.key", "server.csr", "server.ext", "ca.srl"):

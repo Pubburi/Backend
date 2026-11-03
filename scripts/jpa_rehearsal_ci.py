@@ -71,8 +71,8 @@ def run(environ,snapshot,directory):
     metadata=json.loads((snapshot/"snapshot.json").read_text());receipt=json.loads((snapshot/"receipt.json").read_text())
     roles={"PUBBURI_JPA_ADMIN_ID":"ci_jpa_"+secrets.token_hex(8)+"_admin","PUBBURI_JPA_USER_ID":"ci_jpa_"+secrets.token_hex(8)+"_member",
            "PUBBURI_JPA_ADMIN_PASSWORD":secrets.token_hex(24),"PUBBURI_JPA_USER_PASSWORD":secrets.token_hex(24)}
-    normal=None;failure=None
-    for purpose in ("JPA","JPA_FAILURE"):
+    normal=None;failure=None;recommendation=None
+    for purpose in ("JPA","JPA_FAILURE","JPA_RECOMMENDATION"):
         database=environ["PUBBURI_PG_"+purpose+"_DB_NAME"];token=environ["PUBBURI_PG_"+purpose+"_RUN_TOKEN"]
         env=dict(environ,**roles,PUBBURI_PG_DB_NAME=database,PUBBURI_PG_RUN_TOKEN=token,PUBBURI_PG_URL=environ["PUBBURI_PG_URL"].rsplit("/",1)[0]+"/"+database,
             PUBBURI_SOURCE_SNAPSHOT_DIR=str(snapshot),PUBBURI_PG_MUTATING="1",PUBBURI_PG_IMPORT_WRITES_STOPPED="1",PUBBURI_PG_IMPORT_SHA256=receipt["sha256"],
@@ -113,8 +113,13 @@ def run(environ,snapshot,directory):
         command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","-Dtest=JpaFixturePreparationTests","test"],
                 dict(env,PUBBURI_JPA_PREPARE_FIXTURE="1"),directory/(purpose+"-fixture.log"))
         if purpose=="JPA":normal=env
-        else:failure=env
-    normal.update(PUBBURI_JPA_FAILURE_DB_NAME=failure["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_FAILURE_RUN_TOKEN=failure["PUBBURI_PG_RUN_TOKEN"])
+        elif purpose=="JPA_FAILURE":failure=env
+        else:recommendation=env
+    scratch=dict(recommendation,PUBBURI_JPA_RECOMMENDATION_DB_NAME=recommendation["PUBBURI_PG_DB_NAME"])
+    command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","-Dtest=JpaRecommendationPreparationTests","test"],
+            dict(scratch,PUBBURI_JPA_PREPARE_RECOMMENDATION="1"),directory/"JPA_RECOMMENDATION-empty-catalog.log")
+    normal.update(PUBBURI_JPA_FAILURE_DB_NAME=failure["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_FAILURE_RUN_TOKEN=failure["PUBBURI_PG_RUN_TOKEN"],
+                  PUBBURI_JPA_RECOMMENDATION_DB_NAME=recommendation["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_RECOMMENDATION_RUN_TOKEN=recommendation["PUBBURI_PG_RUN_TOKEN"])
     command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","verify"],
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
