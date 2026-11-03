@@ -3,6 +3,13 @@
 `./scripts/check.sh`는 저장소 비밀정보/생성물 검사, 로컬 도구/안전 게이트 테스트와 Java 17
 Maven 단위 테스트·패키징을 실행한다. DB가 없는 개발 환경에서도 이 경로를 사용할 수 있다.
 
+전체20개 MVP는 2026-12-31 Asia/Seoul까지 구현·연결과 기능·권한·정합성·장애 fallback의
+필수 회귀를 완료한다. 필요한 모델 fit/평가·세 실제 서버 흐름은 소유 영역/조정자와 연결해
+확인하며 fixture·부분 제공자·DB 없는 skip을 전체 인수로 세지 않는다. 1월에는 추가 튜닝·
+실측 최적화·강화/확대 회귀와 최종 인수를 진행한다. 문서/일정 변경은 구현 완료나 새 실행
+결과가 아니며 변경에 무관한 새 테스트·성능 측정을 강제하지 않는다. 기존 필수 CI·최신 head
+완료 Codex·미해결0·main 병합 게이트는 유지하고 실행한 검사와 미실행 범위를 구분해 기록한다.
+
 확정 목표는 [PostgreSQL/JPA](POSTGRESQL-MIGRATION.md)다. 독립 Flyway 도구의 Java17 단위/패키징도
 기본 검사에 포함하며, 실제 PostgreSQL18.6 TLS·비superuser의 새 설치/no-op·marker/CID·checksum·
 실패DDL rollback/복구·기존ID/타입/불변json·sequence 예약은 별도 폐기3DB로 실행한다.
