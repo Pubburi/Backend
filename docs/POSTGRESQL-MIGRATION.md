@@ -165,6 +165,9 @@ update로 두 DB에 같은 self API를 추가한다. 역할/스탬프·자격 �
 [Psycopg3 relay 어댑터](plans/2026-11-04-postgresql-search-relay.md)는 같은 명시 CLI/Engine에
 PostgreSQL 실제시각·타입/원문·최소 권한을 연결한다. 기존 MySQL 경로를 보존하며 공개 엔진 검색·
 PG 필수조건 fallback·최종 runtime/cutover와 전체 DB05–06은 후속이다.
+[본인 문구 caller](plans/2026-11-04-owned-search-phrases.md)는 canonical 취향 서비스의 현재
+epoch-bound snapshot을 명시 제공자에 전달한다. 공통 MySQL/JPA 코드와 기존 권한으로 연결하며
+상품 검색/로컬 추천 fallback·전체 R06 웹/DB05 전환 완료를 뜻하지 않는다.
 DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.

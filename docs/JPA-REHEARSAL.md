@@ -50,10 +50,11 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | GET | `/api/recommendations/default` | 공개 비개인 B0·현재 첫1000 ID순/배치 재조회·장애/삭제 시 현재 DB fallback |
 | PUT | `/api/users/me/profile` | 본인 이름만 변경·현재 역할/스탬프/자격 보존·잠금 뒤 epoch 재확인 |
 | PUT | `/api/users/me/password` | 본인 현재 암호 확인·새 hash/epoch·현재 세션 CAS 유지/다른 기존 세션 회수 |
+| POST | `/api/users/me/search-phrases` | 본인 현재 취향·별도 검색 선택만 전달·정확 조건/수명·장애 구분 |
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 개인화 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른다섯 개/마흔두 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른여섯 개/마흔세 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
@@ -150,6 +151,11 @@ Persistable 저장을 같은 TX로 묶는다. 헤더에 불필요한 native upse
 원격 대기 밖의 짧은 읽기 TX·Product7·size/후보 상한·공개 비개인 표시·현재 상품/삭제 fallback과
 전송/본문 제한을 유지한다. 운영자 `PUBBURI_RECOMMENDATION_BASE_URL`의 기본은 원래와 같은
 `http://127.0.0.1:8000`이며 세션/취향/찜·이름/가격을 전송하지 않는다.
+
+본인 검색 문구는 공통 SearchPhraseController/Service와 같은 HTTP client를 사용한다.
+canonical 취향 RR snapshot의 commit 뒤 원격을 호출하고 현재 snapshot/epoch·세션을 다시 확인한다.
+명시 soft 선택과 모든 hard·ordered query pairs를 consumer에서 검증하며 로컬 문구 fallback은 없다.
+새 DAO/권한 없이 [본인 문구 호출 계약](SEARCH-PHRASES.md)의400/401/409/500·UNAVAILABLE를 유지한다.
 
 본인 이름·비밀번호 쓰기도 원래 Controller/서비스와 기존 UserDao를 사용한다. 사용자 전체 잠금
 뒤 관측 epoch를 다시 확인하며 이름은 자격을 유지하고, 현재 암호 불일치는403·무변경이다.
