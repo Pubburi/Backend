@@ -59,7 +59,8 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 [후기 증분](plans/2026-11-03-jpa-comments.md), [찜 증분](plans/2026-11-03-jpa-favorites.md),
 [명시취향 증분](plans/2026-11-03-jpa-preferences.md),
 [공개 기본 목록 증분](plans/2026-11-03-jpa-default-recommendations.md)을 구분하며
-Psycopg3 relay·검색 대체·다른 업무와 전체 DB03–06은 후속이다.
+[Psycopg3 명시 relay](plans/2026-11-04-postgresql-search-relay.md)는 기존 Engine/CLI에
+별도 PostgreSQL Store를 연결한다. 검색 대체·기본 runtime과 전체 DB03–06은 후속이다.
 미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
 원본/업무 재인수·relay·cutover 완료와 구분한다.
 

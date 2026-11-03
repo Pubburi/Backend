@@ -155,6 +155,17 @@ DB backoff·만료 token·엔진쓰기 직후 프로세스 종료/중복 재전�
 별도로 실제 HTTP fixture 이벤트와 backfill delivery를 watch 프로세스로 소비하고 volume 재시작 후
 같은 binding/tombstone을 확인한다. lease/재시도 시간은 폐기 DB에서 제어한 정합성 실험이며
 운영 부하·자동 복구 SLA·검색 refresh 완료·성능 결과가 아니다. [relay 계약](SEARCH-RELAY.md)을 따른다.
+PostgreSQL opt-in은 `PUBBURI_PG_RELAY_CI=1`에서 기존 JPA 정상 복사본과 새 별도 queue DB를
+사용한다. source/JPA 준비 뒤 좁은 relay 역할과 별도 fixture control을 예약하고 기존 엔진 lifecycle에
+검증을 추가한다. 새로운 V1/V2나 source UUID/ACK/sequence reset으로 재실행하지 않는다.
+실제 TLS verify-full·다른 CA/SAN/non-TLS의 인증 전 거절, 기존 strict boolean/UUID·json 원문,
+늦은 낮은ID·SKIP LOCKED·IO 밖 commit·두 worker·DB 실제시각과 잠금 중 만료·이전 token·
+attempts 포화/DB backoff·HTTP400/429/503/TCP·쓰기 직후 worker 종료/중복 전달을 확인한다.
+같은 packaged JPA의 새 관리자 상품/수정/특성/삭제와 별도 watch, 동일 volume 재시작/물리 index
+교체는 원본 업무행·기존 ACK와 source를 보존해야 한다. 기존 MySQL relay lifecycle도 유지한다.
+MySQL의 기존 fixture 역할은 자기 빈 queue의 DDL/실험 SQL도 수행하며, 새 PG의 운영 최소 역할과
+control 완전 분리 검증을 MySQL에서 새로 검증한 결과로 쓰지 않는다. 원문/자격/상세 로그는
+artifact에 추가하지 않고 기존 안전 요약만 유지한다. [조건과 한계](plans/2026-11-04-postgresql-search-relay.md)를 따른다.
 앱·조회는 DB 전용 CI 계정으로 실행한다. binlog가 켜진 MySQL은 DB의 ALL 권한만으로 TRIGGER
 생성을 허용하지 않을 수 있어, 폐기 DB/CID/marker 검사 후 고정 실패 주입 CREATE/DROP에만
 별도 `PUBBURI_DB_ROOT_PASSWORD`를 사용한다. 값은 child MYSQL_PWD로만 전달하며 Java 앱

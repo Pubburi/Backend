@@ -2,7 +2,7 @@
 
 이 relay는 [업무 생산](SEARCH-OUTBOX.md)의 이벤트를 개별 claim해 명시한 로컬 색인으로 보낸다.
 `init`·`once`·`watch`를 직접 실행할 때만 동작하며 Java 서버/기본 통합 기동은 Python 의존성이나
-검색 엔진을 요구하지 않는다. 공개 상품 검색은 MySQL 그대로다. 자동 색인 재생성·retention/
+검색 엔진을 요구하지 않는다. 기본 공개 상품 검색은 MySQL 그대로다. 자동 색인 재생성·retention/
 재색인 세대 cutover·전체 S02 완료와 구분한다.
 
 ## 전달 계약
@@ -50,7 +50,8 @@ alias 응답은 지정한 physical index여야 한다. 새 물리 index로 교�
 ## 설치·기동
 
 Python3.12의 별도 환경에 [고정 의존성](../tools/search-relay/requirements.lock)을 설치한다.
-PyMySQL1.2.3의 공식 release/보안 변경과 PyPI hash를 확인했다. Java 기본 기동에 추가하지 않는다.
+MySQL의 PyMySQL1.2.3과 PostgreSQL의 Psycopg/binary3.3.7을 공식 release·PyPI hash로 고정했다.
+Java 기본 기동에 추가하지 않는다. 두 DB는 같은 Relay/Engine/CLI를 사용하며 JDBC URL이 Store를 선택한다.
 
 ~~~bash
 uv venv --python 3.12 .venv-relay
@@ -63,7 +64,7 @@ UPDATE/DELETE하지 않는다. DDL은 implicit commit이며 중간 실패/기존
 않는다. 기존 outbox/버전과 새 표/행 개수를 대조하고 DML rollback 여부를 확인한 뒤 기동한다.
 빈 새 DB는 현재 data.sql을 사용하며 기존 볼륨에 초기화 SQL을 다시 실행하지 않는다.
 
-DB는 numeric loopback JDBC URL과 별도 환경의 PUBBURI_DB_USER/PASSWORD를 사용한다.
+DB는 numeric loopback JDBC MySQL/PostgreSQL URL과 별도 환경의 PUBBURI_DB_USER/PASSWORD를 사용한다.
 root 검증 자격이나 비밀번호를 argv에 넣지 않는다. 운영 계정은 outbox SELECT와 delivery/target의
 SELECT·UPDATE면 된다. 앱의 producer INSERT 권한과 분리할 수 있다.
 
@@ -72,7 +73,7 @@ relay는 **명시한 로컬 MySQL CA chain을 검증하는 TLS**를 필수로 �
 복사하지 않는다. 자동 생성 서버 인증서 이름이127.0.0.1과 일치하지 않아 hostname 검증은 끄며,
 동일 CA가 발급한 다른 peer를 이름으로 구분하지 못하는 한계가 있다. numeric loopback/소유 DB에만
 사용하고 외부 DB는 거절한다. CA 없거나 읽기 오류·다른 CA·non-TLS는 실패하며 plaintext로 fallback하지 않는다.
-[드라이버 연결 옵션](https://pymysql.readthedocs.io/en/latest/modules/connections.html)의
+[MySQL 드라이버 연결 옵션](https://pymysql.readthedocs.io/en/latest/modules/connections.html)의
 ssl_verify_cert/ssl_verify_identity를 각각 명시했으며, 자동 생성 인증서에 hostname 검증까지
 성공했다고 표현하지 않는다.
 
@@ -84,8 +85,45 @@ export PUBBURI_RELAY_DB_CA="$PWD/.pubburi/mysql-ca.pem"
 .venv-relay/bin/python scripts/search_relay.py watch --endpoint http://127.0.0.1:9200 --index pubburi-products-v1-live
 ~~~
 
+## PostgreSQL 명시 선택
+
+relay 전용 환경의 `PUBBURI_DB_URL=jdbc:postgresql://127.0.0.1:5432/pubburi`와 별도
+`PUBBURI_DB_USER/PASSWORD`, `PUBBURI_RELAY_DB_CA`를 지정하면 PostgreSQL Store를 사용한다.
+현재 Java 기본 MySQL 설정을 바꾸지 않는다. [Flyway/복사 계약](POSTGRESQL-MIGRATION.md)으로
+준비한 `pubburi` schema와 이관한 source UUID를 그대로 사용하며 init도 UUID/기존 ACK·binding을
+생성/초기화하지 않는다. 새 source 수명은 별도 명시 준비가 필요하다.
+
+Psycopg 연결은 공개 CA의 **verify-full**로 numeric 주소의 SAN까지 확인하며 SCRAM/TLS·UTF8·
+UTC·READ COMMITTED를 사용한다. schema 경로·연결/SQL/잠금 제한을 명시하며 non-TLS나
+다른 CA/이름으로 plaintext fallback하지 않는다. MySQL의 위 hostname-off 한계와 구분한다.
+[libpq 인증서 검증](https://www.postgresql.org/docs/18/libpq-ssl.html)을 따른다.
+
+PG의 `CURRENT_TIMESTAMP`는 TX 시작 시각이므로 lease·due·ACK/retry·binding에는
+[`clock_timestamp()`](https://www.postgresql.org/docs/18/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT)를
+사용한다. ACK는 target FOR SHARE 다음에 해당 claim 행을 먼저 잠그고, retry도 해당 claim 행을
+먼저 잠근다. 잠금 뒤의 새 UPDATE 명령에서 token/status와 실제시각 만료를 판정한다. 단일 UPDATE의
+시각 조건이 row 잠금 대기 전에 평가될 가능성까지 분리하며 원격 IO 중에는 이 잠금을 잡지 않는다.
+불변 json은 `payload::text`와 바이트 상한으로 읽고 UUID의 canonical text·boolean0/1 변환으로
+기존 strict Engine 입력을 유지한다. JSON 자동 객체화/재직렬화나 새 wire는 없다.
+
+별도 relay 역할의 표/열 권한은 다음이 전부다. 역할·DB/TLS와 source 준비는 관리자가 명시하며
+runtime에 업무 쓰기·version 접근·INSERT/DELETE·sequence/DDL/TEMP를 주지 않는다.
+검증 DB는 PUBLIC의 TEMP 권한도 제거해 상속으로 넓어지지 않게 준비한다.
+
+~~~sql
+GRANT USAGE ON SCHEMA pubburi TO pubburi_relay;
+GRANT SELECT ON pubburi.t_product_search_outbox,
+    pubburi.t_product_search_delivery, pubburi.t_product_search_relay_target TO pubburi_relay;
+GRANT UPDATE(status,claim_token,lease_until,available_at,attempts,delivered_at,last_error)
+    ON pubburi.t_product_search_delivery TO pubburi_relay;
+GRANT UPDATE(fingerprint,identity_json,bound_at)
+    ON pubburi.t_product_search_relay_target TO pubburi_relay;
+~~~
+
 watch는 Ctrl+C로 중단한다. 급작스러운 종료는 미ACK lease를 남길 수 있으며 만료 뒤 다른 worker가
 재claim한다. 실패를 없애려고 delivered_at/token/UUID를 수정하거나 이벤트를 삭제하지 않는다.
 추가 metadata 조회·DB 쓰기/잠금·이력 보관과 반복 전송 비용이 있다. 처리량/지연 개선 수치는 미측정이다.
 
-구현/실제 조건·실패 기록은 [작업 계획](plans/2026-11-01-durable-search-relay.md)을 따른다.
+기존 MySQL 구현/실제 조건·실패는 [전달 기록](plans/2026-11-01-durable-search-relay.md),
+PG 제공/검증 범위는 [어댑터 기록](plans/2026-11-04-postgresql-search-relay.md)에 구분한다.
+공개 엔진 검색·필수조건 PG fallback·기본 runtime/cutover와 전체 DB05–06은 후속이다.

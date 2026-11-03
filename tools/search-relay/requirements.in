@@ -1,2 +1,3 @@
-# The opt-in relay requires CA-verified local MySQL TLS. No RSA/caching shortcut or Java dependency.
+# Only the opt-in relay uses these drivers. Both require explicit local verified TLS.
 PyMySQL==1.2.3
+psycopg[binary]==3.3.7

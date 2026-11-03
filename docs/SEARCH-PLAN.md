@@ -12,6 +12,9 @@ S01–S05는 F02·R06·R02의 기술 작업이며 R 8개 + F 12개 = 20개 기�
 최신 확정 업무 DB 목표는 [PostgreSQL18.6/JPA 전환](POSTGRESQL-MIGRATION.md)이다. 아래 기존
 MySQL 구현/측정은 이관 전 기준으로 보존하며 PostgreSQL/JPA/Psycopg3의 outbox·현재 상품
 재조회·필수조건 대체 검색을 DB03–DB06에서 재검증한다. schema 도입만으로 검색 전환을 완료하지 않는다.
+[PostgreSQL 명시 relay 증분](plans/2026-11-04-postgresql-search-relay.md)은 기존 MySQL 경로와
+같은 Engine/CLI에 Psycopg Store를 연결한다. 공개 검색·PG 필수조건 fallback·재색인/유실 복구와
+기본 스택 전환·전체 DB05–06 완료는 별도로 남긴다.
 
 Backend는 검색 API·업무 상품 원본·색인 동기화·추천 서버 연동·장애 대체 검색을 소유한다.
 주류 데이터 수집·정제·특성 설계·추천 모델 학습·평가의 정본은

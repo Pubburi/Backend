@@ -170,6 +170,15 @@ def main():
             report["completed"].append("durable relay late commits, concurrent claims, retry, fencing, crash redelivery and source binding")
             business_relay = consume_business(http, endpoint, private, os.environ)
             report["completed"].append("actual business API events and backfill consumed by the durable watch process")
+        pg_relay = pg_business = None
+        if os.environ.get("PUBBURI_PG_RELAY_CI") == "1":
+            from postgresql_relay_smoke import exercise as pg_exercise, consume_business as pg_consume
+            fixture_path = Path(os.environ["PUBBURI_PG_RELAY_FIXTURE"]).resolve()
+            fixture_path.relative_to(Path(".pubburi").resolve())
+            pg_fixture = json.loads(fixture_path.read_text())
+            pg_relay = pg_exercise(http, endpoint, private, pg_fixture["queue"])
+            pg_business = pg_consume(http, endpoint, private, pg_fixture["business"])
+            report["completed"].append("PostgreSQL verify-full/minimum role, exact JSON/types, DB wall clock and locked expiry, two workers, retry/fencing/crash and actual packaged JPA watch")
         docker("restart", state["container_id"])
         # Dynamic host ports can change when Docker restarts a container.
         raw = owned_container(); state.update(port=int(raw["NetworkSettings"]["Ports"]["9200/tcp"][0]["HostPort"]), container_pid=raw["State"]["Pid"]); save()
@@ -187,6 +196,16 @@ def main():
             business_after_restart(http, business_relay)
             after_restart(http, relay_state)
             report["completed"].append("relay binding survives restart and refuses a replaced physical index before ack")
+        if pg_relay is not None:
+            from postgresql_relay_smoke import after_restart as pg_after, business_after_restart as pg_business_after
+            def replace_pg_index(index, source):
+                owned_container()
+                if index != pg_relay["index"]: raise ValueError("postgresql_relay_index_scope_rejected")
+                assert http.request("DELETE", "/" + index)[0] == 200
+                Engine(http, index, "backend_product_events", source, refresh="false").ready(create=True)
+            pg_business_after(http, pg_business)
+            pg_after(http, endpoint, pg_relay, replace_pg_index)
+            report["completed"].append("PostgreSQL business/queue binding and tombstone survive engine restart; replacement remains unacknowledged")
         source = private / "events.json"
         source.write_text(json.dumps({"schemaVersion": 1, "dataKind": "authored_fixture", "events": events}))
         base = [sys.executable, "scripts/search_index.py"]

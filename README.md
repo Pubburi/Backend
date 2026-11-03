@@ -61,6 +61,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 확정 저장 전환 | PostgreSQL 18.6 · Spring Data JPA(Hibernate) · Flyway Community |
 | 별도 JPA 제공자 | Boot 3.5.16 · Spring Data JPA 3.5.13 · Hibernate 6.6.53.Final · 계정/프로필·매장·상품/특성·데모 주문·후기·본인 찜/명시취향·공개 기본 목록·상품 변경 이벤트 |
 | 로컬 색인 | OpenSearch 3.9.0 · analysis-nori 3.9.0 · 명시 관리 CLI |
+| 명시 Python relay | Python 3.12 · MySQL/PyMySQL 1.2.3 · PostgreSQL/Psycopg 3.3.7 · 검증 TLS·개별 claim/ACK |
 | API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
 | CI | GitHub Actions · backend-ci |
@@ -76,7 +77,8 @@ PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 �
 본인 찜의 상태·현재 상품 목록·저장/해제도 같은 계정 수명 계약으로 제공합니다.
 본인 명시취향의 조회·전체 교체·건너뛰기/초기화도 같은 공개 계약으로 제공합니다.
 공개 기본 목록도 원래 비개인 B0 호출과 현재 DB fallback으로 제공합니다.
-Psycopg3 relay·다른 업무 API와 기본 로컬 스택의 전환은 후속입니다.
+별도 [명시 relay](docs/SEARCH-RELAY.md)는 MySQL과 PostgreSQL을 선택해 같은 Engine/CLI로 전달합니다.
+공개 엔진 검색·PG 대체 검색과 기본 로컬 스택의 전환은 후속입니다.
 
 <a id="architecture"></a>
 
