@@ -41,10 +41,14 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | PUT | `/api/comments/{id}` | 작성자/현재 관리자만 평점·본문 수정 |
 | DELETE | `/api/comments/{id}` | 작성자/현재 관리자만 삭제·없는 후기404 |
 | GET | `/api/admin/comments` | 현재 관리자만 전체 후기 페이지 |
+| GET | `/api/users/me/favorites` | 본인만 최신 추가순 현재 상품 페이지·짧은 RR snapshot |
+| GET | `/api/users/me/favorites/{productId}` | 한 SQL의 현재 epoch/관계 상태·없음 false/만료401 |
+| PUT | `/api/users/me/favorites/{productId}` | 본인 저장·중복은 최초 시각 유지·없는 상품404 |
+| DELETE | `/api/users/me/favorites/{productId}` | 본인 해제·없는 관계/삭제 상품도200 false |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 취향·찜
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 취향·추천
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 스물아홉 개/서른세 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른한 개/서른일곱 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
@@ -123,7 +127,14 @@ DELETE는 affected-row 수를 반환해 없어진 행을 다시 만들지 않는
 FK cascade와 full FOR UPDATE/KEY SHARE 관계는 실제 별도 연결로 검증한다.
 후기 쓰기는 상품/회원 합계나 검색 producer를 호출하지 않는다.
 
-Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp/Comment 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
+찜은 원래 FavoriteRestController/FavoriteServiceImpl·Product7 DTO와 실제 복합 PK entity/Repository를
+연결한다. 관리자도 자신의 관계만 읽는다. 단건은 epoch로 제한한 사용자와 EXISTS를 한 SQL에서
+읽어 만료 null/관계 없음 false를 구분한다. 페이지는 기존 RR에서 사용자·count·현재 상품을 읽는다.
+쓰기의 User→Product full FOR UPDATE/epoch 재검증은 기존 서비스를 재사용한다. INSERT만 명시
+ON CONFLICT DO NOTHING과 statement_timestamp()를 사용해 중복의 최초 시각을 유지하고 신규는
+MySQL 문장 시각을 보존한다. favorite UPDATE/sequence 권한은 없으며 상품/회원/검색 기록을 바꾸지 않는다.
+
+Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp/Comment/Favorite 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
 JPA 매핑을 검증했다거나 스키마 검사만으로 전체 업무 동등성이 확보됐다고 해석하지 않는다.
 
@@ -145,6 +156,7 @@ createrole/replication/bypassrls·역할 membership·schema CREATE·객체 소�
 - 상품/특성 SELECT·INSERT·UPDATE·DELETE, 태그 SELECT·INSERT·DELETE와 `UPDATE(tag)`만.
 - version SELECT·INSERT·UPDATE, outbox/delivery SELECT·INSERT, 상품/outbox sequence USAGE.
 - 후기 SELECT·INSERT·DELETE와 `UPDATE(rating,comment)`, 후기 identity sequence USAGE.
+- 찜 SELECT·INSERT·DELETE만. 표/어느 컬럼의 UPDATE·TRIGGER/TRUNCATE는 거절하며 sequence를 추가하지 않는다.
 - 태그 표 전체 UPDATE·product_id/kind UPDATE, version DELETE·outbox/delivery UPDATE/DELETE,
   모든 업무표 TRIGGER/TRUNCATE와 상품/outbox sequence SELECT/UPDATE는 기동 guard에서 거절한다.
 
@@ -195,7 +207,8 @@ group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제
 [계정/프로필 검증](plans/2026-11-03-jpa-account-profile.md)은 전체 사용자 화면 인수와 구분한다.
 [후기 검증](plans/2026-11-03-jpa-comments.md)은 단정도·소유권·실패/경합·부모 수명과 실행 JAR을 다룬다.
 검증 도구의 PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment를 사용한다.
-남은 DB03은 취향/찜·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
+[찜 검증](plans/2026-11-03-jpa-favorites.md)은 본인 수명·멱등성·RR/자격 경합·실패와 실행 JAR을 다룬다.
+남은 DB03은 취향·추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
 전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
 lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.

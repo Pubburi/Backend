@@ -59,7 +59,7 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | JSON | Jackson BOM 2.21.8 · 문자셋/엄격 입력 계약 |
 | 현재 API 저장 | MyBatis 3.0.3, MySQL 8.4 · 이관 전 기준 |
 | 확정 저장 전환 | PostgreSQL 18.6 · Spring Data JPA(Hibernate) · Flyway Community |
-| 별도 JPA 제공자 | Boot 3.5.16 · Spring Data JPA 3.5.13 · Hibernate 6.6.53.Final · 계정/프로필·매장·상품/특성·데모 주문·후기·상품 변경 이벤트 |
+| 별도 JPA 제공자 | Boot 3.5.16 · Spring Data JPA 3.5.13 · Hibernate 6.6.53.Final · 계정/프로필·매장·상품/특성·데모 주문·후기·본인 찜·상품 변경 이벤트 |
 | 로컬 색인 | OpenSearch 3.9.0 · analysis-nori 3.9.0 · 명시 관리 CLI |
 | API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
 | 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
@@ -72,6 +72,7 @@ PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 �
 실행합니다. 데모 주문의 생성·이력·완료/삭제와 금액/상품 스냅샷·스탬프도 제공합니다.
 가입/ID 확인·현재 프로필/등급과 관리자 계정 관리도 기존 계약으로 제공합니다.
 공개 후기와 작성자/관리자의 작성·수정·삭제도 실제 JPA로 제공합니다.
+본인 찜의 상태·현재 상품 목록·저장/해제도 같은 계정 수명 계약으로 제공합니다.
 Psycopg3 relay·다른 업무 API와 기본 로컬 스택의 전환은 후속입니다.
 
 <a id="architecture"></a>

@@ -234,6 +234,15 @@ def run(environ):
         status,reviewed=request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"tasteTags":[" DRY ","fruity"],"aromaTags":[],"sourceName":"Authored packaged verification"});expect(status,200)
         if reviewed["data"]["tasteTags"]!=["dry","fruity"] or reviewed["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_features_changed")
         expect(request(admin,base,"PUT","/api/admin/products/"+str(product_id)+"/features",{"volumeMl":"750","sourceName":"authored"})[0],400)
+        favorite_path="/api/users/me/favorites/"+str(product_id)
+        expect(request(anonymous,base,"GET",favorite_path)[0],401)
+        status,absent=request(ordinary,base,"GET",favorite_path);expect(status,200)
+        if absent["data"]!={"productId":product_id,"favorited":False}:raise ValueError("jpa_runtime_favorite_absence_changed")
+        for _ in range(2):
+            status,present=request(ordinary,base,"PUT",favorite_path);expect(status,200)
+            if present["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_favorite_put_changed")
+        status,admin_favorite=request(admin,base,"GET",favorite_path);expect(status,200)
+        if admin_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_owner_leaked")
         authored_comment={"productId":product_id,"rating":3.7,"comment":"Authored packaged review"}
         expect(request(anonymous,base,"POST","/api/comments",authored_comment)[0],401)
         status,created_comment=request(ordinary,base,"POST","/api/comments",authored_comment);expect(status,201);comment_id=created_comment["data"]["id"]
@@ -262,9 +271,10 @@ def run(environ):
                 "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
                 "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
                 "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
-                "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
+                "/api/users/me/favorites","/api/users/me/favorites/{productId}"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=33:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=37:raise ValueError("jpa_runtime_operation_scope_changed")
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
@@ -280,6 +290,12 @@ def run(environ):
         status,persisted_features=request(client(),base,"GET","/api/products/"+str(product_id)+"/features");expect(status,200)
         if persisted_features["data"]["tasteTags"]!=["dry","fruity"] or persisted_features["data"]["aromaTags"]!=[]:raise ValueError("jpa_runtime_product_restart_lost_features")
         login(ordinary,base,"USER")
+        status,persisted_favorite=request(ordinary,base,"GET",favorite_path);expect(status,200)
+        if persisted_favorite["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_restart_lost_favorite")
+        status,favorites=request(ordinary,base,"GET","/api/users/me/favorites");expect(status,200)
+        if favorites["data"]["items"]!=[persisted_product["data"]] or set(favorites["data"]["items"][0])!=product_fields:raise ValueError("jpa_runtime_favorite_current_product_changed")
+        for _ in range(2):expect(request(ordinary,base,"DELETE",favorite_path)[0],200)
+        expect(request(ordinary,base,"PUT",favorite_path)[0],200)
         status,persisted_comments=request(client(),base,"GET","/api/products/"+str(product_id)+"/comments");expect(status,200)
         if persisted_comments["data"]["items"]!=[comment_data]:raise ValueError("jpa_runtime_restart_lost_comment")
         expect(request(ordinary,base,"DELETE","/api/comments/"+str(comment_id))[0],200)
@@ -295,6 +311,10 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/products/"+str(product_id))[0],200)
         expect(request(client(),base,"GET","/api/products/"+str(product_id))[0],404)
         expect(request(client(),base,"GET","/api/products/"+str(product_id)+"/features")[0],404)
+        status,deleted_favorite=request(ordinary,base,"GET",favorite_path);expect(status,200)
+        if deleted_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_parent_cascade_failed")
+        status,empty_favorites=request(ordinary,base,"GET","/api/users/me/favorites");expect(status,200)
+        if empty_favorites["data"]["items"]!=[] or empty_favorites["data"]["total"]!=0:raise ValueError("jpa_runtime_favorite_deleted_product_listed")
         status,deleted_comments=request(client(),base,"GET","/api/products/"+str(product_id)+"/comments");expect(status,200)
         if deleted_comments["data"]["items"]!=[] or deleted_comments["data"]["total"]!=0:raise ValueError("jpa_runtime_comment_parent_cascade_failed")
         expect(request(admin,base,"DELETE","/api/comments/"+str(cascade_comment_id))[0],404)
@@ -312,7 +332,8 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":29,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":31,"registered_api_operations":operations,
+            "private_favorites_and_lifecycle":True,
             "comment_reads_writes_and_parent_cascades":True,
             "account_registration_profile_and_lifecycle":True,
             "order_transactions_and_history":True,
