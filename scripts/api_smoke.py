@@ -572,6 +572,63 @@ def session_authority_contract(environ):
     other_admin_session.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
 
 
+def self_account_contract(environ):
+    """Current session owns both writes; only new disposable accounts are changed."""
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+    public = ApiClient(port)
+    admin_id, owner_id, other_id = ("ci_admin_" + uuid.uuid4().hex, "ci_self_" + uuid.uuid4().hex, "ci_self_" + uuid.uuid4().hex)
+    password, fresh = uuid.uuid4().hex, " literal self password "
+    for account_id in (admin_id, owner_id, other_id):
+        public.request("POST", "/users", 201, {"id": account_id, "name": "CI self fixture", "pass": password})
+    promote_ci_fixture_admin(environ, admin_id)
+    admin, owner, other, second = (ApiClient(port) for _ in range(4))
+    for client, account_id in ((admin, admin_id), (owner, owner_id), (other, other_id), (second, owner_id)):
+        client.request("POST", "/auth/login", 200, {"id": account_id, "pass": password})
+    profile_path, password_path = "/users/me/profile", "/users/me/password"
+    try:
+        public.request("PUT", profile_path, 401, {"name": "unauthorized"}, "UNAUTHORIZED")
+        public.request("PUT", password_path, 401, {"currentPassword": password, "newPassword": fresh}, "UNAUTHORIZED")
+        admin.request("PUT", "/admin/users/" + owner_id, 200, {"stamps": 63})
+        before = owner.request("GET", "/auth/me", 200)["data"]
+        other_before = other.request("GET", "/auth/me", 200)["data"]
+        assert owner.request("PUT", profile_path, 200, {"name": " literal self name "})["data"] is True
+        expected = dict(before, name=" literal self name ")
+        assert owner.request("GET", "/auth/me", 200)["data"] == expected
+        assert second.request("GET", "/auth/me", 200)["data"] == expected
+        for body in ({}, {"name": None}, {"name": 1}, {"name": True}, {"name": " "}, {"name": "a" * 101}, {"name": "valid", "role": "ADMIN"}, {"name": "valid", "id": other_id}):
+            owner.request("PUT", profile_path, 400, body, "VALIDATION_FAILED")
+        for body in ({}, {"currentPassword": password}, {"currentPassword": 1, "newPassword": fresh}, {"currentPassword": password, "newPassword": "abc"}, {"currentPassword": password, "newPassword": "a" * 101}, {"currentPassword": password, "newPassword": fresh, "authEpoch": "forged"}):
+            owner.request("PUT", password_path, 400, body, "VALIDATION_FAILED")
+        for raw in ("a" * 73, "가" * 25, "😀" * 19):
+            owner.request("PUT", password_path, 400, {"currentPassword": password, "newPassword": raw}, "VALIDATION_FAILED")
+        owner.request("PUT", profile_path + "?id=" + other_id, 400, {"name": "wrong owner"}, "BAD_REQUEST")
+        owner.request("PUT", password_path, 403, {"currentPassword": "wrong", "newPassword": fresh}, "FORBIDDEN")
+        assert owner.request("GET", "/auth/me", 200)["data"] == expected
+        assert second.request("GET", "/auth/me", 200)["data"] == expected
+        assert owner.request("PUT", password_path, 200, {"currentPassword": password, "newPassword": fresh})["data"] is True
+        assert owner.request("GET", "/auth/me", 200)["data"] == expected
+        second.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
+        public.request("POST", "/auth/login", 401, {"id": owner_id, "pass": password}, "UNAUTHORIZED")
+        second.request("POST", "/auth/login", 200, {"id": owner_id, "pass": fresh})
+        assert second.request("GET", "/auth/me", 200)["data"] == expected
+        current = fresh
+        for raw in ("a" * 72, "가" * 24, "😀" * 18):
+            owner.request("PUT", password_path, 200, {"currentPassword": current, "newPassword": raw})
+            assert owner.request("GET", "/auth/me", 200)["data"] == expected
+            check = ApiClient(port)
+            check.request("POST", "/auth/login", 200, {"id": owner_id, "pass": raw})
+            current = raw
+        assert other.request("GET", "/auth/me", 200)["data"] == other_before
+        admin.request("DELETE", "/admin/users/" + owner_id, 200)
+        public.request("POST", "/users", 201, {"id": owner_id, "name": "Rejoined self", "pass": password})
+        owner.request("PUT", profile_path, 401, {"name": "stale"}, "UNAUTHORIZED")
+        second.request("PUT", password_path, 401, {"currentPassword": fresh, "newPassword": password}, "UNAUTHORIZED")
+    finally:
+        for account_id in (owner_id, other_id):
+            admin.request("DELETE", "/admin/users/" + account_id, 200)
+
+
 def product_feature_contract(environ):
     """Exercise unknown/known attributes without treating fixture values as product facts."""
     require_disposable_database(environ)
@@ -1067,6 +1124,8 @@ def main():
             history_preservation_contract(os.environ)
             report["completed"].append("deleted references, anonymized owner and preserved order snapshots")
             session_authority_contract(os.environ)
+            self_account_contract(os.environ)
+            report["completed"].append("strict own profile/password, current-password rejection and session/epoch rotation")
             report["completed"].append("live roles, account incarnation, password revocation and profile freshness")
             product_feature_contract(os.environ)
             product_filter_contract(os.environ)

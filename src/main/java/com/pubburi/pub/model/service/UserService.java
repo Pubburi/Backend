@@ -17,6 +17,14 @@ public interface UserService {
 
 	UserUpdateResult modifyUser(String id, UserUpdate changes);
 
+	boolean modifyOwnProfile(String id, String authEpoch, String name);
+
+	UserUpdateResult modifyOwnPassword(String id, String authEpoch, String currentPassword, String newPassword);
+
+	final class CurrentPasswordMismatchException extends RuntimeException {
+		public CurrentPasswordMismatchException() { super("Current password does not match"); }
+	}
+
 	int removeUser(String id);
 
 	int updateStamp(User user);

@@ -1,6 +1,7 @@
 package com.pubburi.pub.model.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -110,6 +111,38 @@ class UserServiceImplTests {
 	void missingUserDoesNotClearUnrelatedOrderNotes() {
 		assertThat(userService.removeUser("missing")).isZero();
 		assertThat(userDao.clearedOrderNotesFor).isNull();
+	}
+
+	@Test
+	void selfNameChangesOnlyTheLockedNamesAndPreservesCredentialsRoleAndStamps() {
+		User stored = new User("id01", "old name", passwordHasher.hash("old pass"), 71, "ADMIN");
+		stored.setAuthEpoch("current-account"); userDao.saved = stored;
+		assertThat(userService.modifyOwnProfile("id01", "old-account", "stale")).isFalse();
+		assertThat(userDao.saved).isSameAs(stored);
+		assertThat(userService.modifyOwnProfile("id01", "current-account", " literal name ")).isTrue();
+		assertThat(userDao.saved.getName()).isEqualTo(" literal name ");
+		assertThat(userDao.saved.getPass()).isEqualTo(stored.getPass());
+		assertThat(userDao.saved.getAuthEpoch()).isEqualTo("current-account");
+		assertThat(userDao.saved.getRole()).isEqualTo("ADMIN");
+		assertThat(userDao.saved.getStamps()).isEqualTo(71);
+	}
+
+	@Test
+	void selfPasswordRejectsStaleEpochBeforeCheckingCurrentPasswordAndDoesNotWriteOnMismatch() {
+		User stored = new User("id01", "member", passwordHasher.hash(" old pass "), 71, "USER");
+		stored.setAuthEpoch("current-account"); userDao.saved = stored;
+		assertThat(userService.modifyOwnPassword("id01", "old-account", "wrong", "new pass")).isNull();
+		assertThatThrownBy(() -> userService.modifyOwnPassword("id01", "current-account", "old pass", "new pass"))
+				.isInstanceOf(UserService.CurrentPasswordMismatchException.class);
+		assertThat(userDao.saved).isSameAs(stored);
+		var changed = userService.modifyOwnPassword("id01", "current-account", " old pass ", " new pass ");
+		assertThat(changed.previousAuthEpoch()).isEqualTo("current-account");
+		assertThat(changed.authEpoch()).isNotEqualTo("current-account");
+		assertThat(passwordHasher.matches(" new pass ", userDao.saved.getPass())).isTrue();
+		assertThat(passwordHasher.matches("new pass", userDao.saved.getPass())).isFalse();
+		assertThat(userDao.saved.getName()).isEqualTo(stored.getName());
+		assertThat(userDao.saved.getRole()).isEqualTo("USER");
+		assertThat(userDao.saved.getStamps()).isEqualTo(71);
 	}
 
 	private static class FakeUserDao implements UserDao {

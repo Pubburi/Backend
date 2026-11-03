@@ -71,6 +71,28 @@ class RuntimeDocumentationTests {
 		assertThat(ui).contains("swagger-ui");
 	}
 
+	@Test
+	void selfAccountWritesExposeOnlyTheirStrictInputsAndBooleanResponse() throws Exception {
+		JsonNode document = mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString());
+		for (String path : Set.of("/api/users/me/profile", "/api/users/me/password")) {
+			JsonNode operation = document.path("paths").path(path).path("put");
+			assertThat(operation.isMissingNode()).isFalse();
+			assertThat(operation.path("parameters").size()).isZero();
+			JsonNode input = resolve(document, operation.path("requestBody").path("content").path("application/json").path("schema"));
+			assertThat(input.path("additionalProperties").booleanValue()).isFalse();
+			assertThat(fieldNames(input.path("properties"))).isEqualTo(path.endsWith("profile") ? Set.of("name") : Set.of("currentPassword", "newPassword"));
+			if (path.endsWith("password")) {
+				assertThat(input.path("properties").path("currentPassword").path("minLength").asInt()).isLessThanOrEqualTo(1);
+				assertThat(input.path("properties").path("newPassword").path("minLength").intValue()).isEqualTo(4);
+				for (String name : Set.of("currentPassword", "newPassword")) assertThat(input.path("properties").path(name).path("writeOnly").booleanValue()).isTrue();
+			}
+			JsonNode response = resolve(document, operation.path("responses").path("200").path("content").path("*/*").path("schema"));
+			if (response.isMissingNode()) response = resolve(document, operation.path("responses").path("200").path("content").path("application/json").path("schema"));
+			assertThat(response.path("properties").path("data").path("type").asText()).isEqualTo("boolean");
+		}
+	}
+
 	private JsonNode resolve(JsonNode document, JsonNode schema) {
 		while (schema.has("$ref")) {
 			schema = document.at(schema.path("$ref").asText().substring(1));

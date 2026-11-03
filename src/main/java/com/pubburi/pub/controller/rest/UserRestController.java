@@ -1,6 +1,7 @@
 package com.pubburi.pub.controller.rest;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,10 @@ import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.controller.request.AdminUserRequest;
 import com.pubburi.pub.controller.request.JoinUserRequest;
 import com.pubburi.pub.controller.request.LoginRequest;
+import com.pubburi.pub.controller.request.SelfProfileRequest;
+import com.pubburi.pub.controller.request.SelfPasswordRequest;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import com.pubburi.pub.controller.response.IdAvailableResponse;
 import com.pubburi.pub.controller.response.OrderResponse;
 import com.pubburi.pub.controller.response.ProfileResponse;
@@ -115,6 +120,39 @@ public class UserRestController {
 		ProfileResponse profile = new ProfileResponse(ResponseMapper.user(user), orders,
 				gradeService.gradeFor(user.getStamps()));
 		return ResponseEntity.ok(ApiResponse.ok(profile));
+	}
+
+	@PutMapping("/users/me/profile")
+	@Operation(summary = "Change only the current account name", description = "Session account only; exact name string, no query or extra body fields. Does not change credentials, role or stamps.")
+	public ResponseEntity<ApiResponse<Boolean>> updateOwnProfile(@Valid @RequestBody SelfProfileRequest request,
+			@Parameter(hidden = true) @RequestParam Map<String, String> query, HttpSession session) {
+		SessionUser owner = accessGuard.requireLogin(session);
+		requireNoQuery(query);
+		if (!userService.modifyOwnProfile(owner.id(), owner.authEpoch(), request.name())) {
+			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Login required");
+		}
+		return ResponseEntity.ok(ApiResponse.ok(true));
+	}
+
+	@PutMapping("/users/me/password")
+	@Operation(summary = "Change only the current account password", description = "Literal passwords, no query or extra body fields. Incorrect current password is 403 and keeps the session. Success retains only this unchanged session identity and revokes other old sessions.")
+	public ResponseEntity<ApiResponse<Boolean>> updateOwnPassword(@Valid @RequestBody SelfPasswordRequest request,
+			@Parameter(hidden = true) @RequestParam Map<String, String> query, HttpSession session) {
+		SessionUser owner = accessGuard.requireLogin(session);
+		requireNoQuery(query);
+		UserUpdateResult updated;
+		try {
+			updated = userService.modifyOwnPassword(owner.id(), owner.authEpoch(), request.currentPassword(), request.newPassword());
+		} catch (UserService.CurrentPasswordMismatchException wrongPassword) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Current password does not match");
+		}
+		if (updated == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Login required");
+		accessGuard.refreshAfterCredentialChange(session, owner, updated);
+		return ResponseEntity.ok(ApiResponse.ok(true));
+	}
+
+	private void requireNoQuery(Map<String, String> query) {
+		if (!query.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Query parameters are not supported");
 	}
 
 	@GetMapping("/admin/users")

@@ -83,6 +83,57 @@ public class UserServiceImpl implements UserService {
 
 	@Override
 	@Transactional
+	public boolean modifyOwnProfile(String id, String authEpoch, String name) {
+		if (name == null || name.isBlank() || name.length() > 100) {
+			throw new IllegalArgumentException("Invalid profile name");
+		}
+		User existing = lockOwned(id, authEpoch);
+		if (existing == null) return false;
+		User changed = copy(existing);
+		changed.setName(name);
+		updateLocked(changed);
+		return true;
+	}
+
+	@Override
+	@Transactional
+	public UserUpdateResult modifyOwnPassword(String id, String authEpoch, String currentPassword, String newPassword) {
+		if (currentPassword == null || currentPassword.isBlank() || currentPassword.length() > 100 || !validPassword(newPassword)) {
+			throw new IllegalArgumentException("Invalid password input");
+		}
+		User existing = lockOwned(id, authEpoch);
+		if (existing == null) return null;
+		if (!passwordHasher.matches(currentPassword, existing.getPass())) throw new CurrentPasswordMismatchException();
+		User changed = copy(existing);
+		changed.setPass(passwordHasher.hash(newPassword));
+		changed.setAuthEpoch(UUID.randomUUID().toString());
+		updateLocked(changed);
+		return new UserUpdateResult(existing.getId(), existing.getAuthEpoch(), changed.getAuthEpoch(), true);
+	}
+
+	private User lockOwned(String id, String authEpoch) {
+		if (isBlank(id) || isBlank(authEpoch)) return null;
+		User locked = userDao.selectByIdForUpdate(id);
+		return locked != null && java.util.Objects.equals(authEpoch, locked.getAuthEpoch()) ? locked : null;
+	}
+
+	private User copy(User user) {
+		User result = new User(user.getId(), user.getName(), user.getPass(), user.getStamps(), user.getRole());
+		result.setAuthEpoch(user.getAuthEpoch());
+		return result;
+	}
+
+	private boolean validPassword(String value) {
+		return value != null && !value.isBlank() && value.length() >= 4 && value.length() <= 100
+				&& value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 72;
+	}
+
+	private void updateLocked(User user) {
+		if (userDao.update(user) != 1) throw new IllegalStateException("User could not be updated");
+	}
+
+	@Override
+	@Transactional
 	public int removeUser(String id) {
 		if (isBlank(id) || userDao.selectByIdForUpdate(id) == null) {
 			return 0;

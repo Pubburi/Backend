@@ -122,6 +122,16 @@ CI의 명시 `JpaRecommendationPreparationTests`는 normal/failure와 다른 지
 실행한다. packaged smoke는 자체 bound/non-listening 포트를 끝까지 소유해 원격 미기동 fallback과
 재시작·기존 흐름을 확인하고 소켓/JVM을 정리한다. [기본 목록 검증](plans/2026-11-03-jpa-default-recommendations.md)을 따른다.
 
+`JpaSelfAccountIntegrationTests`는 두 본인 쓰기의 strict body/query·이름 literal·현재 짧은 암호/
+legacy 해시·새 암호UTF-8 72바이트/초과·역할/스탬프/자격 보존과 두 세션 회수를 검사한다.
+잠금 전 자격 회전/동일ID 재가입, 두 암호 쓰기·이름/스탬프 경합과 이미 검증한 옛 로그인 응답의
+후속 보호 요청401을 실제 PG에서 확인한다. test gate는 SQL을 바꾸지 않고 원래 hasher를 호출한다.
+별도 failure DB의 `JpaSelfAccountFailureIntegrationTests`는 정확한 자체 계정의 AFTER UPDATE
+실패 뒤 이름/해시/epoch·두 세션·개인 자식/producer가 전부 rollback되는지 확인하고 DDL을 제거한다.
+기본 MySQL packaged HTTP에도 같은 self 입력/권한/72바이트/회수 회귀를 추가하고, 같은 JPA JAR의
+기동 거절·재시작/재로그인과 실제 OpenAPI35경로/42작업을 확인한다.
+[공급/실제 조건](plans/2026-11-03-self-account-settings.md)을 전체 F09 웹·DB 전환과 구분한다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.
