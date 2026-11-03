@@ -4,6 +4,8 @@
 명시취향·찜·사용자 ID·세션·행동 로그를 추천 서버로 보내지 않는다. 학습/취향 점수·인기 성과나
 추천 품질을 증명하는 API가 아니다. [부분 OpenAPI](openapi/default-recommendations.json)와
 실행 `/v3/api-docs`가 제공자 계약이다.
+기본 MySQL과 [별도 JPA 제공자](JPA-REHEARSAL.md)는 같은 원래 호출 계층을 사용한다.
+[JPA 연결/검증 범위](plans/2026-11-03-jpa-default-recommendations.md)는 기본 PG 전환·B1 개인화와 구분한다.
 
 성공은 ApiResponse의 data에 다음 두 필드만 둔다.
 

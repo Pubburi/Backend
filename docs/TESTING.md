@@ -22,7 +22,10 @@ PUBBURI_PG_INTEGRATION=1이 실제 통합 조건이며 CI에서 빠지면 성공
 기본 check는 별도 `tools/jpa-rehearsal`의 단위/패키징도 수행한다. DB가 없으면 실제 통합은
 skip하며, [JPA 제공 계약](JPA-REHEARSAL.md)의 부분 범위를 전체 DB03 성공으로 세지 않는다.
 필수 backend-ci는 기존 PG3/import4와 분리한 JPA 정상/실패 두 DB를 더 준비하고, 같은 owned
-source snapshot을 복사한 뒤 별도 최소 runtime 역할로 실제 HTTP와 실행 JAR을 검증한다.
+source snapshot을 복사한다. 기본 목록 수명에는 별도 세 번째 JPA scratch DB를 추가하고
+승인 복사/검수 뒤 명시 CI 준비 테스트가 원래 관리자 DELETE API로 해당 복사본의 상품만 제거한다.
+기존 정상/실패 DB의 source 상품은 읽기 전용으로 보존한다. 각 DB는 별도 최소 runtime 역할로
+실제 HTTP와 실행 JAR을 검증한다.
 
 `PUBBURI_JPA_INTEGRATION=1`은 User/Market Repository·DTO projection·insert-only ID·기존 해시
 CAS/epoch·역할·사용자 전체 잠금·SQL 실패 rollback·CREATE/ALTER/DROP 거절의 실제 경계다.
@@ -106,6 +109,18 @@ UPDATE·값 DELETE/두 번째 INSERT 이후 실패를 주어 이전 헤더/값·
 rollback을 확인한다. 실패 DDL은 finally 제거한다. packaged smoke는 같은 JAR의 재시작/재로그인·
 전체 교체/초기화·계정 삭제/재가입 격리와 기존 업무 흐름을 함께 검사한다.
 [명시취향 조건·결과·한계](plans/2026-11-03-jpa-preferences.md)를 따른다.
+
+`JpaDefaultRecommendationIntegrationTests`는 원래 Controller/서비스/실제 HTTP gateway와 JPA
+projection의 공개·size/순서·첫1000 상한·ID/available만 전송·원격 대기 밖 TX·현재 Product7을
+검사한다. 자체 ephemeral HTTP fixture에서 잘못된 B0/503/redirect/비JSON과32KiB 경계·미완료
+본문의 전체 기한을 확인하며 실제 FastAPI/B0 통합과 구분한다.
+`JpaDefaultRecommendationLifecycleIntegrationTests`는 별도 root-authored 빈 카탈로그 DB의 새
+자체 상품만 사용한다. 실제 관리자 변경/삭제를 HTTP 응답 대기 중 완료해 현재 값/삭제 fallback을
+확인하고 빈 DB는 원격 없이 빈 FALLBACK이어야 한다. 그 DB의 t_product SELECT만 임시 회수해
+최초/현재/fallback 읽기 오류500을 확인한 뒤 finally 복원한다. 생산 SQL/서비스를 바꾸지 않는다.
+CI의 명시 `JpaRecommendationPreparationTests`는 normal/failure와 다른 지정 scratch에서만
+실행한다. packaged smoke는 자체 bound/non-listening 포트를 끝까지 소유해 원격 미기동 fallback과
+재시작·기존 흐름을 확인하고 소켓/JVM을 정리한다. [기본 목록 검증](plans/2026-11-03-jpa-default-recommendations.md)을 따른다.
 
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.

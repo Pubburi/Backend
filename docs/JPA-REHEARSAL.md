@@ -47,10 +47,11 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | DELETE | `/api/users/me/favorites/{productId}` | 본인 해제·없는 관계/삭제 상품도200 false |
 | GET | `/api/users/me/preferences` | 본인 epoch의 헤더/값 RR·미입력/null/[]/0 구분 |
 | PUT | `/api/users/me/preferences` | 본인 전체 교체·skip/reset·사용자 잠금/epoch 재검증·원자 rollback |
+| GET | `/api/recommendations/default` | 공개 비개인 B0·현재 첫1000 ID순/배치 재조회·장애/삭제 시 현재 DB fallback |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 추천
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 개인화 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른두 개/서른아홉 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른세 개/마흔 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
@@ -142,6 +143,12 @@ MySQL 문장 시각을 보존한다. favorite UPDATE/sequence 권한은 없으�
 Persistable 저장을 같은 TX로 묶는다. 헤더에 불필요한 native upsert나 값 UPDATE 권한을 추가하지 않는다.
 응답은 원래 DTO이며 생략 unknown·known[]·0·soft/hard·skip/reset과 정규화/정렬을 유지한다.
 
+공개 기본 목록은 원래 DefaultRecommendationController/Service·RecommendationConfig·BaselineHttpClient를
+연결한다. 기존 JPA의 ID순 제한 후보/현재 ID 배치 projection을 사용하므로 새 GRANT는 없다.
+원격 대기 밖의 짧은 읽기 TX·Product7·size/후보 상한·공개 비개인 표시·현재 상품/삭제 fallback과
+전송/본문 제한을 유지한다. 운영자 `PUBBURI_RECOMMENDATION_BASE_URL`의 기본은 원래와 같은
+`http://127.0.0.1:8000`이며 세션/취향/찜·이름/가격을 전송하지 않는다.
+
 Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp/Comment/Favorite/Preference/PreferenceValue 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
 JPA 매핑을 검증했다거나 스키마 검사만으로 전체 업무 동등성이 확보됐다고 해석하지 않는다.
@@ -219,7 +226,8 @@ group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제
 검증 도구의 PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment를 사용한다.
 [찜 검증](plans/2026-11-03-jpa-favorites.md)은 본인 수명·멱등성·RR/자격 경합·실패와 실행 JAR을 다룬다.
 [명시취향 검증](plans/2026-11-03-jpa-preferences.md)은 두 Repository·전체 교체/실패·RR/계정 수명과 실행 JAR을 다룬다.
-남은 DB03은 추천 연동 등 다른 업무 DAO/API의 실제 JPA 이전과
+[기본 목록 검증](plans/2026-11-03-jpa-default-recommendations.md)은 실제 B0 전송·현재 상품/삭제·DB 오류/fallback 경계를 다룬다.
+남은 DB03은 필요한 다른 업무 연동과
 전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
 lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.

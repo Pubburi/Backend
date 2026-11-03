@@ -11,6 +11,8 @@ import com.pubburi.pub.controller.rest.UserRestController;
 import com.pubburi.pub.controller.rest.CommentRestController;
 import com.pubburi.pub.controller.rest.FavoriteRestController;
 import com.pubburi.pub.controller.rest.UserPreferenceRestController;
+import com.pubburi.pub.controller.rest.DefaultRecommendationController;
+import com.pubburi.pub.config.RecommendationConfig;
 import com.pubburi.pub.model.service.*;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -21,7 +23,8 @@ import org.springframework.context.annotation.Import;
     ProductRestController.class,ProductFeatureRestController.class,ProductServiceImpl.class,ProductSearchOutbox.class,
     UserServiceImpl.class,PasswordHasher.class,MarketServiceImpl.class,OrderRestController.class,OrderServiceImpl.class,
     UserRestController.class,GradeService.class,CommentRestController.class,CommentServiceImpl.class,
-    FavoriteRestController.class,FavoriteServiceImpl.class,UserPreferenceRestController.class,UserPreferenceServiceImpl.class})
+    FavoriteRestController.class,FavoriteServiceImpl.class,UserPreferenceRestController.class,UserPreferenceServiceImpl.class,
+    DefaultRecommendationController.class,DefaultRecommendationService.class,RecommendationConfig.class})
 public class JpaRehearsalApplication {
     public static void main(String[] args){SpringApplication.run(JpaRehearsalApplication.class,args);}
 }
