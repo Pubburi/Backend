@@ -133,21 +133,21 @@ afterCommit 전달은 기록 유실 틈을 남기고, 업무 안의 엔진 전�
 #### 코드
 
 ~~~java
-            if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
-                throw new IllegalStateException("Search outbox event could not be recorded");
-            if (outbox.schedule(productId, version) != 1)
-                throw new IllegalStateException("Search delivery could not be scheduled");
+if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
+    throw new IllegalStateException("Search outbox event could not be recorded");
+if (outbox.schedule(productId, version) != 1)
+    throw new IllegalStateException("Search delivery could not be scheduled");
 ~~~
 
 ~~~python
-    def ack(self, claim):
-        with self.transaction() as cursor:
-            self.fence_target(cursor, claim.fingerprint, claim.source_id)
-            cursor.execute("""UPDATE t_product_search_delivery SET status='DELIVERED', delivered_at=NOW(6),
-                claim_token=NULL, lease_until=NULL, last_error=NULL
-                WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s AND lease_until>NOW(6)""",
-                (claim.event_id, claim.token))
-            return cursor.rowcount == 1
+def ack(self, claim):
+    with self.transaction() as cursor:
+        self.fence_target(cursor, claim.fingerprint, claim.source_id)
+        cursor.execute("""UPDATE t_product_search_delivery SET status='DELIVERED', delivered_at=NOW(6),
+            claim_token=NULL, lease_until=NULL, last_error=NULL
+            WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s AND lease_until>NOW(6)""",
+            (claim.event_id, claim.token))
+        return cursor.rowcount == 1
 ~~~
 
 [업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml) · [claim·target 확인·조건부 ACK](scripts/search_relay.py) · [전송·운영 경계](docs/SEARCH-RELAY.md)
@@ -177,24 +177,24 @@ Guard가 로그인 때의 역할·이름·스탬프를 신뢰했습니다. ID만
 #### 코드
 
 ~~~java
-		User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
-		if (!sameIdentity(value(session), observed)) {
-			return null;
-		}
+User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
+if (!sameIdentity(value(session), observed)) {
+	return null;
+}
 ~~~
 
 ~~~java
-			synchronized (session) {
-				if (sameIdentity(value(session), observed)) {
-					if (!java.util.Objects.equals(updated.id(), observed.id())
-							|| !java.util.Objects.equals(updated.previousAuthEpoch(), observed.authEpoch())) {
-						session.removeAttribute(SESSION_USER);
-					} else {
-						session.setAttribute(SESSION_USER, new SessionUser(observed.id(), observed.name(),
-								observed.stamps(), observed.role(), updated.authEpoch()));
-					}
-				}
-			}
+synchronized (session) {
+	if (sameIdentity(value(session), observed)) {
+		if (!java.util.Objects.equals(updated.id(), observed.id())
+				|| !java.util.Objects.equals(updated.previousAuthEpoch(), observed.authEpoch())) {
+			session.removeAttribute(SESSION_USER);
+		} else {
+			session.setAttribute(SESSION_USER, new SessionUser(observed.id(), observed.name(),
+					observed.stamps(), observed.role(), updated.authEpoch()));
+		}
+	}
+}
 ~~~
 
 [현재 계정 확인·조건부 세션 갱신](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java) · [잠금 안의 버전 캡처](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [ID·epoch 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml) · [계약·전환](docs/SESSION-AUTHORITY.md)
@@ -224,20 +224,20 @@ PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전�
 #### 코드
 
 ~~~java
-        boolean attempted=false,confirmed=false;
-        try(connection) {
-            connection.setAutoCommit(false);
-            try {
-                T value=work.execute(connection);attempted=true;connection.commit();confirmed=true;return value;
-            } catch(Exception error) {
-                try{connection.rollback();}catch(SQLException ignored){ }
-                throw error;
-            }
-        } catch(Exception error) {
-            if(confirmed)throw new OutcomeException("postgresql_import_committed_close_failed",error);
-            if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
-            throw error;
-        }
+boolean attempted=false,confirmed=false;
+try(connection) {
+    connection.setAutoCommit(false);
+    try {
+        T value=work.execute(connection);attempted=true;connection.commit();confirmed=true;return value;
+    } catch(Exception error) {
+        try{connection.rollback();}catch(SQLException ignored){ }
+        throw error;
+    }
+} catch(Exception error) {
+    if(confirmed)throw new OutcomeException("postgresql_import_committed_close_failed",error);
+    if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
+    throw error;
+}
 ~~~
 
 [복사·PK tuple 대조·sequence 잠금](tools/postgresql-migration/src/main/java/com/pubburi/migration/SourceImportTool.java) · [commit/자원 종료 분류](tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java) · [typed bind](tools/postgresql-migration/src/main/java/com/pubburi/migration/TargetValues.java) · [복사 계약](docs/SOURCE-IMPORT.md)
@@ -269,19 +269,17 @@ PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전�
 서비스의 트랜잭션 안에서 가격을 캡처하고 저장하는 부분입니다.
 
 ~~~java
-			detail.setUnitPrice(product.getPrice());
-			try {
-				detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
-				totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
-				totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
-			} catch (ArithmeticException ex) {
-				throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
-			}
+detail.setUnitPrice(product.getPrice());
+try {
+	detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
+	totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
+	totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
+} catch (ArithmeticException ex) {
+	throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
+}
 ~~~
 
-조회는 현재 상품 가격 대신 저장된 상세를 사용합니다.
-
-참조 삭제와 회원 자유 입력 정리는 다음 경계로 처리합니다.
+상품 삭제 후에도 주문 상세를 남기는 FK 경계입니다.
 
 ~~~sql
 ALTER TABLE t_order_detail
