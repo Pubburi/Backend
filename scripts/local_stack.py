@@ -9,6 +9,7 @@ import secrets
 import shutil
 import signal
 import socket
+import types
 import subprocess
 import time
 import urllib.error
@@ -248,9 +249,19 @@ def start(env, smoke):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "doctor", "install", "up", "smoke", "status", "down", "reset-db"])
+    parser.add_argument("command", choices=["init", "doctor", "install", "up", "smoke", "status", "down", "reset-db", "package-pg"])
     parser.add_argument("--confirm-delete-local-data", action="store_true")
+    parser.add_argument("--provider", choices=("mysql", "postgresql"), default="mysql")
+    parser.add_argument("--pg-config")
+    parser.add_argument("--release-dir")
+    parser.add_argument("--output-dir")
+    parser.add_argument("--backend-only", action="store_true")
     args = parser.parse_args()
+    if args.provider == "postgresql" or args.command == "package-pg":
+        import postgresql_local
+        return postgresql_local.dispatch(types.SimpleNamespace(**globals()), args)
+    if args.pg_config or args.release_dir or args.output_dir or args.backend_only:
+        raise RuntimeError("PostgreSQL options require the explicit PostgreSQL provider.")
     if args.command == "init":
         initialize()
         return
@@ -293,7 +304,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("Application processes stopped; local database data was retained.")
-    except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
+    except (RuntimeError, OSError, ValueError, subprocess.CalledProcessError) as error:
         # Do not print command output: Docker/JDBC diagnostics may contain secrets.
         raise SystemExit(f"Local stack failed ({type(error).__name__}). " +
                          (str(error) if isinstance(error, RuntimeError) else "Check prerequisites and local logs."))

@@ -178,3 +178,9 @@ DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.
 실제 검증/제약은 [작업 기록](plans/2026-11-02-postgresql-schema-foundation.md)에 남긴다.
+
+
+DB06의 [명시 로컬 release 증가분](plans/2026-11-04-postgresql-local-release.md)은 현재37/44
+JPA JAR를 source 입력/commit·완료 manifest에 결속하고 준비된 소유 copied PG에서 실행한다.
+기본 MySQL 기동·installer/import와 분리하며 기존 최소 runtime guard와 `/api` 프록시를 재사용한다.
+DB 생성/초기화·권한 확대·기본 DB 전환이나 cutover 후 쓰기의 역이관을 자동화하지 않는다.

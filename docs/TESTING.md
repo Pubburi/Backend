@@ -409,3 +409,15 @@ SourceImportIntegration/Typed XML와 원본·source/env/CA·상세 로그는 업
 기존 PG3개 클래스 XML만 명시하고 source-snapshot-report.json의 안전한 상태만 추가한다.
 새 CI helper는 자기 CID/label·loopback과 target PG 소유권을 확인하고 자기 source/private
 자료만 finally 정리한다. root/다른 작업자 DB를 초기화하거나 보호 규칙을 완화하지 않는다.
+
+
+## DB06 명시 PostgreSQL 로컬 release
+
+`test_postgresql_local.py`는 private strict 설정·source/JAR/commit 출처·기존 MySQL dispatch·
+PG 파괴 명령 차단·동일 작업 잠금/포트 점유·상속 자격/JVM 설정과 세 자식 환경 격리를 검사한다.
+기본 check의 도구 검사에 포함한다. 필수 CI는 기존 JPA 정상/실패/빈 카탈로그 실제 회귀와
+packaged smoke를 그대로 실행한 뒤, 이미 검수한 normal DB에 `postgresql_local_ci.py`로 실제
+DB독립 release 생성과 backend-only 기동/OpenAPI37/44/종료를 추가한다. 별도 schema나 GRANT는 없다.
+이 CI는 sibling FE/추천·사용자 웹 흐름을 실행하지 않는다. 전체 세 서버와 세션·재시작/정리 및
+원본 보존은 별도 소유 자원에서 [증가분 기록](plans/2026-11-04-postgresql-local-release.md)에 남긴다.
+실제 DB fixture 준비 실패·하네스 실패/권한 제한을 성공으로 소급하거나 기존89를 skip하지 않는다.

@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def verify_owned_postgres(environ):
+def verify_owned_postgres(environ, child_env=None):
     raw = environ.get("PUBBURI_PG_URL", "")
     if not raw.startswith("jdbc:postgresql://"):
         raise ValueError("postgresql_explicit_fixture_required")
@@ -24,8 +24,9 @@ def verify_owned_postgres(environ):
             or not re.fullmatch(r"[a-z][a-z0-9_]*_ci", name) or url.path != "/" + name
             or not re.fullmatch(r"[a-f0-9]{12,64}", cid) or not re.fullmatch(r"[a-z0-9-]{5,100}", label)):
         raise ValueError("postgresql_explicit_fixture_required")
+    options = {} if child_env is None else {"env": child_env}
     result = subprocess.run(["docker", "inspect", "--type", "container", cid], capture_output=True, text=True,
-                            check=True, timeout=5)
+                            check=True, timeout=5, **options)
     parsed = json.loads(result.stdout)
     if len(parsed) != 1:
         raise ValueError("postgresql_container_guard_rejected")

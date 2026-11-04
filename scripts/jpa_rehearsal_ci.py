@@ -126,6 +126,8 @@ def run(environ,snapshot,directory):
     command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","verify"],
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
+    from postgresql_local_ci import run as local_release
+    local_release(normal)
     if environ.get("PUBBURI_PG_RELAY_CI")=="1":
         from prepare_postgresql_relay_ci import prepare
         prepare(environ,relay_business,directory)
