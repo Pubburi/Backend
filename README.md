@@ -133,60 +133,21 @@ afterCommit 전달은 기록 유실 틈을 남기고, 업무 안의 엔진 전�
 #### 코드
 
 ~~~java
-@Override
-@Transactional
-public int removeProduct(int id) {
-	if (id <= 0) {
-		return 0;
-	}
-	if (productDao.selectByIdForUpdate(id) == null) return 0;
-	int changed = productDao.delete(id);
-	if (changed > 0) searchOutbox.recordDeleted(id);
-	return changed;
-}
-~~~
-
-~~~java
-private void append(int productId, boolean deleted, Map<String, Object> projection) {
-    if (productId <= 0) throw new IllegalArgumentException("Positive product ID required");
-    outbox.ensureVersion(productId);
-    if (outbox.advanceVersion(productId) != 1)
-        throw new IllegalStateException("Search source version cannot advance");
-    Long version = outbox.selectVersionForUpdate(productId);
-    if (version == null || version <= 0) throw new IllegalStateException("Search source version is invalid");
-    Map<String, Object> event = new LinkedHashMap<>();
-    event.put("productId", productId);
-    event.put("sourceVersion", version);
-    event.put("deleted", deleted);
-    event.put("document", projection);
-    try {
-        if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
-            throw new IllegalStateException("Search outbox event could not be recorded");
-        if (outbox.schedule(productId, version) != 1)
-            throw new IllegalStateException("Search delivery could not be scheduled");
-    } catch (JsonProcessingException error) {
-        throw new IllegalStateException("Search projection cannot be serialized", error);
-    }
-}
+if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
+    throw new IllegalStateException("Search outbox event could not be recorded");
+if (outbox.schedule(productId, version) != 1)
+    throw new IllegalStateException("Search delivery could not be scheduled");
 ~~~
 
 ~~~python
-result = self.engine.apply(claim_document(claim))
-if result not in ("applied", "duplicate", "stale_ignored"):
-    raise SearchError("relay_write_outcome_invalid")
-self.engine.ready()
-if target_identity(self.engine, self.source_id) != before:
-    raise SearchError("relay_target_changed_during_delivery")
-accepted = self.store.ack(claim)
-return {"status": "delivered" if accepted else "lease_lost", "outcome": result}
-~~~
-
-~~~sql
-UPDATE t_product_search_delivery
-SET status='DELIVERED', delivered_at=NOW(6),
-    claim_token=NULL, lease_until=NULL, last_error=NULL
-WHERE event_id=%s AND status='IN_FLIGHT'
-  AND claim_token=%s AND lease_until>NOW(6)
+def ack(self, claim):
+    with self.transaction() as cursor:
+        self.fence_target(cursor, claim.fingerprint, claim.source_id)
+        cursor.execute("""UPDATE t_product_search_delivery SET status='DELIVERED', delivered_at=NOW(6),
+            claim_token=NULL, lease_until=NULL, last_error=NULL
+            WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s AND lease_until>NOW(6)""",
+            (claim.event_id, claim.token))
+        return cursor.rowcount == 1
 ~~~
 
 [업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml) · [claim·target 확인·조건부 ACK](scripts/search_relay.py) · [전송·운영 경계](docs/SEARCH-RELAY.md)
@@ -216,47 +177,22 @@ Guard가 로그인 때의 역할·이름·스탬프를 신뢰했습니다. ID만
 #### 코드
 
 ~~~java
-public SessionUser currentUser(HttpSession session) {
-	Object value = value(session);
-	if (!(value instanceof SessionUser observed)) {
-		return null;
-	}
-	if (observed.id() == null || observed.authEpoch() == null || observed.authEpoch().isBlank()) {
-		clearIfCurrent(session, observed);
-		return null;
-	}
-	// DB 예외는 전파한다. 저장된 역할로 대신 허용하거나 세션을 지우지 않는다.
-	User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
-	if (!sameIdentity(value(session), observed)) {
-		return null;
-	}
-	if (current == null) {
-		clearIfCurrent(session, observed);
-		return null;
-	}
-	return SessionUser.from(current);
+User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
+if (!sameIdentity(value(session), observed)) {
+	return null;
 }
 ~~~
 
 ~~~java
-public void refreshAfterCredentialChange(HttpSession session, SessionUser observed, UserUpdateResult updated) {
-	if (!updated.credentialsChanged()) {
-		return;
-	}
-	try {
-		synchronized (session) {
-			if (sameIdentity(value(session), observed)) {
-				if (!java.util.Objects.equals(updated.id(), observed.id())
-						|| !java.util.Objects.equals(updated.previousAuthEpoch(), observed.authEpoch())) {
-					session.removeAttribute(SESSION_USER);
-				} else {
-					session.setAttribute(SESSION_USER, new SessionUser(observed.id(), observed.name(),
-							observed.stamps(), observed.role(), updated.authEpoch()));
-				}
-			}
+synchronized (session) {
+	if (sameIdentity(value(session), observed)) {
+		if (!java.util.Objects.equals(updated.id(), observed.id())
+				|| !java.util.Objects.equals(updated.previousAuthEpoch(), observed.authEpoch())) {
+			session.removeAttribute(SESSION_USER);
+		} else {
+			session.setAttribute(SESSION_USER, new SessionUser(observed.id(), observed.name(),
+					observed.stamps(), observed.role(), updated.authEpoch()));
 		}
-	} catch (IllegalStateException invalidated) {
-		// 동시 로그아웃으로 제거된 신원을 복원하지 않는다.
 	}
 }
 ~~~
@@ -288,52 +224,20 @@ PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전�
 #### 코드
 
 ~~~java
-    static SourceArtifact.Report run(Map<String,String> env) throws Exception {
-        // Read/validate once. No second file read after approved digest/identity checks.
-        var source=input(env);var settings=PostgresSchemaTool.Settings.from(env);
-        PostgresSchemaTool.guard(settings);PostgresSchemaTool.configuration(settings,PostgresSchemaTool.LOCATION).load().validate();
-        return ImportTransaction.run(settings.connect(),connection -> {
-                PostgresSchemaTool.guard(connection,settings);
-                try(var marker=connection.prepareStatement("SELECT token FROM public.pubburi_pg_migration_guard WHERE token=?")) {
-                    marker.setString(1,settings.token());try(var r=marker.executeQuery()){if(!r.next())throw new IllegalArgumentException("postgresql_import_guard_changed");}
-                }
-                try(var statement=connection.createStatement()) {
-                    String names=String.join(",",SourceContract.TABLES.stream().map(t->"pubburi."+t.name()).toList());
-                    statement.execute("LOCK TABLE "+names+",pubburi.migration_source_receipt IN ACCESS EXCLUSIVE MODE");
-                    TargetSchemaContract.verify(connection);
-                    for(var table:SourceContract.TABLES)try(var rows=statement.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi."+table.name()+")")) {
-                        rows.next();if(rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_empty_target_required");
-                    }
-                    try(var rows=statement.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.migration_source_receipt)")) {rows.next();if(rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_already_recorded");}
-                }
-                for(int t=0;t<SourceContract.TABLES.size();t++) insert(connection,SourceContract.TABLES.get(t),source.data().path("tables").get(t));
-                compare(connection,source);reserve(connection,source.data().path("sourceNext"));
-                try(var receipt=connection.prepareStatement("INSERT INTO pubburi.migration_source_receipt(singleton_id,artifact_sha256,source_id,source_server,window_id,row_count) VALUES(1,?,?::uuid,?::uuid,?::uuid,?)")) {
-                    receipt.setString(1,source.sha256());receipt.setString(2,source.data().path("sourceId").textValue());receipt.setString(3,source.data().path("sourceServer").textValue());
-                    receipt.setString(4,source.data().path("window").textValue());receipt.setLong(5,source.report().rows());if(receipt.executeUpdate()!=1)throw new IllegalArgumentException("postgresql_import_receipt_failed");
-                }
-                PostgresSchemaTool.guard(connection,settings);return source.report();
-        });
+boolean attempted=false,confirmed=false;
+try(connection) {
+    connection.setAutoCommit(false);
+    try {
+        T value=work.execute(connection);attempted=true;connection.commit();confirmed=true;return value;
+    } catch(Exception error) {
+        try{connection.rollback();}catch(SQLException ignored){ }
+        throw error;
     }
-~~~
-
-~~~java
-    static <T> T run(Connection connection,Work<T> work) throws Exception {
-        boolean attempted=false,confirmed=false;
-        try(connection) {
-            connection.setAutoCommit(false);
-            try {
-                T value=work.execute(connection);attempted=true;connection.commit();confirmed=true;return value;
-            } catch(Exception error) {
-                try{connection.rollback();}catch(SQLException ignored){ }
-                throw error;
-            }
-        } catch(Exception error) {
-            if(confirmed)throw new OutcomeException("postgresql_import_committed_close_failed",error);
-            if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
-            throw error;
-        }
-    }
+} catch(Exception error) {
+    if(confirmed)throw new OutcomeException("postgresql_import_committed_close_failed",error);
+    if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
+    throw error;
+}
 ~~~
 
 [복사·PK tuple 대조·sequence 잠금](tools/postgresql-migration/src/main/java/com/pubburi/migration/SourceImportTool.java) · [commit/자원 종료 분류](tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java) · [typed bind](tools/postgresql-migration/src/main/java/com/pubburi/migration/TargetValues.java) · [복사 계약](docs/SOURCE-IMPORT.md)
@@ -365,87 +269,26 @@ PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전�
 서비스의 트랜잭션 안에서 가격을 캡처하고 저장하는 부분입니다.
 
 ~~~java
-        int totalQuantity = 0;
-        int totalPrice = 0;
-        for (OrderDetail detail : normalizedDetails) {
-            detail.setOrderId(order.getoId());
-            Product product = productDao.selectByIdForUpdate(detail.getProductId());
-            if (product == null) {
-                throw new IllegalArgumentException("Product not found: " + detail.getProductId());
-            }
-            // Capture server prices under a row lock before any amount-dependent write.
-            if (product.getPrice() < 0) {
-                throw new IllegalArgumentException("Invalid product price: " + detail.getProductId());
-            }
-            detail.setProductName(product.getName());
-            detail.setProductType(product.getType());
-            detail.setProductImg(product.getImg());
-            detail.setUnitPrice(product.getPrice());
-            try {
-                detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
-                totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
-                totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
-            } catch (ArithmeticException ex) {
-                throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
-            }
-            if (productDao.incrementOrderCount(detail.getProductId(), detail.getQuantity()) <= 0) {
-                throw new IllegalArgumentException("Product not found: " + detail.getProductId());
-            }
-        }
-        if (orderDetailDao.insertAll(normalizedDetails) != normalizedDetails.size()) {
-            throw new IllegalStateException("Order details could not be created");
-        }
-        if (orderDao.updateTotalPrice(order.getoId(), totalPrice) != 1) {
-            throw new IllegalStateException("Order total could not be captured");
-        }
-        order.setTotalPrice(totalPrice);
+detail.setUnitPrice(product.getPrice());
+try {
+	detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
+	totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
+	totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
+} catch (ArithmeticException ex) {
+	throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
+}
 ~~~
 
-조회는 현재 상품 가격 대신 저장된 상세를 사용합니다.
+상품 삭제 후에도 주문 상세를 남기는 FK 경계입니다.
 
 ~~~sql
-SELECT d.d_id AS id, d.order_id AS orderId, d.product_id AS productId,
-       d.quantity, d.product_name AS name, d.product_type AS type,
-       d.unit_price AS unitPrice, d.sum_price AS sumPrice,
-       d.product_img AS img
-FROM t_order_detail d
-WHERE d.order_id = #{orderId}
-ORDER BY d.d_id ASC
-~~~
-
-참조 삭제와 회원 자유 입력 정리는 다음 경계로 처리합니다.
-
-~~~sql
-ALTER TABLE t_order DROP FOREIGN KEY fk_order_user;
-ALTER TABLE t_order
-    MODIFY COLUMN user_id VARCHAR(100) NULL,
-    ADD CONSTRAINT fk_order_history_user FOREIGN KEY (user_id)
-        REFERENCES t_user(id) ON DELETE SET NULL;
-
-ALTER TABLE t_order_detail DROP FOREIGN KEY fk_order_detail_product;
 ALTER TABLE t_order_detail
     MODIFY COLUMN product_id INT NULL,
     ADD CONSTRAINT fk_order_history_product FOREIGN KEY (product_id)
         REFERENCES t_product(id) ON DELETE SET NULL;
 ~~~
 
-~~~java
-@Override
-@Transactional
-public int removeUser(String id) {
-    if (isBlank(id) || userDao.selectByIdForUpdate(id) == null) {
-        return 0;
-    }
-    // Block new order FK references until notes are cleared and the user is deleted.
-    userDao.clearOrderNotes(id);
-    if (userDao.delete(id) != 1) {
-        throw new IllegalStateException("User could not be deleted");
-    }
-    return 1;
-}
-~~~
-
-[가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [회원 삭제 트랜잭션](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [삭제 정책·FK 전환](docs/ORDER-HISTORY-PRESERVATION.md)
+[가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [회원 삭제 트랜잭션](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [FK 전환 SQL](docs/migrations/002-order-history-preservation.sql) · [삭제 정책](docs/ORDER-HISTORY-PRESERVATION.md)
 
 <a id="development"></a>
 
