@@ -14,8 +14,16 @@
         SELECT id, user_id, product_id, rating, comment
         FROM t_comment
         WHERE product_id = #{productId}
-        ORDER BY id DESC
+        <choose>
+            <when test="sort.name().equals('RATING_DESC')">ORDER BY rating DESC, id DESC</when>
+            <when test="sort.name().equals('RATING_ASC')">ORDER BY rating ASC, id DESC</when>
+            <otherwise>ORDER BY id DESC</otherwise>
+        </choose>
         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="averageRatingByProductId" parameterType="int" resultType="double">
+        SELECT AVG(rating) FROM t_comment WHERE product_id = #{productId}
     </select>
 
     <select id="countByProductId" parameterType="int" resultType="int">

@@ -4,6 +4,8 @@ import java.util.List;
 
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
+import com.pubburi.pub.controller.api.CommentSort;
+import com.pubburi.pub.controller.response.CommentPageResponse;
 import com.pubburi.pub.model.dto.Comment;
 
 public interface CommentService {
@@ -17,6 +19,9 @@ public interface CommentService {
 	List<Comment> getCommentsByProductId(int productId);
 
 	PageResponse<Comment> getCommentsByProductId(int productId, PageCriteria criteria);
+
+	CommentPageResponse<Comment> getCommentsPage(int productId, PageCriteria criteria, CommentSort sort,
+			boolean includeSummary);
 
 	List<Comment> getAllComments();
 

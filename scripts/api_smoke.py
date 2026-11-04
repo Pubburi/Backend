@@ -11,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 
 
 def require_disposable_database(environ, run=subprocess.run):
@@ -726,6 +727,77 @@ def product_feature_contract(environ):
 
 
 
+def comment_rating_contract(environ):
+    """Public review summary/order on this run's authored disposable products only."""
+    require_disposable_database(environ)
+    port = environ.get("PUBBURI_SERVER_PORT", "9987")
+    public = ApiClient(port)
+    user = "ci_admin_" + uuid.uuid4().hex
+    password = uuid.uuid4().hex
+    public.request("POST", "/users", 201, {"id": user, "name": "CI review summary", "pass": password})
+    promote_ci_fixture_admin(environ, user)
+    owner = ApiClient(port)
+    owner.request("POST", "/auth/login", 200, {"id": user, "pass": password})
+    products = []
+    page_fields = {"items", "page", "size", "total", "totalPages", "hasNext"}
+    try:
+        for suffix in ("current", "legacy"):
+            created = owner.request("POST", "/admin/products", 201, {
+                "name": "CI review fixture " + suffix, "type": "맥주", "price": 1000,
+                "img": "ci-review.png", "abv": 5, "orderCount": 0,
+            })["data"]
+            products.append(created["id"])
+        product, legacy = products
+        path = f"/products/{product}/comments"
+        def summary():
+            return public.request("GET", path + "?includeSummary=true", 200)["data"]
+        empty = summary()
+        assert set(empty) == page_fields | {"ratingSummary"}
+        assert empty["ratingSummary"] == {"count": 0, "average": None}
+        ids = []
+        for rating in (4.25, 1.25, 4.25):
+            ids.append(owner.request("POST", "/comments", 201, {"productId": product,
+                "rating": rating, "comment": "Authored review summary"})["data"]["id"])
+        original = public.request("GET", path, 200)["data"]
+        assert set(original) == page_fields and [x["id"] for x in original["items"]] == ids[::-1]
+        middle = public.request("GET", path + "?includeSummary=true&sort=rating_desc&page=2&size=1", 200)["data"]
+        assert [x["id"] for x in middle["items"]] == [ids[0]]
+        assert middle["total"] == 3 and middle["ratingSummary"] == {"count": 3, "average": 3.25}
+        low = public.request("GET", path + "?includeSummary=false&sort=rating_asc&size=1", 200)["data"]
+        assert set(low) == page_fields and low["items"][0]["id"] == ids[1]
+        for query in ("?sort=nope", "?sort=latest&sort=latest", "?includeSummary=TRUE", "?includeSummary=true&includeSummary=true"):
+            public.request("GET", path + query, 400, error_code="BAD_REQUEST")
+        owner.request("PUT", f"/comments/{ids[0]}", 200, {"rating": 3.75, "comment": "Edited summary"})
+        assert summary()["ratingSummary"] == {"count": 3, "average": 3.08}
+        owner.request("DELETE", f"/comments/{ids[1]}", 200)
+        assert summary()["ratingSummary"] == {"count": 2, "average": 4}
+        for id_ in (ids[0], ids[2]):
+            owner.request("DELETE", f"/comments/{id_}", 200)
+        assert summary()["ratingSummary"] == {"count": 0, "average": None}
+        for rating in (.58, .59):
+            owner.request("POST", "/comments", 201, {"productId": product, "rating": rating, "comment": "Stored FLOAT boundary"})
+        boundary = summary()
+        assert [x["rating"] for x in boundary["items"]] == [.59, .58]
+        assert boundary["ratingSummary"] == {"count": 2, "average": .58}
+        # An owned legacy fixture must not loosen POST validation or rewrite imported rows.
+        require_disposable_database(environ)
+        assert re.fullmatch(r"ci_admin_[a-f0-9]{32}", user) and type(legacy) is int and legacy > 0
+        sql = ("INSERT INTO t_comment(user_id,product_id,rating,comment) SELECT id," + str(legacy)
+               + ",5.555,'CI legacy rating' FROM t_user WHERE id=CONVERT(0x" + user.encode().hex()
+               + " USING utf8mb4); SELECT AVG(rating) FROM t_comment WHERE product_id=" + str(legacy))
+        output = subprocess.run(["docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+            "mysql", "-u" + environ["PUBBURI_DB_USER"], "--batch", "--skip-column-names", environ["PUBBURI_DB_NAME"],
+            "--execute", sql], env=dict(environ, MYSQL_PWD=environ["PUBBURI_DB_PASSWORD"]),
+            capture_output=True, text=True, check=True)
+        expected = Decimal(output.stdout.strip()).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+        legacy_page = public.request("GET", f"/products/{legacy}/comments?includeSummary=true", 200)["data"]
+        assert legacy_page["items"][0]["rating"] == 5.555
+        assert Decimal(str(legacy_page["ratingSummary"]["average"])) == expected
+    finally:
+        for product in products:
+            owner.request("DELETE", f"/admin/products/{product}", 200)
+
+
 def product_filter_contract(environ):
     """Mandatory search filters over synthetic, disposable product facts only."""
     require_disposable_database(environ)
@@ -1194,6 +1266,8 @@ def main():
             report["completed"].append("private explicit preferences, soft/hard separation, account isolation and lifecycle")
             favorite_contract(os.environ)
             report["completed"].append("account favorites, idempotent membership, current products and ownership lifecycle")
+            comment_rating_contract(os.environ)
+            report["completed"].append("public whole-review summary, stable rating order, legacy FLOAT precision and unchanged default page")
             search_outbox_contract(os.environ)
             report["completed"].append("transactional product search versions, immutable projections, rollback and retained tombstones")
             print("Packaged HTTP session, validation, order persistence and rollback checks passed.")
