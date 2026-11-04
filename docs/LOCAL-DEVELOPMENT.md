@@ -1,9 +1,9 @@
 # 로컬 통합 실행
 
-확정 목표 DB/영속 계층은 PostgreSQL18.6·JPA(Hibernate)·Flyway다. 현재 아래 통합 기동은 이관 전
-MySQL 기준이며 기존 볼륨을 보존한다. PostgreSQL schema installer는 별도 폐기 검증 DB에서
+확정 목표 DB/영속 계층은 PostgreSQL18.6·JPA(Hibernate)·Flyway다. 옵션을 생략한 통합 기동은 이관 전
+MySQL 기준이며 기존 볼륨을 보존한다. 준비된 소유 PostgreSQL 복사본은 아래 명시 경로로 실행한다. PostgreSQL schema installer는 별도 폐기 검증 DB에서
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
-완료로 간주하거나 현재 기동 도구를 반쪽 PostgreSQL profile로 전환하지 않는다.
+완료로 간주하지 않는다. 기본 스택 전환과 복구 인수는 별도 게이트다.
 
 현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의37경로/44작업은
 별도 [명시 JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
@@ -101,3 +101,58 @@ DB 초기화는 **전용 로컬 DB의 모든 변경을 삭제**한다. 앱을 �
 기본 추천 API는 로컬 추천 서버의 B0를 호출하며 미기동/장애에는 현재 DB의 기본 목록을 제공한다.
 추천 서버는 B0/B1 계약을 제공하지만 통합 실행 성공은 추천 모델·회원 흐름 전체의
 완성을 의미하지 않는다. [개발 계획](DELIVERY-PLAN.md)의 기능별 검증을 별도로 진행한다.
+
+## 준비된 PostgreSQL의 명시 실행·패키징
+
+DB06의 이 경로는 기존37경로/44작업 JPA 제공자를 소유한 로컬 폐기 복사본에서 실행한다.
+DB 설치·source import·ID 예약·기본 DB 전환을 수행하지 않는다. 먼저 [복사/검수](SOURCE-IMPORT.md)와
+[JPA 제공자](JPA-REHEARSAL.md)의 TLS/marker/receipt·최소 runtime 역할 준비를 마친다.
+원본 DB나 운영 DB를 이 도구에 지정하지 않는다. 새 역할/권한 추가는 필요하지 않다.
+
+```bash
+./scripts/local-stack.sh package-pg --output-dir <Backend의 .pubburi 바로 아래 새 release 폴더>
+./scripts/local-stack.sh doctor --provider postgresql --pg-config <비공개 JSON> --release-dir <release 폴더>
+./scripts/local-stack.sh smoke --provider postgresql --pg-config <비공개 JSON> --release-dir <release 폴더>
+./scripts/local-stack.sh up --provider postgresql --pg-config <비공개 JSON> --release-dir <release 폴더>
+```
+
+`package-pg`는 DB 없는 JPA Maven verify 뒤 source commit/현재 입력의 개별 SHA와
+실제 실행 JAR SHA를 완료 manifest에 결속한다. 패키징하는 Java·resource·POM·wrapper 입력은 Git에 커밋된 깨끗한 상태여야 하고 신규 미추적
+입력도 거절한다. 다른 launcher/문서 변경은 허용한다. 출력 폴더는 새 private 폴더여야 하며
+기존 release를 덮어쓰지 않는다. 빌드 실패/중단·입력 변경에는 완료 manifest를 발행하지 않는다.
+이 manifest는 로컬 소스/JAR 동일성 검증이며 서명된 배포나 실제 DB 인수 증명서는 아니다.
+
+설정 파일은 소유자만 읽는 regular JSON(0600 또는0400, symlink 불가)이며 정확히
+`{"schema_version":1,"environment":{...}}` 형식이다. 중복/미지 키·비문자열 값을 거절한다.
+`environment`에는 다음을 모두 문자열로 지정한다. 비밀번호/실제 값은 커밋하거나 공유하지 않는다.
+
+| 키 | 의미 |
+|---|---|
+| `PUBBURI_PG_URL`, `PUBBURI_PG_DB_NAME` | query/userinfo 없는 numeric loopback JDBC URL과 동일한 `*_ci` DB명 |
+| `PUBBURI_PG_USER`, `PUBBURI_PG_PASSWORD` | 기존 최소 runtime 계정, admin/control 자격 금지 |
+| `PUBBURI_PG_RUN_TOKEN`, `PUBBURI_PG_CA` | 해당 DB marker와 공개 TLS CA 파일 |
+| `PUBBURI_PG_CONTAINER_ID`, `PUBBURI_PG_VALIDATION_LABEL` | Running Docker 컨테이너의 정확한 ID/소유 label·loopback 공개 포트 |
+| `PUBBURI_JPA_SOURCE_ID`, `PUBBURI_JPA_REHEARSAL` | 검수 receipt의 canonical UUID, 명시 값 `1` |
+| `PUBBURI_SERVER_PORT`, `PUBBURI_FRONTEND_PORT`, `PUBBURI_RECOMMENDATION_PORT` | 서로 다른 미점유 loopback 앱 포트 |
+
+선택 키는 `PUBBURI_LOG_LEVEL`, `PUBBURI_RECOMMENDATION_BASE_URL`,
+`PUBBURI_SEARCH_ENABLED`/`ENDPOINT`/`INDEX`, `PUBBURI_CONTENT_CATALOG_PATH`/`SHA256`다.
+원격 base URL/엔진은 HTTP numeric loopback만 허용한다. catalog 생략은 원래 UNAVAILABLE이며
+임의 bundle/기존80 자동 fit을 만들지 않는다. 공식 fresh container-DEMO 계약은 그대로다.
+PG 모드는 Backend `.env`를 읽지 않고 상속된 PUBBURI/DB/control·JVM 주입 설정을 제거한다.
+FE에는 앱 포트/`VITE_API_PROXY_TARGET`, Recommendation에는 앱 포트와 공통 도구 경로만 전달한다.
+FE/추천 자식에 DB 자격을 전달하지 않는다. trusted toolchain의 runtime.env 사용은 위와 같다.
+
+실행은 release/소유 CID를 검증하고 같은 로컬 작업 잠금·미점유 포트를 확보한 뒤 복사한 JAR를
+Java17로 먼저 시작한다. 원래 TLS verify-full/SCRAM·PG18.6/UTF8·receipt/source·최소 권한·
+Flyway validate/Hibernate validate·OSIV off 검증을 재사용한다. 준비 실패 시 FE/추천은 시작하지 않는다.
+자기 JVM 기동 로그와 상품 API·OpenAPI37/44를 확인한 뒤 FE/추천 health와 `/api` 프록시를 검사한다.
+`--backend-only`는 doctor/up/smoke/status에서 API release만 확인하는 CI/개별 실행 옵션이며
+세 서버·세션/사용자 흐름 인수가 아니다. `status`도 endpoint 관측이지 프로세스 소유 증명은 아니다.
+
+`smoke` 정상 종료·`up` Ctrl+C/SIGTERM·실패는 이번에 만든 앱 process group만 정리한다.
+private run 폴더에 완료 readiness와 종료 상태·PID 기록을 남기며 로그/설정/JAR는 비공개로 보관한다.
+DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/reset-db는 명시 거절한다.
+불확실한 프로세스 정리에는 기존 잠금을 남긴다. 강제 종료 뒤 잠금/프로세스를 확인하지 않고
+지우거나 다른 실행을 인계받지 않는다. 실제 release·소유/중단·세 서버 검증과 남은 cutover/rollback은
+[DB06 증가분 기록](plans/2026-11-04-postgresql-local-release.md)으로 구분한다.

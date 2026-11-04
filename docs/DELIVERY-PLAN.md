@@ -73,6 +73,10 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
 원본/업무 재인수·relay·cutover 완료와 구분한다.
 
+DB06의 [명시 local release 실행](plans/2026-11-04-postgresql-local-release.md)은 준비된 copied PG와
+현재 JPA37/44 JAR를 source/완료 manifest로 고정해 로컬에서 실행하는 증가분이다. 기본 MySQL은
+유지하며 실제 전환·cutover 후 쓰기의 역이관/rollback·전체 서비스 재인수는 후속 게이트다.
+
 ## 검색·추천 연동
 
 [검색 계획](SEARCH-PLAN.md)의 Backend 담당 S01–S05를 구현한다. OpenSearch는 로컬 Docker의

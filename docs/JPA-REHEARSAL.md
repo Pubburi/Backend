@@ -1,8 +1,11 @@
 # PostgreSQL·JPA 계정/프로필·매장·상품·주문·후기 제공자
 
 `tools/jpa-rehearsal`은 PostgreSQL18.6에 복사한 데이터로 실제 로그인·계정/프로필·매장 CRUD·상품/특성 읽기를
-실행하고 상품/특성 쓰기와 같은 TX의 version/outbox/delivery를 생산하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 통합 로컬 스택은 현재
+실행하고 상품/특성 쓰기와 같은 TX의 version/outbox/delivery를 생산하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 옵션을 생략한 통합 로컬 스택은 현재
 MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 DB03 전환 완료로 표시하지 않는다.
+
+준비된 copied PG는 [명시 local release 실행](LOCAL-DEVELOPMENT.md#준비된-postgresql의-명시-실행패키징)으로
+패키징/세 서버에 연결할 수 있다. installer/import·기본 스택 전환과 구분하며 기존 runtime 최소 권한을 유지한다.
 
 ## 제공하는 계약
 
