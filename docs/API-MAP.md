@@ -108,6 +108,18 @@ sourceName은 알려진 값/빈 배열 검수에도 필요하지만 권리 승�
 - `DELETE /api/comments/{id}`: 댓글 삭제
 - `GET /api/admin/comments?page=1&size=20`: 관리자 댓글 목록
 
+공개 상품 후기 GET은 `sort=latest|rating_desc|rating_asc`를 받는다. 생략/latest는 기존 ID 내림차순,
+평점순의 동점은 ID 내림차순이다. `includeSummary=true`일 때만 기존 여섯 페이지 필드에
+`ratingSummary:{count,average}`를 더한다. 생략/false는 기존 여섯 필드와 후기 다섯 필드를 그대로
+유지한다. 두 옵션은 한 번만 허용하며 잘못된 값·중복은400이다. 관리자 목록에는 적용하지 않는다.
+
+count는 해당 상품의 전체 후기 수(total)이며 average도 현재 페이지가 아닌 전체 저장 FLOAT/REAL의
+SQL AVG다. 유한 집계를 BigDecimal로 변환해 소수 둘째자리 HALF_UP으로 표시하고 저장된 후기
+값을 변경·범위 필터·clamp하지 않는다. 부동소수 저장 오차가 반올림 경계에 영향을 줄 수 있다.
+0건일 때만 average=null이고, 비어 있지 않은 집계의 비유한/잘못된 값은500이다. items/total/평균은
+하나의 read-only REPEATABLE READ snapshot에서 읽는다. page/size 정규화·없는 상품의 빈200은
+보존하고 int OFFSET을 넘는 페이지는400으로 거절한다. 맛 태그·구매확인·전체 F04 인수는 후속이다.
+
 ## Orders
 
 - `POST /api/orders`: 주문 생성

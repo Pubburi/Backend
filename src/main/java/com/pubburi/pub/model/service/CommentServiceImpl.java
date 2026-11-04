@@ -4,9 +4,15 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
+import com.pubburi.pub.controller.api.CommentSort;
+import com.pubburi.pub.controller.response.CommentPageResponse;
+import com.pubburi.pub.controller.response.CommentRatingSummary;
 import com.pubburi.pub.model.dao.CommentDao;
 import com.pubburi.pub.model.dto.Comment;
 
@@ -32,8 +38,25 @@ public class CommentServiceImpl implements CommentService {
 		if (productId <= 0) {
 			return PageResponse.of(List.of(), criteria, 0);
 		}
-		List<Comment> comments = commentDao.selectByProductIdPaged(productId, criteria.size(), criteria.offset());
+		List<Comment> comments = commentDao.selectByProductIdPaged(productId, criteria.size(), criteria.offset(), CommentSort.LATEST);
 		return PageResponse.of(comments, criteria, commentDao.countByProductId(productId));
+	}
+
+	@Override
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+	public CommentPageResponse<Comment> getCommentsPage(int productId, PageCriteria criteria, CommentSort sort,
+			boolean includeSummary) {
+		if ((long) (criteria.page() - 1) * criteria.size() > Integer.MAX_VALUE) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Review page offset is too large");
+		}
+		if (productId <= 0) {
+			return CommentPageResponse.from(PageResponse.of(List.of(), criteria, 0),
+					includeSummary ? CommentRatingSummary.from(0, null) : null);
+		}
+		var comments = commentDao.selectByProductIdPaged(productId, criteria.size(), criteria.offset(), sort);
+		int count = commentDao.countByProductId(productId);
+		var summary = includeSummary ? CommentRatingSummary.from(count, commentDao.averageRatingByProductId(productId)) : null;
+		return CommentPageResponse.from(PageResponse.of(comments, criteria, count), summary);
 	}
 
 	@Override

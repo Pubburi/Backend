@@ -16,17 +16,24 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pubburi.pub.controller.api.ApiResponse;
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
+import com.pubburi.pub.controller.api.CommentSort;
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.controller.request.CommentCreateRequest;
 import com.pubburi.pub.controller.request.CommentUpdateRequest;
 import com.pubburi.pub.controller.response.CommentResponse;
+import com.pubburi.pub.controller.response.CommentPageResponse;
 import com.pubburi.pub.controller.response.ResponseMapper;
 import com.pubburi.pub.model.dto.Comment;
 import com.pubburi.pub.model.service.CommentService;
 
 import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 @RestController
 @RequestMapping("/api")
@@ -41,11 +48,25 @@ public class CommentRestController {
 	}
 
 	@GetMapping("/products/{productId}/comments")
-	public ResponseEntity<ApiResponse<PageResponse<CommentResponse>>> comments(@PathVariable int productId,
-			@RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
-		PageResponse<CommentResponse> comments = commentService
-				.getCommentsByProductId(productId, PageCriteria.of(page, size, 10)).map(ResponseMapper::comment);
+	@Operation(parameters = {
+		@Parameter(name = "sort", in = ParameterIn.QUERY, schema = @Schema(allowableValues = {"latest", "rating_desc", "rating_asc"}), description = "Default latest; equal ratings use descending ID. Repeated values return 400."),
+		@Parameter(name = "includeSummary", in = ParameterIn.QUERY, schema = @Schema(type = "boolean"), description = "Exact true adds ratingSummary for all reviews, not only this page. Omitted/false keeps the original six fields. Repeated or malformed values return 400.")})
+	public ResponseEntity<ApiResponse<CommentPageResponse<CommentResponse>>> comments(@PathVariable int productId,
+			@RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
+			HttpServletRequest request) {
+		var sort = CommentSort.fromQuery(request.getParameterValues("sort"));
+		boolean includeSummary = includeSummary(request.getParameterValues("includeSummary"));
+		var comments = commentService
+				.getCommentsPage(productId, PageCriteria.of(page, size, 10), sort, includeSummary).map(ResponseMapper::comment);
 		return ResponseEntity.ok(ApiResponse.ok(comments));
+	}
+
+	private static boolean includeSummary(String[] values) {
+		if (values == null) return false;
+		if (values.length == 1 && (values[0].equals("true") || values[0].equals("false"))) {
+			return values[0].equals("true");
+		}
+		throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid review summary option");
 	}
 
 	@PostMapping("/comments")

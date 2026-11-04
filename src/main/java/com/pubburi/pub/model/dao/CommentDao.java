@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import com.pubburi.pub.controller.api.CommentSort;
 import com.pubburi.pub.model.dto.Comment;
 
 public interface CommentDao {
@@ -16,9 +17,11 @@ public interface CommentDao {
 	List<Comment> selectByProductId(int productId);
 
 	List<Comment> selectByProductIdPaged(@Param("productId") int productId, @Param("limit") int limit,
-			@Param("offset") int offset);
+			@Param("offset") int offset, @Param("sort") CommentSort sort);
 
 	int countByProductId(int productId);
+
+	Double averageRatingByProductId(int productId);
 
 	List<Comment> selectAll();
 
