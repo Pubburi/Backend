@@ -85,6 +85,11 @@ chunked/redirect·partial receipt, 정상/오류/SIGTERM/timeout의 소유 자�
 자기 engine/CID/label·volume만 정리하며 cleanup 실패를 성공으로 숨기지 않는다. 실험의 lease 대기·
 파서 소비량·CI 시간·테스트 수를 서비스 성능/운영 SLA로 해석하지 않는다.
 
+본인 B1 family opt-in은 기본 거절/명시 허용·정확한 scope/evidence/origin 조합·혼합 scope와
+알려진 용량/설명/태그 거절·핀/만료·기존 container 호환을 확인한다. Spring 설정과 실제 loader를
+연결하고, 실제 JPA는 현재 unknown 필드·기존4필드/새 scope·원격 뒤 변경409를 기존 수명 회귀에 더한다.
+공식 fresh bundle/실제 Recommendation·웹 인수는 이 consumer fixture와 구분한다.
+
 ## 결과물과 개인정보
 
 원본 snapshot/원문 SQL·통합 XML/서버 로그·CA private key·.env·계정 hash는 업로드하지 않는다.

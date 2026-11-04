@@ -10,7 +10,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public record ContentRecommendationResponse(Source source, CatalogScope catalogScope,
         @Schema(types={"object","null"}) Result result,List<ProductResponse> products) {
     public enum Source { PROVIDER, UNAVAILABLE }
-    public enum CatalogScope { REVIEWED_DEMO }
+    public enum CatalogScope { REVIEWED_DEMO, REVIEWED_FAMILY_BROWSE_DEMO }
     public static ContentRecommendationResponse unavailable(){return new ContentRecommendationResponse(Source.UNAVAILABLE,CatalogScope.REVIEWED_DEMO,null,List.of());}
     @Schema(name="ContentRecommendationResult",requiredProperties={"algorithm","fit_scope","representation_fitted","model_fingerprint","items","eligible_count","supported_profile_tokens","unknown_profile_tokens","active_numeric_preferences","fallback_reason"})
     public record Result(String algorithm,@JsonProperty("fit_scope") String fitScope,

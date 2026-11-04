@@ -48,7 +48,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
     def test_duplicate_unknown_nonfinite_nonstring_and_shared_ports_fail(self):
         for mutation in ({'PUBBURI_PG_ADMIN_PASSWORD':'no'}, {'JAVA_TOOL_OPTIONS':'-Dsecret=no'},
                          {'SPRING_DATASOURCE_URL':'remote'}, {'PUBBURI_SERVER_PORT':True},
-                         {'PUBBURI_FRONTEND_PORT':'15001'}, {'PUBBURI_RECOMMENDATION_BASE_URL':'https://remote.invalid'}, {'PUBBURI_SEARCH_ENDPOINT':'http://127.0.0.1:9200/private'}, {'PUBBURI_JPA_REHEARSAL':'0'}):
+                         {'PUBBURI_FRONTEND_PORT':'15001'}, {'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED':'yes'}, {'PUBBURI_RECOMMENDATION_BASE_URL':'https://remote.invalid'}, {'PUBBURI_SEARCH_ENDPOINT':'http://127.0.0.1:9200/private'}, {'PUBBURI_JPA_REHEARSAL':'0'}):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 with self.assertRaises(RuntimeError):pg.configuration(self.config(Path(temporary), dict(self.env(), **mutation)))
         for text in ('{"a":1,"a":2}', '{"a":NaN}', '{"a":1} true'):
@@ -63,8 +63,9 @@ class PostgreSQLLocalTests(unittest.TestCase):
     def test_three_children_receive_only_their_owned_runtime_settings(self):
         with patch.dict(os.environ, {'PATH':'/tools','PGPASSWORD':'control','PUBBURI_DB_ROOT_PASSWORD':'root',
                 'PUBBURI_CONTENT_CATALOG_PATH':'inherited-private-file'}, clear=True):
-            backend, frontend, recommendation = pg.child_environments(self.env())
+            backend, frontend, recommendation = pg.child_environments(dict(self.env(),PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED='true'))
         self.assertEqual(backend['PUBBURI_PG_PASSWORD'],'runtime-secret')
+        self.assertEqual(backend['PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED'],'true')
         self.assertEqual(backend['PUBBURI_JPA_PORT'],'15001')
         self.assertEqual(frontend,{'PATH':'/tools','PUBBURI_FRONTEND_PORT':'15002','VITE_API_PROXY_TARGET':'http://127.0.0.1:15001'})
         self.assertEqual(recommendation,{'PATH':'/tools','PUBBURI_RECOMMENDATION_PORT':'15003'})

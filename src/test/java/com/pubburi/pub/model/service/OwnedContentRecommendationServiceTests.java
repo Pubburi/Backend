@@ -25,4 +25,17 @@ class OwnedContentRecommendationServiceTests {
         when(snapshots.read("own","epoch",catalog.ids())).thenThrow(new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED));assertThatThrownBy(()->service.recommend("own","epoch",4)).isInstanceOf(ResponseStatusException.class);
         doThrow(new IllegalStateException("DB failure")).when(snapshots).read("own","epoch",catalog.ids());assertThatThrownBy(()->service.recommend("own","epoch",4)).isInstanceOf(IllegalStateException.class);
     }
+    @Test void approvedFamilyKeepsUnknownFactsAndOnlyProviderUsesTheExplicitBrowseScope()throws Exception{
+        var catalog=PinnedContentCatalog.validate(ContentFixtures.familyBundle(),"c".repeat(64),ContentFixtures.NOW,true);
+        var snapshots=mock(OwnedContentSnapshotService.class);when(snapshots.read("own","epoch",catalog.ids())).thenReturn(snapshot(catalog));
+        var service=new OwnedContentRecommendationService(snapshots,()->Optional.of(catalog),(c,p,l)->{
+            assertThat(c.at("/0/volume_ml").isNull()).isTrue();assertThat(c.at("/0/taste_tags").isNull()).isTrue();
+            try{return Optional.of(ContentFixtures.response());}catch(Exception invalid){throw new AssertionError(invalid);}
+        },ContentFixtures.JSON);
+        var result=service.recommend("own","epoch",4);assertThat(result.catalogScope().name()).isEqualTo("REVIEWED_FAMILY_BROWSE_DEMO");
+        assertThat(result.products()).extracting(ProductResponse::id).containsExactly(81);
+        var unavailable=new OwnedContentRecommendationService(snapshots,()->Optional.of(catalog),(c,p,l)->Optional.empty(),ContentFixtures.JSON).recommend("own","epoch",4);
+        assertThat(unavailable.catalogScope().name()).isEqualTo("REVIEWED_DEMO");assertThat(unavailable.result()).isNull();assertThat(unavailable.products()).isEmpty();
+    }
+
 }

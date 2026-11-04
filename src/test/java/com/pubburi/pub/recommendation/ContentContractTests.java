@@ -37,4 +37,58 @@ class ContentContractTests {
         var bundle=ContentFixtures.twoBundle();var response=ContentFixtures.response();response.put("eligible_count",2);var second=response.withArray("items").get(0).deepCopy();second.withObject("").put("product_id",82).put("score",0);second.withObject("").putArray("reasons").add("available").add("no_shared_features");second.withObject("").putArray("contributions");var explanation=second.withObject("/explanation");explanation.put("basis","no_shared_features");explanation.putArray("score_evidence");explanation.put("total_positive_contributions",0);response.withArray("items").add(second);
         var result=new ContentContract(ContentFixtures.JSON).validate(response,bundle.path("catalog"),ContentFixtures.preferences(),4);assertThat(result.items()).hasSize(2);assertThat(result.items().get(1).score()).isEqualByComparingTo("0");assertThat(result.fallbackReason()).isNull();assertThat(result.items().get(1).explanation().path("score_evidence")).isEmpty();
     }
+    @Test void familyIsExplicitOptInAndOnlyTheFivePublishedScopeOriginEvidenceCombinationsAreAccepted()throws Exception{
+        var family=ContentFixtures.familyBundle();
+        assertThatThrownBy(()->PinnedContentCatalog.validate(family,"c".repeat(64),ContentFixtures.NOW)).isInstanceOf(IllegalArgumentException.class);
+        var approved=PinnedContentCatalog.validate(family,"c".repeat(64),ContentFixtures.NOW,true);
+        assertThat(approved.scope().name()).isEqualTo("REVIEWED_FAMILY_BROWSE_DEMO");
+        assertThat(approved.catalog().get(0).path("volume_ml").isNull()).isTrue();
+        for(String key:List.of("volumeMl","description","tasteTags","aromaTags"))assertThat(approved.bindings().get(81).features().path(key).isNull()).isTrue();
+        family.withObject("/checked_export").put("evidence_kind","reviewed_public_source").put("snapshot_origin","owned_family_browse_demo");
+        assertThat(PinnedContentCatalog.validate(family,"c".repeat(64),ContentFixtures.NOW,true).scope()).isEqualTo(approved.scope());
+        for(String origin:List.of("demo_fixture","owned_demo_fixture","existing_local_catalog","http_read","authored")){
+            var wrong=family.deepCopy();wrong.withObject("/checked_export").put("snapshot_origin",origin);
+            assertThatThrownBy(()->PinnedContentCatalog.validate(wrong,"c".repeat(64),ContentFixtures.NOW,true)).isInstanceOf(IllegalArgumentException.class);
+        }
+        for(String origin:List.of("demo_fixture","owned_demo_fixture","existing_local_catalog")){
+            var container=ContentFixtures.bundle();container.withObject("/checked_export").put("snapshot_origin",origin).put("evidence_kind",origin.equals("existing_local_catalog")?"reviewed_public_source":"authored_regression_fixture");
+            assertThat(PinnedContentCatalog.validate(container,"c".repeat(64),ContentFixtures.NOW,true).scope().name()).isEqualTo("REVIEWED_DEMO");
+        }
+    }
+    @Test void familyScopeCannotMixWithContainerEligibilityOrKnownInventedFactsAndStillUsesFreshPins()throws Exception{
+        var root=ContentFixtures.familyBundle();
+        for(Consumer<ObjectNode> mutation:List.<Consumer<ObjectNode>>of(
+            v->v.withObject("/records/0").put("eligibility_scope","public_browse_row_exists"),
+            v->v.withObject("/checked_export").put("data_scope","reviewed_mapped_business_demo_only"),
+            v->v.withObject("/checked_export").put("snapshot_origin","owned_demo_fixture"),
+            v->v.withObject("/checked_export").put("snapshot_origin","owned_family_browse_demo"),
+            v->{v.withObject("/catalog/0").put("volume_ml",750);v.withObject("/records/0/features/data").put("volumeMl",750);},
+            v->v.withObject("/records/0/features/data").put("description","invented"),
+            v->v.withObject("/records/0/features/data").putArray("tasteTags"),
+            v->v.withObject("/records/0/features/data").putArray("aromaTags"),
+            v->v.withObject("/catalog/0").putArray("taste_tags"),
+            v->v.withObject("/catalog/0").putArray("aroma_tags"),
+            v->v.withObject("/catalog/0").put("abv_percent",5.2),
+            v->{v.withObject("/catalog/0").putNull("abv_percent");v.withObject("/records/0/product/data").putNull("abv");},
+            v->v.put("valid_until_utc",ContentFixtures.NOW.minusSeconds(1).toString()))) {
+            var wrong=root.deepCopy();mutation.accept(wrong);
+            assertThatThrownBy(()->PinnedContentCatalog.validate(wrong,"c".repeat(64),ContentFixtures.NOW,true)).isInstanceOf(IllegalArgumentException.class);
+        }
+        Path file=directory.resolve("family.json");byte[] bytes=ContentFixtures.JSON.writeValueAsBytes(root);Files.write(file,bytes);
+        String sha=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));var clock=Clock.fixed(ContentFixtures.NOW,ZoneOffset.UTC);
+        assertThat(new PinnedContentCatalog(file.toString(),sha,ContentFixtures.JSON,clock,true).current()).isPresent();
+        assertThat(new PinnedContentCatalog(file.toString(),sha,ContentFixtures.JSON,clock).current()).isEmpty();
+        Files.writeString(file," "+Files.readString(file));assertThat(new PinnedContentCatalog(file.toString(),sha,ContentFixtures.JSON,clock,true).current()).isEmpty();
+    }
+    @Test void springConfigurationDefaultsToContainerOnlyAndRequiresTheExactFamilyOptInProperty()throws Exception{
+        var root=ContentFixtures.familyBundle();var now=Instant.now();root.put("valid_until_utc",now.plusSeconds(240).toString());
+        root.withObject("/checked_export").put("checked_at_utc",now.minusSeconds(5).toString()).put("original_export_at_utc",now.minusSeconds(10).toString());
+        Path file=directory.resolve("configured-family.json");byte[] bytes=ContentFixtures.JSON.writeValueAsBytes(root);Files.write(file,bytes);String sha=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        var runner=new org.springframework.boot.test.context.runner.ApplicationContextRunner().withUserConfiguration(com.pubburi.pub.config.RecommendationConfig.class)
+            .withBean(com.fasterxml.jackson.databind.ObjectMapper.class,()->ContentFixtures.JSON)
+            .withPropertyValues("pubburi.recommendation.base-url=http://127.0.0.1:1","pubburi.recommendation.content-catalog-path="+file,"pubburi.recommendation.content-catalog-sha256="+sha);
+        runner.run(context->assertThat(context.getBean(ContentCatalogSource.class).current()).isEmpty());
+        runner.withPropertyValues("pubburi.recommendation.content-family-browse-demo-enabled=true").run(context->assertThat(context.getBean(ContentCatalogSource.class).current()).hasValueSatisfying(c->assertThat(c.scope().name()).isEqualTo("REVIEWED_FAMILY_BROWSE_DEMO")));
+    }
+
 }

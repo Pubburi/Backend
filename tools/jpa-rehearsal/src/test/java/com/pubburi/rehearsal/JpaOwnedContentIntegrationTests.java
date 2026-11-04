@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 import com.pubburi.pub.controller.response.UserPreferencesResponse;
+import com.pubburi.pub.controller.response.ContentRecommendationResponse.CatalogScope;
 import com.pubburi.pub.model.service.OwnedContentSnapshotService;
 import com.pubburi.pub.recommendation.*;
 import com.sun.net.httpserver.*;
@@ -38,8 +39,8 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
     @AfterAll static void close(){if(remote!=null)remote.close();}
     class Fixture implements AutoCloseable {
         final java.net.http.HttpClient admin=loggedIn("ADMIN");final String user=join();final java.net.http.HttpClient owner=login(user,password);final List<Integer> ids=new ArrayList<>();
-        Fixture()throws Exception{try{for(int i=0;i<2;i++){var body=new HashMap<String,Object>(product(ownName(),1000+i*1000));body.put("type",i==0?"맥주":"증류주");body.put("abv",i*10);var created=request(admin,"POST","/api/admin/products",body);assertEquals(201,created.status());int id=created.body().at("/data/id").intValue();ids.add(id);assertEquals(200,request(admin,"PUT","/api/admin/products/"+id+"/features",Map.of("volumeMl",750-i*250,"tasteTags",i==0?List.of("a,b","line\nx"):List.of(),"aromaTags",List.of(),"sourceName","Authored B1 consumer fixture")).status());}bind();}catch(Throwable error){close();throw error;}}
-        void bind()throws Exception{var catalog=json.createArrayNode();var bindings=new LinkedHashMap<Integer,ContentCatalogSource.Binding>();for(int id:ids){var p=request(owner,"GET","/api/products/"+id,null).body().path("data");var f=request(owner,"GET","/api/products/"+id+"/features",null).body().path("data");var row=catalog.addObject();row.put("product_id",id);row.put("available",true);row.put("sku_group","authored-"+id);row.set("category",p.get("type"));row.set("price_krw",p.get("price"));row.set("abv_percent",p.get("abv"));row.set("volume_ml",f.get("volumeMl"));row.putNull("taste_tags");row.putNull("aroma_tags");bindings.put(id,new ContentCatalogSource.Binding(id,p.deepCopy(),f.deepCopy()));}source.value.set(Optional.of(new ContentCatalogSource.Catalog(catalog,Collections.unmodifiableMap(bindings),Instant.now().plusSeconds(300),"d".repeat(64))));}
+        Fixture()throws Exception{try{for(int i=0;i<2;i++){var body=new HashMap<String,Object>(product(ownName(),1000+i*1000));body.put("type",i==0?"맥주":"증류주");body.put("abv",i*10);var created=request(admin,"POST","/api/admin/products",body);assertEquals(201,created.status());int id=created.body().at("/data/id").intValue();ids.add(id);assertEquals(200,request(admin,"PUT","/api/admin/products/"+id+"/features",Map.of("volumeMl",750-i*250,"tasteTags",i==0?List.of("a,b","line\nx"):List.of(),"aromaTags",List.of(),"sourceName","Authored B1 consumer fixture")).status());}bind(CatalogScope.REVIEWED_DEMO);}catch(Throwable error){close();throw error;}}
+        void bind(CatalogScope scope)throws Exception{var catalog=json.createArrayNode();var bindings=new LinkedHashMap<Integer,ContentCatalogSource.Binding>();for(int id:ids){var p=request(owner,"GET","/api/products/"+id,null).body().path("data");var f=request(owner,"GET","/api/products/"+id+"/features",null).body().path("data");var row=catalog.addObject();row.put("product_id",id);row.put("available",true);row.put("sku_group","authored-"+id);row.set("category",p.get("type"));row.set("price_krw",p.get("price"));row.set("abv_percent",p.get("abv"));row.set("volume_ml",f.get("volumeMl"));row.putNull("taste_tags");row.putNull("aroma_tags");bindings.put(id,new ContentCatalogSource.Binding(id,p.deepCopy(),f.deepCopy()));}source.value.set(Optional.of(new ContentCatalogSource.Catalog(catalog,Collections.unmodifiableMap(bindings),Instant.now().plusSeconds(300),"d".repeat(64),scope)));}
         @Override public void close(){source.value.set(Optional.empty());try{for(int id:ids){var deleted=request(admin,"DELETE","/api/admin/products/"+id,null);assertTrue(deleted.status()==200 || deleted.status()==404);}clean(control(),user,null,List.of());}catch(Exception error){throw new IllegalStateException(error);}}
     }
     @Test void strictPrivateInputAndOnlyTheCurrentAccountSnapshotReachTheCheckedCatalog()throws Exception{
@@ -49,6 +50,24 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             assertEquals(Set.of("catalog","preferences","constraints","limit","include_explanations"),keys(remote.last.get()));assertEquals(f.ids,remote.last.get().path("catalog").findValues("product_id").stream().map(JsonNode::intValue).toList());assertEquals("NOT_STARTED",remote.last.get().at("/preferences/surveyStatus").textValue());assertEquals(4,remote.last.get().path("limit").intValue());assertTrue(remote.last.get().path("include_explanations").booleanValue());assertNull(remote.cookie.get());assertNull(remote.authorization.get());assertEquals(Boolean.FALSE,observed.inside.get());
             int calls=remote.calls.get();for(String body:List.of("{\"userId\":\"other\"}","{\"profile\":{}}","{\"preferences\":{}}","{\"catalog\":[]}","{\"limit\":true}","{\"limit\":\"1\"}","{\"limit\":1.0}","{\"limit\":null}","{\"limit\":0}","{\"limit\":13}"))assertEquals(400,request(f.owner,"POST",PATH,body).status());assertEquals(400,request(f.owner,"POST",PATH+"?userId=other",Map.of()).status());assertEquals(calls,remote.calls.get());
             source.value.set(Optional.empty());var unavailable=request(f.owner,"POST",PATH,Map.of());assertEquals(200,unavailable.status());assertEquals("UNAVAILABLE",unavailable.body().at("/data/source").textValue());assertTrue(unavailable.body().at("/data/result").isNull());assertEquals(0,unavailable.body().at("/data/products").size());assertEquals(calls,remote.calls.get());assertEquals(state,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
+        }
+    }
+    @Test void familyBrowseKeepsUnknownFactsAndRechecksThemAfterRemoteWithoutChangingTheExistingWire()throws Exception{
+        try(var f=new Fixture()){
+            for(int id:f.ids)assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+id+"/features",Map.of("sourceName","Authored family-browse fixture")).status());
+            f.bind(CatalogScope.REVIEWED_FAMILY_BROWSE_DEMO);
+            var account=accountState(control(),f.user);var identity=sourceIdentity(control());
+            var result=request(f.owner,"POST",PATH,Map.of());assertEquals(200,result.status());
+            assertEquals(Set.of("source","catalogScope","result","products"),keys(result.body().path("data")));
+            assertEquals("PROVIDER",result.body().at("/data/source").textValue());assertEquals("REVIEWED_FAMILY_BROWSE_DEMO",result.body().at("/data/catalogScope").textValue());
+            for(var candidate:remote.last.get().path("catalog"))for(String key:List.of("volume_ml","taste_tags","aroma_tags"))assertTrue(candidate.path(key).isNull());
+            for(var product:result.body().at("/data/products")){int id=product.path("id").intValue();assertEquals(request(f.owner,"GET","/api/products/"+id,null).body().path("data"),product);}
+            remote.handler.set((exchange,body)->{
+                assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+f.ids.get(0)+"/features",Map.of("sourceName","Changed authored family fixture","description","Now known")).status());
+                remote.reply(exchange,200,zero(body));
+            });
+            assertEquals(409,request(f.owner,"POST",PATH,Map.of()).status());assertEquals(Boolean.FALSE,observed.inside.get());
+            assertEquals(account,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
         }
     }
     @Test void storedZeroUnknownAndHardBoundsRemainExactAndTamperedFactsNeverBecomeRecommendations()throws Exception{
