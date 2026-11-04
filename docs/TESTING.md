@@ -163,6 +163,21 @@ CI artifact로 업로드하지 않는다. 소유 앱/상품만 finally 정리하
 [공개 검색 기록](plans/2026-11-04-public-search-fallback.md)의 실제 MySQL/PG·원본 투영 감사와
 첫 미보존 RAM 비교의 한계는 fixture 단위/운영 데이터 보호 성과와 구분한다.
 
+`JpaOwnedContentIntegrationTests`는 본인 B1 caller의 새5개 실제 PG 회귀다. 기존84와 합쳐
+89통합·단위3/준비2 skip을 구분한다. 직접 작성 HTTP fixture로 strict 입력·DEMO·현재 본인
+null/[]/0/hard·정상 빈 결과·변조/초과/redirect를 검증한다. 원격 대기 중 취향/가격/특성/삭제·
+credential/삭제재가입/로그아웃/다른 로그인·이름만 변경의409/401/200을 구분하며 외부 TX를
+유지하지 않는다. 두 mapped 상품의 snapshot은5개 고정 scalar batch 질의이고, 상품/특성 사이
+실제 별도 commit에서도 RR을 유지한다. 정확 t_product SELECT만 일시 회수해 원격 전/후 DB500을
+확인하고 finally 기존 권한을 복원한다. 실제 Recommendation 연결은 이 HTTP fixture와 별도다.
+
+새 경로는37/44 strict OpenAPI·POST 전용·limit만1–12·query 선택자 없음·PROVIDER/UNAVAILABLE·
+REVIEWED_DEMO·현재 products/result를 검사한다. 기존 packaged JPA/기본 MySQL 취향 회귀에는
+미설정 bundle의 전송 없는 UNAVAILABLE과 입력/소유 불변 검증을 더한다. source bundle은 공식
+producer·전체 SHA/정확 origin-scope/순서·known volume/unknown 태그·유효기한을 검사하고
+권위/모델을 Java에서 재생성하지 않는다. [본인 B1 기록](plans/2026-11-04-owned-content-recommendations.md)은
+공식 bundle/실제 B1·현재 DB 인수와 초기 하네스/권한 전제 실패를 구분한다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.

@@ -4,6 +4,7 @@ import com.pubburi.pub.controller.api.*;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.ProductFeatures;
 import com.pubburi.pub.model.dto.ProductFeatureTag;
+import com.pubburi.pub.model.dto.ProductFeatureTagRow;
 import jakarta.persistence.*;
 import jakarta.persistence.criteria.*;
 import java.util.*;
@@ -73,13 +74,25 @@ public class JpaProductQueries {
 
     public ProductFeatures featureHeader(int id) {
         if(id<=0)return null;
+        return featureHeaders(List.of(id)).stream().findFirst().orElse(null);
+    }
+
+    public List<ProductFeatures> featureHeaders(List<Integer> ids) {
+        if(ids.isEmpty())return List.of();
         var rows=entityManager.createQuery("""
             select new com.pubburi.rehearsal.persistence.ProductFeatureView(p.id,f.volumeMl,f.description,
               coalesce(f.tasteKnown,false),coalesce(f.aromaKnown,false),f.sourceName,f.sourceUrl,f.sourceNote)
-            from RehearsalProduct p left join RehearsalProductFeature f on f.productId=p.id where p.id=:id
-            """,ProductFeatureView.class).setParameter("id",id).getResultList();
-        if(rows.isEmpty())return null;
-        return rows.get(0).dto();
+            from RehearsalProduct p left join RehearsalProductFeature f on f.productId=p.id where p.id in :ids
+            """,ProductFeatureView.class).setParameter("ids",ids).getResultList();
+        return rows.stream().map(ProductFeatureView::dto).toList();
+    }
+
+    public List<ProductFeatureTagRow> tagsByProductIds(List<Integer> ids) {
+        if(ids.isEmpty())return List.of();
+        return entityManager.createQuery("""
+            select new com.pubburi.pub.model.dto.ProductFeatureTagRow(t.productId,t.kind,t.tag)
+            from RehearsalProductTag t where t.productId in :ids
+            """,ProductFeatureTagRow.class).setParameter("ids",ids).getResultList();
     }
 
     public List<ProductFeatureTag> tags(int id) {

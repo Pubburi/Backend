@@ -136,6 +136,8 @@ class ProductFeatureServiceTests {
 			return unknown;
 		}
 		@Override public List<ProductFeatureTag> selectTags(int id) { return List.copyOf(tags); }
+		@Override public List<ProductFeatures> selectByProductIds(List<Integer> ids) { return ids.stream().map(this::selectByProductId).filter(java.util.Objects::nonNull).toList(); }
+		@Override public List<com.pubburi.pub.model.dto.ProductFeatureTagRow> selectTagsByProductIds(List<Integer> ids) { return ids.stream().flatMap(id->selectTags(id).stream().map(tag->new com.pubburi.pub.model.dto.ProductFeatureTagRow(id,tag.kind(),tag.tag()))).toList(); }
 		@Override public int upsert(ProductFeatures features) {
 			events.add("upsert-header"); stored = features; return 1;
 		}

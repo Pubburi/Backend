@@ -5,10 +5,15 @@ MySQL 기준이며 기존 볼륨을 보존한다. PostgreSQL schema installer는
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
 완료로 간주하거나 현재 기동 도구를 반쪽 PostgreSQL profile로 전환하지 않는다.
 
-현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구의36경로/43작업은
+현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의37경로/44작업은
 별도 [명시 JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
 copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 아래 기본 스택은 바꾸지 않는다.
 검증한 범위의 웹 연결은 가능하지만 기본 MySQL runtime/전체 cutover·복구 인수 완료와 구분한다.
+
+본인 B1은 [공급 계약](CONTENT-RECOMMENDATIONS.md)의 공식 fresh container-DEMO bundle을
+운영자가 path/SHA로 고정할 때만 전송한다. 기본 빈 설정은 원본80 자동 fit 없이 UNAVAILABLE이며
+기존 공개 B0/R06/상품 검색·기본 MySQL 기동은 그대로다. 실제 원천/권리 검증·fresh 발행은
+Recommendation 정본 도구를 사용하고 Backend가 임의 catalog를 만들어 대신 승인하지 않는다.
 
 공개 상품 검색의 명시 엔진 읽기는 [검색 계약](PRODUCT-SEARCH.md)의 세 환경변수로만 켠다.
 기본 false는 DB 조회를 유지하며 별도 준비한 source-bound 물리 index와 현재 DB 결과를 대조한다.
