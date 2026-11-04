@@ -151,8 +151,8 @@ Flyway validate/Hibernate validate·OSIV off 검증을 재사용한다. 준비 �
 세 서버·세션/사용자 흐름 인수가 아니다. `status`도 endpoint 관측이지 프로세스 소유 증명은 아니다.
 
 `smoke` 정상 종료·`up` Ctrl+C/SIGTERM·실패는 이번에 만든 앱 process group만 정리한다.
-private run 폴더에 완료 readiness와 종료 상태·PID 기록을 남기며 로그/설정/JAR는 비공개로 보관한다.
+기동 상태는 터미널과 실제 API로 확인하고 private run 폴더의 로그/설정/JAR는 비공개로 보관한다.
 DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/reset-db는 명시 거절한다.
 불확실한 프로세스 정리에는 기존 잠금을 남긴다. 강제 종료 뒤 잠금/프로세스를 확인하지 않고
-지우거나 다른 실행을 인계받지 않는다. 실제 release·소유/중단·세 서버 검증과 남은 cutover/rollback은
-[DB06 증가분 기록](plans/2026-11-04-postgresql-local-release.md)으로 구분한다.
+지우거나 다른 실행을 인계받지 않는다. 이전 검증/제약은
+[DB06 증가분 기록](https://github.com/Pubburi/Backend/blob/89adaa8e9a93cf2628703744f7febcb13dae38d8/docs/plans/2026-11-04-postgresql-local-release.md)으로 구분한다.

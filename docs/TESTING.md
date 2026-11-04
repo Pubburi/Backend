@@ -1,423 +1,92 @@
 # Backend 테스트와 CI
 
-`./scripts/check.sh`는 저장소 비밀정보/생성물 검사, 로컬 도구/안전 게이트 테스트와 Java 17
-Maven 단위 테스트·패키징을 실행한다. DB가 없는 개발 환경에서도 이 경로를 사용할 수 있다.
+`./scripts/check.sh`는 저장소 비밀/생성물 검사, Python 도구 회귀와 Java17의 기본 API·
+PostgreSQL migration·JPA 모듈 검증/패키징을 실행한다. DB 없는 통합 skip은 실제 통과가 아니다.
+문서만 바꿀 때 무관한 새 DB/성능 검사를 추가하지 않는다. 기능별 계약은 각 문서, 회귀의 상세
+조건은 [Java 테스트](../src/test/java/)와 [JPA 테스트](../tools/jpa-rehearsal/src/test/java/)를 따른다.
 
-전체20개 MVP는 2026-12-31 Asia/Seoul까지 구현·연결과 기능·권한·정합성·장애 fallback의
-필수 회귀를 완료한다. 필요한 모델 fit/평가·세 실제 서버 흐름은 소유 영역/조정자와 연결해
-확인하며 fixture·부분 제공자·DB 없는 skip을 전체 인수로 세지 않는다. 1월에는 추가 튜닝·
-실측 최적화·강화/확대 회귀와 최종 인수를 진행한다. 문서/일정 변경은 구현 완료나 새 실행
-결과가 아니며 변경에 무관한 새 테스트·성능 측정을 강제하지 않는다. 기존 필수 CI·최신 head
-완료 Codex·미해결0·main 병합 게이트는 유지하고 실행한 검사와 미실행 범위를 구분해 기록한다.
+## 기본 검사와 필수 CI
 
-확정 목표는 [PostgreSQL/JPA](POSTGRESQL-MIGRATION.md)다. 독립 Flyway 도구의 Java17 단위/패키징도
-기본 검사에 포함하며, 실제 PostgreSQL18.6 TLS·비superuser의 새 설치/no-op·marker/CID·checksum·
-실패DDL rollback/복구·기존ID/타입/불변json·sequence 예약은 별도 폐기3DB로 실행한다.
-PUBBURI_PG_INTEGRATION=1이 실제 통합 조건이며 CI에서 빠지면 성공으로 간주하지 않는다.
-이 결과는 전체 JPA API·이관·Psycopg relay/사용자 흐름의 통과가 아니다. 기존 MySQL
-아래 회귀는 baseline으로 계속 유지하고 전체 cutover 게이트에서 PostgreSQL로 대체한다.
+```bash
+./scripts/check.sh
+# 실행 중인 기본 API의 읽기 전용 HTTP 확인; 계정/주문을 만들지 않는다.
+./scripts/smoke.sh
+```
 
-## DB03·DB05 세션·매장·상품 JPA 제공자
+PR·main·수동 실행의 필수 `backend-ci`는 다음을 유지한다.
 
-기본 check는 별도 `tools/jpa-rehearsal`의 단위/패키징도 수행한다. DB가 없으면 실제 통합은
-skip하며, [JPA 제공 계약](JPA-REHEARSAL.md)의 부분 범위를 전체 DB03 성공으로 세지 않는다.
-필수 backend-ci는 기존 PG3/import4와 분리한 JPA 정상/실패 두 DB를 더 준비하고, 같은 owned
-source snapshot을 복사한다. 기본 목록 수명에는 별도 세 번째 JPA scratch DB를 추가하고
-승인 복사/검수 뒤 명시 CI 준비 테스트가 원래 관리자 DELETE API로 해당 복사본의 상품만 제거한다.
-기존 정상/실패 DB의 source 상품은 읽기 전용으로 보존한다. 각 DB는 별도 최소 runtime 역할로
-실제 HTTP와 실행 JAR을 검증한다.
+| 범위 | 실행·검증 |
+|---|---|
+| 기본 MySQL8.4 | 새 폐기 schema의 data.sql·실제 JAR HTTP/API·세션/권한·업무 쓰기/롤백·OpenAPI/Swagger |
+| PG18.6 schema | `PUBBURI_PG_INTEGRATION=1`: 별도3DB의 새 설치/no-op·checksum·실패DDL 복구·타입/ID/인덱스 |
+| source/import | 별도 TLS source의 읽기 전용 snapshot·승인 파일 검증과 import4DB의16표 전체 typed-cell/PK·7개 고수위·수령증·실패 rollback |
+| JPA | `PUBBURI_JPA_INTEGRATION=1`: normal/failure·빈 카탈로그 scratch의 실제 Repository/HTTP·RR/잠금·수명/실패와 packaged 재시작 |
+| PG local release | `jpa_rehearsal_ci.local_release`: runtime 키만 private 설정에 복사해 실제 package-pg·backend-only37경로/44작업 기동/종료 |
+| 검색/relay | 실제 CLI·현재 업무 producer·두 worker·lease/token·DB 시각·중복/삭제·엔진 재시작/물리 교체와 같은 필수조건의 공개 DB fallback |
 
-`PUBBURI_JPA_INTEGRATION=1`은 User/Market Repository·DTO projection·insert-only ID·기존 해시
-CAS/epoch·역할·사용자 전체 잠금·SQL 실패 rollback·CREATE/ALTER/DROP 거절의 실제 경계다.
-실패 trigger는 별도 control 역할에서만 설치/제거하고 runtime에 DDL/소유권을 주지 않는다.
-실행 `scripts/jpa_smoke.py`는 명시 변이/동일 CID·loopback/marker와 별도 실패 DB를 확인한 뒤
-실제 JAR의 허용 경로·MyBatis runtime 제외·기동 거절·매장 저장·재기동/재로그인·삭제를 검사한다.
-소유한 JVM/자식과 private JAR 복사본은 finally 정리한다. 원문 로그/통합 XML/자격을 업로드하지
-않고 안전 요약만7일 보존한다. [실행 조건·실패 구분](plans/2026-11-02-jpa-market-rehearsal.md)을 따른다.
-소량 HTTP fixture는 idle timeout보다 짧은 헤더/본문 trickle도 절대 기한에 중단하고 정상
-Content-Length·chunked close의 cookie를 보존하는지 검사한다. 실제 자식 listener의 정상/오류/
-SIGTERM 종료와 부모 SIGTERM·deadline도 supervisor의 전체 session 정리 경계로 검사한다.
+`PUBBURI_PG_RELAY_CI=1`은 실제 source/JPA 준비와 search/relay 통합 step에만 둔다.
+단위 검사에 live-integration flag를 주입하지 않는다. 기존 검사나 실패 조건을 skip/continue-on-error로
+대체하지 않는다. 정확한 서비스/의존성·실행 순서는 [필수 workflow](../.github/workflows/ci.yml)가 정본이다.
 
-상품 읽기 증분의 `JpaProductReadIntegrationTests`는 실제
-Product7/특성8·필수 범위/태그AND·unknown/[]·쉼표 literal·REAL bound·네 sort/ID tie·페이지/offset·
-빈 결과/404/잘못된 입력·허용 GET/OpenAPI를 확인한다. 소유 control 연결로 `ci_jpa_read_`의 자체
-상품/특성/태그만 만들고 삭제하며 원본 행을 바꾸지 않는다. 테스트 전용 statement gate는 items/count와
-특성/태그 사이에 실제 별도 commit을 넣어 RR snapshot을 확인한다. 최신 producer 권한에서도 동일 읽기 의미를 확인하며 실패한 SQL을 빈 성공으로 바꾸지 않는다. 새 packaged JAR도 네 GET과 기존 세션·매장/
-기동 거절·재시작을 함께 검사한다. [조건·결과·한계](plans/2026-11-02-jpa-product-reads.md)는 별도다.
+실제 Recommendation/FastAPI·세 서버 웹 연결은 위 fixture 검사와 별도 소유 자원에서 확인한다.
+Frontend가 없는 Backend CI의 backend-only 성공을 전체 웹/기능 인수로 세지 않는다.
+MVP·병합/리뷰 기준은 [개발 기준](DELIVERY-PLAN.md)과 [작업 규칙](../AGENTS.md)을 따른다.
 
+## MySQL 변이 검사 안전 조건
 
-`JpaProductWriteIntegrationTests`는 실제 기존 Controller·서비스·JPA Repository에서 관리자 쓰기·
-특성/태그 전체 교체·엄격 입력·동시 수정·full FOR UPDATE와 FK KEY SHARE·삭제 후 주문 금액/이름·
-같은 ID 후속 버전·원문 JSON·상한 rollback을 확인한다. 성공 TX마다 불변 event와 PENDING이 함께
-남아야 하며 runtime의 queue UPDATE/DELETE·태그 product_id/kind UPDATE·sequence reset·DDL은 계속 거절한다.
-행 잠금에 필요한 태그 `UPDATE(tag)`만 허용하고 UPDATE 표 권한은 주지 않는다.
+`scripts/smoke.sh`의 변이 경로는 다음을 모두 확인한 뒤 새 테스트 계정·상품·주문만 사용한다.
 
-`JpaProductFailureIntegrationTests`는 별도 failure DB에서만 정확한 자체 ID/name의 AFTER INSERT/
-UPDATE trigger를 만든다. 기존 매장 실패를 이곳으로 옮겨 유지하고 상품 수정/특성 교체/삭제·
-이벤트 저장 뒤 delivery 실패·새 identity 실패를 요청 전후 상태로 확인한다. trigger/function은
-finally 제거하며 immutable version/event/delivery는 테스트 정리를 위해 삭제하지 않는다.
-packaged smoke는 실제 상품/특성 쓰기·재기동 후 값 보존·재로그인·삭제와14경로/16작업을 확인한다.
-[사전 조건·실패·결과·한계](plans/2026-11-02-jpa-product-writes.md)는 별도로 보존한다.
+- `PUBBURI_SMOKE_MUTATING=1`과 새 run token을 명시한다.
+- loopback JDBC URL·`*_ci` schema 이름이 일치해야 한다.
+- 지정 CID의 공개 MySQL 포트가 URL과 일치해야 한다.
+- 같은 DB의 `pubburi_ci_smoke_guard(token)`이 run token과 일치해야 한다.
 
-주문의 `JpaOrderIntegrationTests`는 실제 기존 여섯 작업의 소유권/관리자·중복 수량·금액/상품 스냅샷·
-상품/회원 삭제와 동일 ID 재가입·배치 상세·nullable/UTC·월 범위·최소 권한을 확인한다.
-외부 TX 시작 뒤의 월 경계와 새 INSERT fixture도 DB 문장 시각을 따르는지 검사한다.
-두 동시 주문의 회원/상품 합계와 event/version, 두 관리자 동시 삭제의200/404를 검사한다.
-별도 failure DB의 `JpaOrderFailureIntegrationTests`는 정확한 자체 사용자의 스탬프 INSERT 뒤와
-회원 합계 UPDATE 뒤에 예외를 주고 주문/상세/총액/상품/version/event/PENDING/스탬프/회원 전체
-상태의 rollback을 확인한다. 실패 trigger/function은 finally 제거하고 불변 queue 기록은 지우지 않는다.
-실행 JAR smoke도 주문 생성·재로그인·재시작 뒤 snapshot/list·완료·상품 삭제 이력·주문 삭제를 확인한다.
-[주문 조건·결과](plans/2026-11-02-jpa-order-transactions.md)는 기본 MySQL/전체 전환과 구분한다.
+초기 data.sql 상품과 missing ID 전제도 검사한다. SQL 변이 전에도 CID/DB/marker를 재확인하고,
+자체 계정 namespace와 정확한 실패 trigger 본문/대상을 검증한다. binlog 환경의 고정 실패 DDL에만
+`PUBBURI_DB_ROOT_PASSWORD`를 별도 사용할 수 있으며 Java 앱에는 전달하지 않는다. 누락은
+DDL 전에 거절하고 SUPER/글로벌 설정 확대로 우회하지 않는다. 자체 행·임시 DDL은 finally 정리하고
+수정한 원본 값은 복원한다. 불변 event·전달 기록을 테스트 정리 목적으로 지우지 않는다.
 
-`JpaAccountIntegrationTests`는 원래 UserRestController의 실제 가입/ID 확인·프로필/등급·관리자
-목록/변경/삭제와 기존 세션 계약을 검증한다. 중복/대소문자 동등 ID·hash/epoch 비노출·소유권·
-최근10주문 snapshot·생략 필드 보존·현재 역할·자격 회전·본인 세션 유지·삭제/동일 ID 재가입을 확인한다.
-두 부분 수정과 주문/이름 수정의 경합에서 합계/생략 자격이 되돌아가지 않아야 한다.
-별도 failure DB의 `JpaAccountFailureIntegrationTests`는 정확한 자체 사용자의 AFTER UPDATE/DELETE
-실패 뒤 hash/epoch/세션·메모·주문 참조·스탬프·취향/찜 cascade가 전부 rollback되는지 검사한다.
-이 자식 테이블의 계정 수명 검증은 별도 취향/찜 API 인수와 구분한다.
-packaged smoke도 계정/프로필/변경·재시작·비밀번호 회전·삭제/재가입을 같은 JAR에서 확인한다.
-[실행 조건·결과·한계](plans/2026-11-03-jpa-account-profile.md)를 따른다.
+업무 HTTP는 ApiResponse/미디어·strict 입력·현재 권한/epoch·삭제/재가입·비밀번호 회수,
+주문 중간 실패/가격·삭제 snapshot, 특성/찜/취향의 전체 교체·null/[]/0·부모 cascade를 확인한다.
+상품 필터/offset·R06/B1 wire와 DB 오류/UNAVAILABLE는 각 공급 계약에 맞춰 검사한다.
 
-`JpaCommentIntegrationTests`는 기존 후기 다섯 작업의 float32 평점/본문·검증·소유권/현재 권한·
-공개/관리자 페이지·NULL 과거 본문·없는 상품의 빈 페이지/FK409·부모 삭제 cascade를 확인한다.
-경합 수정은 한 요청의 rating/body 쌍을 보존하고 두 삭제는200/404여야 하며 삭제 후 UPDATE로
-행을 다시 만들지 않아야 한다. 사용자/상품 full FOR UPDATE가 별도 FK INSERT를 막는 실제
-55P03·허용하지 않은 소유자/상품/PK UPDATE·sequence reset 거절도 검사한다.
-`JpaCommentFailureIntegrationTests`는 별도 failure DB의 정확한 자체 INSERT/UPDATE/DELETE 뒤
-예외로 후기/부모/사용자 상태와 producer/UUID가 모두 보존되는지 확인하고 실패 DDL은 finally 제거한다.
-packaged smoke도 같은 JAR의 평점/본문 수정·공개 조회·재시작·삭제와 상품 cascade를 검사한다.
-PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment에서 받아 새 identity를 확인한다.
-[후기 조건·결과·한계](plans/2026-11-03-jpa-comments.md)는 전체 DB03–06/웹 인수와 구분한다.
+## PostgreSQL과 source 보존
 
-`JpaFavoriteIntegrationTests`는 본인/타인/관리자 격리·epoch 만료와 false/빈 결과·기존 Product7·
-숫자/offset·없는 상품·최초 추가 시각/반복 PUT·해제/재추가·동일 시각 ID 정렬과 현재 상품 값을 검사한다.
-별도 commit을 count/items 사이에 넣어 RR snapshot을 확인하고, User 잠금 직전 자격 회전 뒤
-대기한 구 요청이 새 자격의 관계를 바꾸지 않는지 검사한다. 오래된 TX의 새 INSERT도 DB 문장 시각을
-사용하며 두 PUT/DELETE는 기존 멱등 결과를 유지해야 한다. 모든 favorite UPDATE/DDL 거절도 확인한다.
-별도 failure DB의 `JpaFavoriteFailureIntegrationTests`는 정확한 자체 관계의 AFTER INSERT/DELETE
-실패 뒤 관계/시각·계정/주문/상품·producer/UUID를 보존하고 실패 DDL을 finally 제거한다.
-packaged smoke는 같은 JAR의 단건/페이지·반복 요청·재시작·현재 상품·상품 cascade를 확인한다.
-[찜 조건·결과·한계](plans/2026-11-03-jpa-favorites.md)는 F01 신규 완료나 전체 DB 전환과 구분한다.
+기존 DB/컨테이너를 채택하거나 원본을 reset하지 않는다. [source 추출](SOURCE-SNAPSHOT.md)과
+[승인 import](SOURCE-IMPORT.md)는 새 labelled tmpfs·동적 loopback·TLS CA/SAN·최소 역할을 사용한다.
+전행/고수위·UUID/epoch·금액/원문 JSON을 대조하고 충돌/드리프트·중복 실행·부분 실패를 거절한다.
+commit ACK 미확인/close 실패의 단위 주입은 실제 네트워크 ACK 유실이나 서버 crash 실험과 구분한다.
 
-`JpaPreferenceIntegrationTests`는 본인/타인/관리자·두 세션, 미입력/null/[]/0·soft/hard·상태와
-전체 교체·skip/reset·엄격 입력/정규화/정렬을 실제 HTTP/DB에서 검사한다. header/values 사이
-별도 commit의 RR, 잠금 직전 자격 회전·삭제/재가입의 구 epoch401, 사용자 잠금으로 직렬화한
-두 전체 교체를 확인한다. 헤더 DELETE/PK UPDATE·값 UPDATE·TRUNCATE는 계속 거절한다.
-`JpaPreferenceFailureIntegrationTests`는 별도 failure DB의 정확한 자체 user_id에 header INSERT/
-UPDATE·값 DELETE/두 번째 INSERT 이후 실패를 주어 이전 헤더/값·계정/상품/producer/UUID의
-rollback을 확인한다. 실패 DDL은 finally 제거한다. packaged smoke는 같은 JAR의 재시작/재로그인·
-전체 교체/초기화·계정 삭제/재가입 격리와 기존 업무 흐름을 함께 검사한다.
-[명시취향 조건·결과·한계](plans/2026-11-03-jpa-preferences.md)를 따른다.
+JPA는 기존 [기동 guard/최소 권한](JPA-REHEARSAL.md)을 사용한다. normal/failure 원본 상품은
+보존하고 기본 목록 수명용 scratch만 승인 복사/검수 뒤 원래 관리자 API로 비운다. 실패 DDL과
+일시 읽기 권한 회수는 별도 control 역할·자체 fixture에만 적용하고 finally 복원한다. runtime에
+DDL/소유권을 주지 않는다. `PUBBURI_JPA_EXPECTED_COMMENT_NEXT`는 snapshot의 sourceNext에서 받는다.
 
-`JpaDefaultRecommendationIntegrationTests`는 원래 Controller/서비스/실제 HTTP gateway와 JPA
-projection의 공개·size/순서·첫1000 상한·ID/available만 전송·원격 대기 밖 TX·현재 Product7을
-검사한다. 자체 ephemeral HTTP fixture에서 잘못된 B0/503/redirect/비JSON과32KiB 경계·미완료
-본문의 전체 기한을 확인하며 실제 FastAPI/B0 통합과 구분한다.
-`JpaDefaultRecommendationLifecycleIntegrationTests`는 별도 root-authored 빈 카탈로그 DB의 새
-자체 상품만 사용한다. 실제 관리자 변경/삭제를 HTTP 응답 대기 중 완료해 현재 값/삭제 fallback을
-확인하고 빈 DB는 원격 없이 빈 FALLBACK이어야 한다. 그 DB의 t_product SELECT만 임시 회수해
-최초/현재/fallback 읽기 오류500을 확인한 뒤 finally 복원한다. 생산 SQL/서비스를 바꾸지 않는다.
-CI의 명시 `JpaRecommendationPreparationTests`는 normal/failure와 다른 지정 scratch에서만
-실행한다. packaged smoke는 자체 bound/non-listening 포트를 끝까지 소유해 원격 미기동 fallback과
-재시작·기존 흐름을 확인하고 소켓/JVM을 정리한다. [기본 목록 검증](plans/2026-11-03-jpa-default-recommendations.md)을 따른다.
+`scripts/jpa_smoke.py`와 [local-stack](LOCAL-DEVELOPMENT.md)은 같은 JAR/OpenAPI 검증을 사용한다.
+자기 JVM 기동/PID를 확인하고 실제37/44·업무·재시작/재로그인과 소유 process group 정리를 검사한다.
+기존 listener를 테스트하거나 종료하지 않으며 PG의 init/down/reset은 제공하지 않는다.
+새 release의 입력 변경/미완료 manifest·비밀 설정 권한·상속 자격·TIME_WAIT/실제 점유를 별도로 검사한다.
 
-`JpaSelfAccountIntegrationTests`는 두 본인 쓰기의 strict body/query·이름 literal·현재 짧은 암호/
-legacy 해시·새 암호UTF-8 72바이트/초과·역할/스탬프/자격 보존과 두 세션 회수를 검사한다.
-잠금 전 자격 회전/동일ID 재가입, 두 암호 쓰기·이름/스탬프 경합과 이미 검증한 옛 로그인 응답의
-후속 보호 요청401을 실제 PG에서 확인한다. test gate는 SQL을 바꾸지 않고 원래 hasher를 호출한다.
-별도 failure DB의 `JpaSelfAccountFailureIntegrationTests`는 정확한 자체 계정의 AFTER UPDATE
-실패 뒤 이름/해시/epoch·두 세션·개인 자식/producer가 전부 rollback되는지 확인하고 DDL을 제거한다.
-기본 MySQL packaged HTTP에도 같은 self 입력/권한/72바이트/회수 회귀를 추가하고, 같은 JPA JAR의
-기동 거절·재시작/재로그인과 실제 OpenAPI35경로/42작업을 확인한다.
-[공급/실제 조건](plans/2026-11-03-self-account-settings.md)을 전체 F09 웹·DB 전환과 구분한다.
+## 검색·relay와 종료
 
-`JpaSearchPhraseIntegrationTests`는 본인 현재 취향 snapshot·strict 입력과 관리자/타계정 격리,
-원격 밖 TX·현재 null/[]/0/scale·원자 태그·soft 비승격/모든 hard와 변조 wire 거절을 확인한다.
-실제 원격 대기 중 취향 변경409·자격 회전/삭제재가입/로그아웃/다른 로그인401과 이름만 변경200을
-구분한다. 자기 새 계정의 C-key 두 값 k/K를 저장한 조건만으로 최종 검색400과 변조UNAVAILABLE를
-검사하고 원본/constraint는 바꾸지 않는다. 기존75와 신규5의 실제 PG80·단위3/준비2 skip을 구분한다.
-기본 단위는 최대40 UTF-16 태그40개·5문구의 정상 escaped body와128KiB/초과·700ms 미완료 본문,
-중복/추가 JSON·redirect/미디어 오류·DB 예외 전파와 private cache/세션 교체를 확인한다.
-기존 packaged MySQL 취향 계약에도 caller의 strict 입력/소유·원격 실패 경계를 포함하며 실제
-OpenAPI 경로와 별도 JPA JAR의36경로/43작업·재시작은 계속 필수다.
-[호출 기록](plans/2026-11-04-owned-search-phrases.md)의 실제 제공자/두 DB 대조는 fixture와 구분한다.
-PG relay business도 같은 실제 JPA의36경로/43작업과 새 경로의 POST 전용·strict 두 입력/
-owner query 부재·PROVIDER/UNAVAILABLE schema를 검사한다. 숫자만 같고 경로/메서드·소유자
-입력/대체 정책이 다른 문서는 거절하며 기존 실제 전달·재시작 검증을 생략하지 않는다.
+[Relay](SEARCH-RELAY.md)의 PG business는 normal/failure와 분리한 승인 복사본이고 queue는 새 빈 DB다.
+원문 저장 경계 fixture를 실제 전송 입력으로 재사용하지 않는다. 최소 runtime/control 권한을
+분리하고 strict wire·원문 JSON/UUID·토큰 fencing·remote IO 전 commit·SKIP LOCKED를 유지한다.
+기존 source/DELIVERED ACK와 target binding을 보존하며 부적합 event를 필터/수정/삭제하거나
+가짜 ACK/reset으로 복구하지 않는다. MySQL lifecycle도 같은 필수 검사에 남긴다.
 
+[공개 검색](PRODUCT-SEARCH.md)은 relay/restart/물리 교체 검증 뒤 실제 현재/지연/변경/삭제를 만들어
+DB-only/엔진/미기동 응답 전체를 비교한다. 원래 업무행·version/event·기존 ACK를 따로 보존한다.
+새 fixture 관리자 로그인의 hash CAS만 정확한 ID/hash 열에 허용하며 epoch/역할·타계정은 보호한다.
 
-`JpaPublicSearchIntegrationTests`는 기존 GET의 opt-in 엔진 ID/total과 현재 RR 페이지 대조,
-remote 밖 TX·실제 관리자 가격/태그/삭제 commit·같은 조건 fallback·빈 결과와 DB 오류를 확인한다.
-기본 Java 단위는 source/물리 UUID·strict IDs/total/shards·128KiB/전체 기한·redirect/잘못된 JSON과
-미지원 LIKE/offset의 무원격 대체를 확인한다. 실제 통합은 기존80에 신규4를 더한84이며 단위3/
-준비2 skip을 따로 센다. API 경로/작업은36/43으로 유지한다.
+HTTP 검증은 connect/write/헤더/본문의 절대 기한과 본문 상한을 유지한다. 느린 trickle·짧은 EOF·
+chunked/redirect·partial receipt, 정상/오류/SIGTERM/timeout의 소유 자식·socket 정리를 검사한다.
+자기 engine/CID/label·volume만 정리하며 cleanup 실패를 성공으로 숨기지 않는다. 실험의 lease 대기·
+파서 소비량·CI 시간·테스트 수를 서비스 성능/운영 SLA로 해석하지 않는다.
 
-필수 search smoke는 기존 relay restart/물리 교체와 완료 ACK 전행 대조를 마친 **뒤** 별도
-`public_search_smoke`를 실행한다. 같은 소유 PG business/예약 physical index에서 실제 relay의
-현재/지연/변경/삭제를 만들고 DB-only/명시 엔진/미기동 origin의 전체 상태·ApiResponse JSON을
-대조한다. 원본12업무표·기존 version/원문 event/DELIVERED ACK/source UUID를 분리 보존하며,
-기존 신규 작성 관리자 로그인만 SHA256→bcrypt CAS를 허용한다. 정확 그 ID의 hash 외 epoch/역할/
-이름/스탬프·타계정·상품 변경은 거절한다. 로그인 전/후/종료 스냅샷과 원문은 private에만 남기고
-CI artifact로 업로드하지 않는다. 소유 앱/상품만 finally 정리하며 queue reset으로 복구하지 않는다.
-[공개 검색 기록](plans/2026-11-04-public-search-fallback.md)의 실제 MySQL/PG·원본 투영 감사와
-첫 미보존 RAM 비교의 한계는 fixture 단위/운영 데이터 보호 성과와 구분한다.
+## 결과물과 개인정보
 
-`JpaOwnedContentIntegrationTests`는 본인 B1 caller의 새5개 실제 PG 회귀다. 기존84와 합쳐
-89통합·단위3/준비2 skip을 구분한다. 직접 작성 HTTP fixture로 strict 입력·DEMO·현재 본인
-null/[]/0/hard·정상 빈 결과·변조/초과/redirect를 검증한다. 원격 대기 중 취향/가격/특성/삭제·
-credential/삭제재가입/로그아웃/다른 로그인·이름만 변경의409/401/200을 구분하며 외부 TX를
-유지하지 않는다. 두 mapped 상품의 snapshot은5개 고정 scalar batch 질의이고, 상품/특성 사이
-실제 별도 commit에서도 RR을 유지한다. 정확 t_product SELECT만 일시 회수해 원격 전/후 DB500을
-확인하고 finally 기존 권한을 복원한다. 실제 Recommendation 연결은 이 HTTP fixture와 별도다.
-
-새 경로는37/44 strict OpenAPI·POST 전용·limit만1–12·query 선택자 없음·PROVIDER/UNAVAILABLE·
-REVIEWED_DEMO·현재 products/result를 검사한다. 기존 packaged JPA/기본 MySQL 취향 회귀에는
-미설정 bundle의 전송 없는 UNAVAILABLE과 입력/소유 불변 검증을 더한다. source bundle은 공식
-producer·전체 SHA/정확 origin-scope/순서·known volume/unknown 태그·유효기한을 검사하고
-권위/모델을 Java에서 재생성하지 않는다. [본인 B1 기록](plans/2026-11-04-owned-content-recommendations.md)은
-공식 bundle/실제 B1·현재 DB 인수와 초기 하네스/권한 전제 실패를 구분한다.
-
-PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
-패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
-새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.
-실행 jar가 없거나 여러 버전이면 실패하므로 오래된 산출물을 정리하고 다시 패키징한다.
-
-## HTTP 계약과 DB 검증
-
-상품 검색 outbox는 [생산 계약](SEARCH-OUTBOX.md)의 업무 TX와 카운터/불변 payload를 검증한다.
-단위는 현재 투영의 승인 필드·null/[]/태그 정렬·삭제/상한/저장 실패를 검사하고, 폐기 HTTP는 실제
-생성·수정·특성·주문수·삭제 버전과 DB trigger 실패의 상품/특성/주문 rollback을 확인한다.
-관리 CLI의 backend_product_events 입력을 소비할 수 있는지도 검사한다. 같은 TX의 delivery
-예약을 포함하며 자동 전송의 사용자 검색 품질로 확대하지 않는다. 수동007·008의 기존 전체
-데이터 보존·현재상태/미전달 backfill은 별도 전용 DB에서 확인한다.
-CI의 다음 엔진 단계는 `PUBBURI_SEARCH_OUTBOX_INPUT`으로 이 HTTP가 만든 private 가상 batch를
-받는다. 실제 CLI 재생·삭제 뒤 old version 차단·재시작 뒤 유지가 필수 성공 조건이다. 원문 입력은
-artifact에 넣지 않으며 입력은 검증용 private 복사본으로 고정한다.
-선택 relay 검증 환경은 Python3.12·해시 고정 의존성을 별도 설치하고, 공개 MySQL CA만 복사한다.
-독립 `*_ci` queue DB의 CID/marker·빈 schema를 먼저 확인하며 기존 DB를 자동 초기화하지 않는다.
-실제 최소 DB계정/TLS·낮은ID 지연commit·두 worker claim/원격IO 전 commit·429/5xx와 영구4xx·
-DB backoff·만료 token·엔진쓰기 직후 프로세스 종료/중복 재전달·source/target 교체를 확인한다.
-별도로 실제 HTTP fixture 이벤트와 backfill delivery를 watch 프로세스로 소비하고 volume 재시작 후
-같은 binding/tombstone을 확인한다. lease/재시도 시간은 폐기 DB에서 제어한 정합성 실험이며
-운영 부하·자동 복구 SLA·검색 refresh 완료·성능 결과가 아니다. [relay 계약](SEARCH-RELAY.md)을 따른다.
-PostgreSQL opt-in은 `PUBBURI_PG_RELAY_CI=1`에서 normal/failure 회귀와 분리한 승인 source의
-business 복사본과 새 별도 queue DB를 사용한다. business는 기존 JPA의 import/권한·계정 준비만
-재사용하며 원문 저장용 부분 JSON 등 경계 fixture가 쌓인 회귀 DB를 전송 입력으로 쓰지 않는다.
-source/JPA 준비 뒤 좁은 relay 역할과 별도 fixture control을 예약하고 기존 엔진 lifecycle에
-검증을 추가한다. 이 실행 플래그는 CI의 source/JPA 준비·실제 search/relay 통합 두 step에만 둔다.
-fake 소유권/cleanup 단위는 외부 실행 환경에서 격리하고, 실제 준비 전 fixture를 열지 않아야 한다.
-새로운 V1/V2나 source UUID/ACK/sequence reset으로 재실행하지 않는다.
-DB 선택 가드는 회귀 DB의 재사용을 SQL 전에 거절한다. 기존 이벤트도 strict wire로 먼저 검사해
-부적합하면 고정 오류로 거절하며 필터/수정/삭제·가짜 ACK를 하지 않는다. 안전 요약에는 queue와
-business 단계를 나누고 상세 입력/로그는 계속 제외한다. 기존75 JPA 회귀는 normal/failure/scratch에서 유지한다.
-실제 TLS verify-full·다른 CA/SAN/non-TLS의 인증 전 거절, 기존 strict boolean/UUID·json 원문,
-늦은 낮은ID·SKIP LOCKED·IO 밖 commit·두 worker·DB 실제시각과 잠금 중 만료·이전 token·
-attempts 포화/DB backoff·HTTP400/429/503/TCP·쓰기 직후 worker 종료/중복 전달을 확인한다.
-같은 packaged JPA의 새 관리자 상품/수정/특성/삭제와 별도 watch, 동일 volume 재시작/물리 index
-교체는 원본 업무행·기존 ACK와 source를 보존해야 한다. 기존 MySQL relay lifecycle도 유지한다.
-MySQL의 기존 fixture 역할은 자기 빈 queue의 DDL/실험 SQL도 수행하며, 새 PG의 운영 최소 역할과
-control 완전 분리 검증을 MySQL에서 새로 검증한 결과로 쓰지 않는다. 원문/자격/상세 로그는
-artifact에 추가하지 않고 기존 안전 요약만 유지한다. [조건과 한계](plans/2026-11-04-postgresql-search-relay.md)를 따른다.
-앱·조회는 DB 전용 CI 계정으로 실행한다. binlog가 켜진 MySQL은 DB의 ALL 권한만으로 TRIGGER
-생성을 허용하지 않을 수 있어, 폐기 DB/CID/marker 검사 후 고정 실패 주입 CREATE/DROP에만
-별도 `PUBBURI_DB_ROOT_PASSWORD`를 사용한다. 값은 child MYSQL_PWD로만 전달하며 Java 앱
-프로세스에서는 제거한다. root 자격 누락은 DDL/새 fixture HTTP 전에 거절한다. DROP 전에는 일반
-계정으로 schema·이름·대상표·시점/종류·해당 productID에 한정한 본문이 맞는지도 확인한다.
-SUPER 부여나 글로벌 log_bin_trust 변경으로 검사를 우회하지 않는다.
-
-로컬 색인은 `python3 scripts/smoke_search.py`로 고유 label/새 volume·동적 loopback 포트의
-전용 엔진을 만들고 검증/재시작/정지·정리한다. 먼저 `docker build -t pubburi-search:3.9.0-nori-v1 search`로
-pinned base/nori를 준비한다. 기존 서버·DB/볼륨을 채택하지 않으며 결과는 target/search-smoke-report.json,
-원문 engine 로그/입력·CID/port/PID는 ignored에만 남긴다. 필수 backend-ci에도 같은 실행을 포함한다.
-가상 ID 이력의 중복/역전·동일 버전/동시 충돌·strict schema·tombstone/GET 차이·volume 재시작·
-부분 실패 receipt를 확인한다. 별도 relay 검증이 실제 업무 전달을 확인하지만 공개 검색 품질/
-시간 성능과 재색인 전체 인수로 확대하지 않는다.
-[실제 조건과 초기 실패](plans/2026-11-01-local-search-replay.md)를 따른다.
-실제 HTTPResponse fixture는 Content-Length보다 짧은 완결 JSON EOF를 거절하고 chunked/본문
-상한·전체 deadline을 유지한다. 검증 본문 성공 뒤의 로그 IO 실패도 소유 자원 정리를 막지 않으며
-비소유/삭제 실패 보호·실패 상태와 partial receipt를 별도 단위 경계로 확인한다.
-추가 실제 header trickle fixture는 idle timeout보다 짧은0.08초 간격의 헤더도 절대 기한0.15초에
-중단하는지 확인한다. nonblocking connect 대기·읽지 않는 peer에 막힌 요청 body·Connection: close
-본문과 기한이 다른 두 동시 요청도 검사한다. 반환 시 요청별 watchdog 종료·소유 socket/취소용
-descriptor 해제를 확인하며 기한 실패는 partial receipt를 complete로 바꾸지 않는다. 짧은 제어
-실험의 경과값을 실제 서비스 응답 속도/운영 오류율로 표현하지 않는다.
-
-상품 page offset은 음수/0/양수 래핑과 첫 지원 범위 초과를 SQL 전에400으로 거절한다.
-MockMvc와 실제 상품 서비스/fake DAO는 미지원 조건의 DAO 호출0·정상/최대 근처·0/음수/
-size clamp·필터/정렬·메타를 확인한다. 필수 HTTP도 네 미지원 조건과 정상화 동등성·런타임 문서의
-지원 범위를 검사한다. 실제 MySQL의 여덟 전후 조건과 서버500/잘못된200은
-[정확성 원값](measurements/2026-11-01-product-page-offset.md)에 구분한다. 클라이언트400을 전체
-오류율/응답 속도 개선으로 바꾸지 않으며 다른 API/공통 페이지 정책은 변경하지 않는다.
-
-상품 목록의 필수 필터는 잘못된 가격/도수 범위·숫자 표기·태그 중복/빈/개수를 SQL 전에 거절한다.
-MVC는 literal comma와 단위형 파라미터·기존 페이지/응답을, MyBatis BoundSql은 목록/COUNT의
-동일 AND 조건·값 바인딩을 확인한다. 표준 폐기 HTTP는 합성 상품5개에서 도수5.1/5.55/5.555·0,
-가격0경계·unknown/검수[]·태그all-match·정렬/페이지/total·잘못된 입력과 삭제를 검사한다.
-실행 OpenAPI의 숫자 범위·반복 태그 form/explode·JSON 응답도 필수다. 실제 DB 결과·제한은
-[필터 작업 계획](plans/2026-11-01-product-search-filters.md)에 구분하며 OpenSearch/성능 인수로 확대하지 않는다.
-
-기본 추천 연결은 private loopback ephemeral upstream에서 정상 B0 계약·비정상/중복/추가 JSON·
-잘못된 ID/algorithm·비JSON/503/redirect·연결 거부·본문32KiB 초과를 검사한다. 헤더 뒤 끝나지 않는
-chunked body도 전체 완료 deadline으로 종료하고 소유 subscription 취소를 확인한다. 이 소량
-실패 주입은 서비스 지연/처리량 측정이나 전체 부하 검증이 아니다. DAO 경계는 최신 가격 배치
-재조회·삭제 후 current fallback·DB 오류/빈 결과 구분을 확인한다.
-
-실행 OpenAPI는 기본 목록의 items/source 두 필드와 기존 Product7을 확인한다. 필수 HTTP는
-size 기본4/1/12·정수/범위400·현재 상품 필드·ID순을 확인한다. CI는 추천 서버를 기동하지 않고
-FALLBACK도 정상 목록임을 검사한다. 실제 3서버 검증은 [연결 계획](plans/2026-11-01-default-recommendation-integration.md)에 구분한다.
-
-Jackson의 주 회귀는 새 스레드의 실제 default shared pool에 60,000자 문자열을 먼저 읽은 뒤
-기본 name 상한 50,000자·키 140,000자·128자 chunk에서 추가 누적 성장을 거부하는지 확인한다.
-보조 회귀의 상한64/키2,048은 fresh non-recycling 조건을 명시한다. primed 큰 버퍼에서는 같은
-작은 키를 전부 소비할 수 있으므로 모든 경로의 즉시 중단으로 해석하지 않는다.
-소비한 문자 수는 고정 파서 경계이며 전체 요청 메모리·DoS/지연 결과가 아니다. 별도 10B/13B
-문서 길이 대조는 이전에도 통과한 경계다. MockMvc/필수 폐기 HTTP는 UTF-8·ISO-8859-1·UTF-16의
-정상 DTO/로그인, 60,000자 필드명 오류의 고정 400·원문 비노출·기존 세션 불변을 확인한다.
-
-Maven의 MultipartParserSecurityTests는 실제 embedded Tomcat 라이브러리로 정상 part header와
-2,111B header의 512B 기본 상한 거부를 검사한다. 포트·DB·대량 메모리 부하 없이 파싱 경계만
-검증하며 실제 HTTP의 전후 오류율이나 전체 DoS 방어 완료로 표현하지 않는다.
-[의존성 점검 범위](DEPENDENCY-SECURITY.md)의 jar/실행 smoke 호환성과 함께 확인한다.
-추가 MockMvc는 일반 MultipartException의 고정 JSON 400·크기 초과 하위 타입의 413·원인 상세
-비노출·기존 미지원 Content-Type 415를 확인한다. 폐기 환경의 필수 HTTP smoke에도 2KB 수준의
-소량 multipart header 초과의 실제 크기 예외 413과 정상 형태의 미지원 미디어 415를 포함한다.
-
-기본 `./scripts/smoke.sh`는 카탈로그 크기와 무관한 페이지 불변식·응답 필드, 없는 상품 404, 비인증 401,
-입력 검증 400과 ApiResponse/오류 필드를 확인한다. 계정·주문을 생성하지 않는다.
-
-실제 `/v3/api-docs`의 새 상품 특성 GET/PUT·요청/응답 필드·nullable 의미와 `/docs` Swagger UI
-HTML도 확인한다. 단위/정적 명세가 통과해도 런타임 문서 생성이 500이면 필수 job은 실패한다.
-
-CI의 변이 모드는 다음 조건을 모두 확인한 뒤에만 고유 테스트 계정·주문을 만든다.
-
-- `PUBBURI_SMOKE_MUTATING=1`을 명시한다.
-- JDBC URL은 loopback MySQL이고 `PUBBURI_DB_NAME`과 같은 `*_ci` 스키마를 가리킨다.
-- `PUBBURI_SMOKE_CONTAINER_ID`의 공개 MySQL 포트가 JDBC URL의 포트와 일치한다.
-- 같은 폐기 DB의 `pubburi_ci_smoke_guard(token)`에 이번 실행의 `PUBBURI_SMOKE_RUN_TOKEN`이 존재한다.
-
-CI marker는 GitHub run ID/attempt로 실행마다 구분한다. 변이 경로는 초기화한 `data.sql`의
-상품이 존재하고 테스트용 missing ID가 없음을 별도로 확인한다. 기본 읽기 전용 경로는 빈 카탈로그도 허용한다.
-
-그 뒤 실제 HTTP 세션 유지/로그아웃, 일반 회원 관리자 접근 403·타인 접근 차단,
-주문 입력 검증·중복 상품 수량 정규화·성공 주문의 상세/상품 주문수/회원 스탬프 반영을 확인한다.
-유효 상품 다음에 없는 상품을 넣는 실패 주문은 현재 서비스의 주문 헤더 INSERT와 첫 상품
-UPDATE 뒤에 예외를 일으킨다. 실패 전후 주문 목록·상품 주문수·프로필/스탬프가 동일한지
-비교해 그 경로의 실제 DB rollback을 검증한다.
-
-신규 주문의 `totalPrice`·`priceBasis`와 상세 단가/합계를 확인하고, 같은 폐기 DB의 상품
-가격·이름을 변경한 뒤 단건/목록 주문 응답이 유지되는지 검증한다. 변경한 상품은 finally에서
-복원하며 SQL 변경 전에도 동일 컨테이너·DB·run marker 안전 조건을 다시 확인한다.
-
-삭제 이력 경로는 새 관리자 fixture·상품·구매자를 만든다. 관리자 fixture 승격은 같은 폐기 DB
-안전 게이트와 `ci_admin_`+UUID 이름 제한을 확인하고 새 로그인으로 역할을 읽는다. 기존 관리자
-계정은 수정하지 않는다. 실제 관리자 HTTP로 상품·회원 삭제를 실행해 상세/금액 보존과 참조 null,
-회원 자유 입력 메모 제거, 인증된 타인 접근 403·삭제 세션 401, 관리자 단건/페이지 보존을 확인한다.
-같은 ID로 새 계정을 만든 뒤에도 과거 주문 목록은 비어 있고 이전 주문 접근은 거부돼야 한다.
-
-세션 경로는 독립 cookie jar로 권한 강등의 기존 관리자 세션 403, 삭제 구세션 401,
-삭제 때 조회하지 않은 세션의 동일 ID 재가입 뒤 401/새 로그인 200, 비밀번호 변경 뒤 구세션
-401와 구/새 비밀번호 로그인, 최신 이름/스탬프 응답을 확인한다. 관리자 본인 비밀번호 수정은
-현재 세션을 유지하고 다른 기존 세션은 거부하는 경계도 확인한다. epoch/hash를 UserResponse에 노출하지 않는다.
-
-상품 특성은 기존 상품 응답을 유지하면서 공개 조회/현재 관리자 교체를 확인한다. null unknown과
-[] 검수 상태, 출처 필수·URL/길이/정수/중복 검증, 정규화·반복 PUT·{} 전체 초기화, 잘못된 입력 뒤
-기존 값 불변을 검증한다. 직접 생성한 상품을 삭제한 뒤 특성 GET/PUT 404와 두 특성 테이블의 잔존
-행 0을 같은 폐기 DB에서 확인한다. 합성 fixture 특성을 실제 상품 사실/수집·모델 성과로 사용하지 않는다.
-정상 관리자 쿠키의 text/plain PUT은 415, 지원하지 않는 Accept의 GET은 406 JSON 오류 envelope를
-반환하고 저장 특성은 그대로인지 확인한다. 미디어 오류를 내부 오류 500으로 숨기지 않는다.
-
-명시취향은 두 일반 계정과 관리자의 본인 격리, body/query 소유자 미신뢰·비공개 응답, 상태와
-null/[]/0·soft 목표/hard 범위 분리, 엄격 타입·역전/중복/주종 검증 뒤 저장 불변을 확인한다.
-삭제 뒤 두 취향 테이블 0행·같은 ID 재가입 NOT_STARTED·조회하지 않고 보관한 구쿠키 401도 검증한다.
-실행 OpenAPI의 본인 경로·상태 enum·세 루트/그룹별 네 필드·nullable을 필수 문서 경로에서 확인한다.
-
-계정 찜은 본인/타계정/관리자 격리·다른 세션의 같은 목록, 반복 PUT/DELETE와 최초 추가 순서,
-페이지·현재 상품 일곱 필드·상품/회원 삭제 cascade·같은 ID 재가입 fresh/구쿠키 401을 확인한다.
-찜으로 상품 주문수/가격을 바꾸지 않으며 잘못된 ID/페이지·없는 상품 뒤 기존 저장이 유지돼야 한다.
-지원하지 않는 POST는 405·Allow(PUT/DELETE), 지원하지 않는 Accept는 406 JSON이며 상태는 그대로다.
-실행 문서는 본인 GET·PUT/DELETE·페이지/상품/관계 스키마·본문 없음·타인 경로 없음을 검사한다.
-단건 상태 GET도 비인증/만료 401과 active false를 구분하며 저장 전false→PUT true→DELETE false,
-없는/삭제 상품 false·타계정/관리자 본인 격리·Allow GET·기존 페이지/저장 불변을 검증한다.
-
-이것은 모든 단계의 장애·동시성·멱등성과 이미 인증된 요청의 취소까지 완료했다는 뜻이 아니다.
-특히 스탬프 저장 이후 장애와 동시/중복 요청은 BE06/C04의 추가 검증으로 남는다.
-
-## 로컬 검증
-
-변이 검증은 전용 폐기 MySQL 컨테이너와 초기 시드가 있는 `*_ci` DB에서만 실행한다.
-기존 개발·사용자 DB를 초기화하거나 테스트 대상에 넣지 않는다. 실행자는 고유 토큰으로
-marker 테이블을 준비하고 DB/포트/컨테이너 환경을 설정한 뒤 `./scripts/smoke.sh`를 실행한다.
-API 테스트는 새 계정/주문을 남기므로 검증 후 폐기 컨테이너를 종료·제거한다. 기존 볼륨은 사용하지 않는다.
-
-CI는 Maven `target/surefire-reports/*.xml`과 자격정보/요청 원문이 없는
-`target/api-smoke-report.json`을 성공/실패와 관계없이 아티팩트로 7일 보존한다.
-개인 설정·DB 원본·서버 원문 로그는 업로드하지 않는다. 테스트 개수나 CI 시간은 앱 성능 지표가 아니다.
-
-## DB02 원본 읽기 전용 추출
-
-[Source snapshot 계약](SOURCE-SNAPSHOT.md)의 별도 모듈은 정확한 타입/승인 receipt·사설 출력·
-명시 TLS/작업 창·읽기 전용 권한과 소유 컨테이너 guard를 검증한다. DB없는 기본 check는
-SourceContractTests를 실행하고 실제 원본 통합은 skip한다. 이는 PG import/전체 복사 검증이 아니다.
-
-required backend-ci는 기존 PG모듈9개(단위5+실PG4)/현재 MySQL HTTP14/실엔진 검사를 유지하면서 다음을 추가한다.
-
-~~~bash
-PUBBURI_SOURCE_CI_RUN=source-snapshot-unique-run python3 scripts/source_snapshot_ci.py
-~~~
-
-도구는 cached mysql:8.4에서 새 labelled tmpfs/동적127포트 컨테이너를 직접 생성한다. 새 CA/SAN·
-VERIFY_IDENTITY·SELECT/SHOW VIEW reader·DB 한정 fixture control을 만들며 기존 API 서비스의
-CA/권한/DB를 바꾸지 않는다. 실제 source 통합에서 RR 중 두 표 DML·원값 복원, 고수위 변경
-거절(no reset), maintenance marker 변경/NUL/schema drift 거절과 실패 receipt·최종 행 보존을
-검사한다. unescaped DB grant의 underscore wildcard가 허구 shadow DB에 닿는 반례와
-정상 escaped-literal reader의 shadow 접근 거절/자체 source 접근 유지를 구분해 확인한다.
-wrapper의 export/두 번 offline validate·같은 출력 재사용 거절도 실제 실행한다.
-모든 경로에서 label/CID를 재확인한 뒤 자기 컨테이너/private CA·로그·snapshot을 정리한다.
-기존 container/volume 채택이나 source 원본 초기화는 제공하지 않는다.
-
-원본 snapshot/SourceIntegrationTests XML/원문 오류 로그에는 개인값·password hash가 포함될 수
-있으므로 **업로드하지 않는다**. CI artifact는 고정 오류/안전한 집계의 source-snapshot-report.json과
-기존 PG 테스트 세 클래스의 XML만 명시하며 원본·CA/private key·.env는 제외한다. CI 준비/수신
-거절을 서비스 성능이나 실제 이관 데이터 손실 개선율로 계산하지 않는다.
-
-## 승인 source의 PG import·결과 대조
-
-[Import 계약](SOURCE-IMPORT.md)은 기존 V1을 보존하고 V2 수령증 metadata를 추가한다.
-기본 `check.sh`에는 파일 승인/한 번 읽기/typed bind·commit/close 분류 단위를 포함한다.
-기존 PG 통합의 기대 migration 수는 새 설치2개로 바뀌지만 거래/타입/인덱스/실패/복구 검사는
-삭제하지 않는다. 새 기본 경로의 실DB skip은 실제 DB 성공으로 세지 않는다.
-
-같은 required backend-ci에서 PG 준비 도구는 기존3DB와 별도 import4DB를 생성한다.
-source CI helper는 기존 API MySQL CA를 보존한 새 source 컨테이너에서 기본 source와 별도
-[authored 타입 fixture](../tools/postgresql-migration/src/test/resources/source-import-types.sql)를
-분리한다. 기본 source export/권한/작업 창 검사를 유지하고 다음 실제 PG 범위를 추가한다.
-
-- 기본 snapshot의16표 모든 셀을 exact PK tuple별로 대조하고7개 sequence/source UUID·epoch·
-  가격·원문 JSON·수령증을 확인한다. 같은 import의 재실행은 상태 변경 없이 거절한다.
-- 일부 상품 INSERT 뒤 실패와 모든 sequence 예약 뒤 수령증 INSERT 실패를 각각 주입해
-  모든 업무행/수령증·sequence 상태의 rollback을 검증한다. fixture trigger/function을 제거하고
-  같은 빈 DB·동일 파일의 CLI import로 복구한다.
-- 대상 collation과 FK parent namespace의 드리프트를 거절/복원한다. 허구 typed artifact의
-  ICU PK 충돌·missing FK, 기존 데이터가 있는 대상을 병합/정규화 없이 거절한다.
-- 별도 authored source의 numeric/NULL·0/known flags·태그·찜 microseconds·삭제 참조/주문금액·
-  claim/lease/ACK/binding 원문을 importer로 보존한다. 기본 원본과 데이터 분모를 합치지 않는다.
-- commit ACK 미확인·ACK 뒤 close 실패와 부모 timeout의 분류는 단위 주입이다. 실제 네트워크
-  ACK 유실·서버 crash 실험이나 운영 장애율로 표시하지 않는다. verify-import는 READ ONLY다.
-
-SourceImportIntegration/Typed XML와 원본·source/env/CA·상세 로그는 업로드하지 않는다.
-기존 PG3개 클래스 XML만 명시하고 source-snapshot-report.json의 안전한 상태만 추가한다.
-새 CI helper는 자기 CID/label·loopback과 target PG 소유권을 확인하고 자기 source/private
-자료만 finally 정리한다. root/다른 작업자 DB를 초기화하거나 보호 규칙을 완화하지 않는다.
-
-
-## DB06 명시 PostgreSQL 로컬 release
-
-`test_postgresql_local.py`는 private strict 설정·source/JAR/commit 출처·기존 MySQL dispatch·
-PG 파괴 명령 차단·동일 작업 잠금/포트 점유·상속 자격/JVM 설정과 세 자식 환경 격리를 검사한다.
-기본 check의 도구 검사에 포함한다. 필수 CI는 기존 JPA 정상/실패/빈 카탈로그 실제 회귀와
-packaged smoke를 그대로 실행한 뒤, 이미 검수한 normal DB에 `postgresql_local_ci.py`로 실제
-DB독립 release 생성과 backend-only 기동/OpenAPI37/44/종료를 추가한다. 별도 schema나 GRANT는 없다.
-이 CI는 sibling FE/추천·사용자 웹 흐름을 실행하지 않는다. 전체 세 서버와 세션·재시작/정리 및
-원본 보존은 별도 소유 자원에서 [증가분 기록](plans/2026-11-04-postgresql-local-release.md)에 남긴다.
-실제 DB fixture 준비 실패·하네스 실패/권한 제한을 성공으로 소급하거나 기존89를 skip하지 않는다.
+원본 snapshot/원문 SQL·통합 XML/서버 로그·CA private key·.env·계정 hash는 업로드하지 않는다.
+CI artifact는 workflow가 명시한 안전 요약과 허용된 XML만7일 보존한다. 개인값이 포함될 수 있는
+source/import/JPA 상세 보고서는 제외한다. 공개 근거에 로컬 private 경로나 비공개 기획 주소를 넣지 않는다.

@@ -72,18 +72,6 @@ class PostgreSQLLocalTests(unittest.TestCase):
             self.assertNotIn('PGPASSWORD',env);self.assertNotIn('PUBBURI_DB_ROOT_PASSWORD',env)
             self.assertNotIn('PUBBURI_CONTENT_CATALOG_PATH',env)
 
-    def test_lifecycle_cleanup_failure_never_reports_processes_stopped(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            child=types.SimpleNamespace(pid=123,poll=lambda:None)
-            directory=Path(temporary)
-            with self.assertRaises(local.ProcessCleanupError):
-                with pg.lifecycle_record(local) as record:
-                    record.update(directory=directory,children=[child])
-                    raise local.ProcessCleanupError('owned process remains')
-            proof=json.loads((directory/'stopped.json').read_text())
-            self.assertFalse(proof['application_processes_stopped'])
-            self.assertTrue(proof['database_retained'])
-
     def test_pg_destructive_commands_reject_before_env_or_docker(self):
         for name in ('init','install','down','reset-db'):
             with self.subTest(command=name), patch.object(local, 'environment') as environment, patch.object(pg, 'doctor') as doctor:
@@ -122,17 +110,21 @@ class PostgreSQLLocalTests(unittest.TestCase):
             self.assertEqual(original['src/main/example'],hashlib.sha256(b'original').hexdigest())
             file.write_text('changed')
             with self.assertRaises(RuntimeError):pg.source_files(scope)
-            file.write_text('original');(root/'src/main/extra').write_text('untracked')
+            file.write_text('original');file.chmod(0o755)
+            with self.assertRaises(RuntimeError):pg.source_files(scope)
+            file.chmod(0o644);(root/'src/main/extra').write_text('untracked')
             with self.assertRaises(RuntimeError):pg.source_files(scope)
 
     def test_jar_refuses_legacy_runtime_and_wrong_entrypoint(self):
         with tempfile.TemporaryDirectory() as temporary:
             path=Path(temporary)/'app.jar'
             entry='BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class'
-            with zipfile.ZipFile(path,'w') as jar:jar.writestr(entry,b'fixture')
+            with zipfile.ZipFile(path,'w') as jar:
+                for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
+                    jar.writestr(name,b'fixture')
             pg.validate_jar(path)
             with zipfile.ZipFile(path,'a') as jar:jar.writestr('BOOT-INF/lib/mysql-connector-j.jar',b'legacy')
-            with self.assertRaises(RuntimeError):pg.validate_jar(path)
+            with self.assertRaises(ValueError):pg.validate_jar(path)
 
     def test_closed_server_time_wait_is_not_an_active_listener(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -170,12 +162,12 @@ class PostgreSQLLocalTests(unittest.TestCase):
             owned.assert_called_once_with(self.env(),child_env={'PATH':'/tools'})
 
     def test_ci_uses_runtime_only_projection_and_keeps_all_prior_grants(self):
-        import postgresql_local_ci as ci
+        import jpa_rehearsal_ci as ci
         with tempfile.TemporaryDirectory() as temporary:
             state=Path(temporary)/'.pubburi';state.mkdir(mode=0o700)
             env=dict(self.env(),PUBBURI_JPA_CI='1',PUBBURI_JPA_CONTROL_PASSWORD='never-child',PUBBURI_PG_MUTATING='1')
             with patch.object(local,'STATE',state), patch.object(pg,'package') as package, patch.object(pg,'start') as start:
-                ci.run(env)
+                ci.local_release(env)
             package.assert_called_once();start.assert_called_once()
             config=pg.configuration(start.call_args.args[1].pg_config)
             self.assertEqual(set(config),pg.REQUIRED)
@@ -187,20 +179,41 @@ class PostgreSQLLocalTests(unittest.TestCase):
         response=MagicMock();response.__enter__.return_value=response
         response.read.return_value=json.dumps({'data':{'items':[]}}).encode()
         with patch.object(pg.urllib.request,'urlopen',return_value=response):
-            with self.assertRaises(RuntimeError):pg.api_ready('http://127.0.0.1:15001')
+            with self.assertRaises((RuntimeError,ValueError)):pg.api_ready('http://127.0.0.1:15001')
         response.read.side_effect=[json.dumps({'data':{'items':[]},'error':None}).encode(),b'{"paths":{}}']
         with patch.object(pg.urllib.request,'urlopen',return_value=response):
-            with self.assertRaises(RuntimeError):pg.api_ready('http://127.0.0.1:15001')
+            with self.assertRaises((RuntimeError,ValueError)):pg.api_ready('http://127.0.0.1:15001')
 
-    def test_stale_jar_or_commit_binding_cannot_be_claimed_as_verified_release(self):
+    def test_release_checks_real_git_tree_and_actual_jar_pin(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary);scope=types.SimpleNamespace(STATE=root/'.pubburi',BACKEND=root)
+            root=Path(temporary);(root/'src/main').mkdir(parents=True)
+            file=root/'src/main/code';file.write_text('first')
+            def git(*args):
+                return subprocess.check_output(['git',*args],cwd=root,text=True).strip()
+            git('init','-q');git('config','user.email','fixture@example.invalid');git('config','user.name','Fixture')
+            git('add','.');git('commit','-qm','first');first=git('rev-parse','HEAD')
+            file.write_text('second');git('add','.');git('commit','-qm','second');current=git('rev-parse','HEAD')
+            scope=types.SimpleNamespace(STATE=root/'.pubburi',BACKEND=root)
             directory=pg.private_directory(scope.STATE/'release',scope,True)
-            value={'schema_version':1,'completed':True,'provider':'JPA_POSTGRESQL_REHEARSAL','source_commit':'a'*40,
-                'source_files':{'src/main/code':'b'*64},'jar_sha256':'c'*64,'java_feature':17,'postgresql_version':'18.6',
+            jar=directory/'runtime.jar'
+            with zipfile.ZipFile(jar,'w') as archive:
+                for name in ('BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class',
+                             'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
+                    archive.writestr(name,b'fixture')
+            jar.chmod(0o600)
+            value={'schema_version':1,'completed':True,'provider':'JPA_POSTGRESQL_REHEARSAL','source_commit':first,
+                'source_files':pg.source_files(scope),'jar_sha256':pg.sha(jar),'java_feature':17,'postgresql_version':'18.6',
                 'api_paths':37,'api_operations':44,'preparation':'database-independent-maven-verify'}
-            pg.write_json(directory/'manifest.json',value)
-            with patch.object(pg,'source_files',return_value=value['source_files']), patch.object(pg.subprocess,'check_output',return_value=b'different source'):
-                with self.assertRaises(RuntimeError):pg.release(directory,scope)
+            def manifest(commit):
+                (directory/'manifest.json').unlink(missing_ok=True)
+                pg.write_json(directory/'manifest.json',dict(value,source_commit=commit))
+            manifest(first)
+            with self.assertRaises(RuntimeError):pg.release(directory,scope)
+            manifest('f'*40)
+            with self.assertRaises(RuntimeError):pg.release(directory,scope)
+            manifest(current);self.assertEqual(pg.release(directory,scope)[1]['source_commit'],current)
+            with jar.open('ab') as output:output.write(b'tamper')
+            with self.assertRaises(RuntimeError):pg.release(directory,scope)
+
 
 if __name__=='__main__':unittest.main()

@@ -124,7 +124,7 @@ flowchart LR
 
 #### 결과
 
-상품 변경과 전송 예약은 함께 commit·rollback되고, 명시 실행한 relay는 중단 뒤 남은 미전달 작업을 다시 처리합니다. 중복·순서 역전은 상품별 버전과 엔진 정본으로 판정하며, source·target 식별이 달라지면 ACK하지 않습니다. 이 동작을 공개 검색 전환이나 색인 유실의 자동 복구로 확대하지 않습니다. [생산 근거](docs/plans/2026-11-01-product-search-outbox.md)와 [relay의 상세 근거·한계](docs/plans/2026-11-01-durable-search-relay.md)는 별도 기록에 보존했습니다.
+상품 변경과 전송 예약은 함께 commit·rollback되고, 명시 실행한 relay는 중단 뒤 남은 미전달 작업을 다시 처리합니다. 중복·순서 역전은 상품별 버전과 엔진 정본으로 판정하며, source·target 식별이 달라지면 ACK하지 않습니다. 이 동작을 공개 검색 전환이나 색인 유실의 자동 복구로 확대하지 않습니다. [생산 근거](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-product-search-outbox.md)와 [relay의 상세 근거·한계](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)는 별도 기록에 보존했습니다.
 
 #### 대체안/회고
 
@@ -279,7 +279,7 @@ PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전�
 
 #### 결과
 
-승인된 snapshot의 명시 ID·epoch·주문 금액·원문 JSON·전달 상태를 유지한 복사와 읽기 전용 대조를 제공합니다. 기존 데이터를 병합하거나 충돌을 정규화하지 않으며, 결과 미확인/연결 종료 실패도 성공·rollback과 구분합니다. 실제 확인 범위와 한계는 [작업 기록](docs/plans/2026-11-02-postgresql-source-import.md)에 남겼습니다.
+승인된 snapshot의 명시 ID·epoch·주문 금액·원문 JSON·전달 상태를 유지한 복사와 읽기 전용 대조를 제공합니다. 기존 데이터를 병합하거나 충돌을 정규화하지 않으며, 결과 미확인/연결 종료 실패도 성공·rollback과 구분합니다. 실제 확인 범위와 한계는 [작업 기록](https://github.com/Pubburi/Backend/blob/3748f25718e13a2e76012d1a86c5a9fd36b75fe6/docs/plans/2026-11-02-postgresql-source-import.md)에 남겼습니다.
 
 #### 대체안/회고
 

@@ -63,4 +63,4 @@ consumer guard는 현재 snapshot의 모든 hard·별도 선택과 conditions/pa
 클릭 없이 검색을 실행하지 않는다. 실제 검색의 빈 결과/400·현재 상품 값은 해당 API가 판정한다.
 
 전체 R06 웹 소비·문구 선택/실제 검색 인수, B1 개인화·공개 엔진 검색/PG fallback·DB05–06
-cutover는 별도 미완료다. [작업/검증 기록](plans/2026-11-04-owned-search-phrases.md)을 따른다.
+cutover는 별도 미완료다. [작업/검증 기록](https://github.com/Pubburi/Backend/blob/aeb0949e8ac4b2a56535e4c8280360a7edad86d5/docs/plans/2026-11-04-owned-search-phrases.md)을 따른다.

@@ -95,4 +95,4 @@ bounded output을 사용하며 상한 초과는 부분 artifact만 남기고 실
 포함되므로 원본 수준의 비공개 자료다. Git/PR/CI artifact/채팅/로그에 공개하지 않는다. 이관 전
 보관 기간/백업 암호화·접근 통제는 별도로 정하고 후속 작업에서 공개 raw seed를 재생성하지 않는다.
 
-실제 검증/준비 실패·완료 범위는 [작업 기록](plans/2026-11-02-mysql-source-snapshot.md)에 둔다.
+실제 검증/준비 실패·완료 범위는 [작업 기록](https://github.com/Pubburi/Backend/blob/f30e32d65ab72be29b31a6aa9830f6e98970cbb8/docs/plans/2026-11-02-mysql-source-snapshot.md)에 둔다.

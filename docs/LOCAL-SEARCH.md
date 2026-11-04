@@ -110,5 +110,5 @@ receipt는 completed=false와 확인된 적용/중복/오래된 이벤트 수를
 검증기의 로그 수집 실패도 실패로 기록하지만, 소유 확인을 마친 컨테이너/볼륨 정리는 계속한다.
 소유자 불일치나 실제 삭제 실패는 cleanup_failed로 남기며 비소유 자원을 제거하지 않는다.
 
-실제 검증·초기 실패/수정·제한은 [S02 작업 기록](plans/2026-11-01-local-search-replay.md), 실행은
+실제 검증·초기 실패/수정·제한은 [S02 작업 기록](https://github.com/Pubburi/Backend/blob/e7a957babd094442d9e027174bb795aefccc4219/docs/plans/2026-11-01-local-search-replay.md), 실행은
 [TESTING](TESTING.md)을 따른다. 현재 검색 품질·응답 속도·서비스 사용자 성과는 측정하지 않았다.

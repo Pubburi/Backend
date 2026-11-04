@@ -14,11 +14,10 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 import uuid
-import zipfile
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 
 from postgresql_schema import verify_owned_postgres
-from jpa_smoke import defer_termination
+from jpa_smoke import defer_termination, verify_jar as validate_jar, verify_openapi_scope
 
 REQUIRED = frozenset(('PUBBURI_PG_URL', 'PUBBURI_PG_DB_NAME', 'PUBBURI_PG_USER',
     'PUBBURI_PG_PASSWORD', 'PUBBURI_PG_RUN_TOKEN', 'PUBBURI_PG_CA',
@@ -30,7 +29,6 @@ OPTIONAL = frozenset(('PUBBURI_LOG_LEVEL', 'PUBBURI_RECOMMENDATION_BASE_URL',
     'PUBBURI_CONTENT_CATALOG_PATH', 'PUBBURI_CONTENT_CATALOG_SHA256'))
 INPUTS = ('pom.xml', 'mvnw', '.mvn', 'src/main', 'tools/jpa-rehearsal/pom.xml',
           'tools/jpa-rehearsal/src/main', 'tools/postgresql-migration/src/main/resources')
-METHODS = frozenset(('get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'))
 
 
 def reject():
@@ -176,14 +174,6 @@ def package(local, destination):
         print('PostgreSQL release packaged; no database was accessed or prepared.', flush=True)
 
 
-def validate_jar(path):
-    with zipfile.ZipFile(path) as jar:
-        names = jar.namelist()
-        if ('BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class' not in names
-                or any('BOOT-INF/lib/mybatis' in name or 'BOOT-INF/lib/mysql-connector' in name for name in names)):
-            reject()
-
-
 def release(path, local):
     directory = private_directory(path, local)
     value = strict_json(private_file(directory / 'manifest.json', 2 * 1024 * 1024))
@@ -197,11 +187,11 @@ def release(path, local):
             or not re.fullmatch(r'[0-9a-f]{40}', value['source_commit'])
             or value['source_files'] != source_files(local)):
         reject()
-    # Commit binding is checked against actual Git objects, not a claimed manifest ID.
-    for name, expected in value['source_files'].items():
-        body = subprocess.check_output(['git', 'show', value['source_commit'] + ':' + name], cwd=local.BACKEND)
-        if hashlib.sha256(body).hexdigest() != expected:
-            reject()
+    # Current inputs are clean and hash-pinned above; one tree comparison binds
+    # the whole set to the recorded commit instead of re-reading each Git blob.
+    if subprocess.run(['git', 'diff', '--quiet', value['source_commit'], '--', *INPUTS],
+                      cwd=local.BACKEND, stderr=subprocess.PIPE).returncode:
+        reject()
     private_file(directory / 'runtime.jar', 150 * 1024 * 1024)
     if sha(directory / 'runtime.jar') != value['jar_sha256']:
         reject()
@@ -239,11 +229,8 @@ def api_ready(base_url):
         body = response.read(2 * 1024 * 1024 + 1)
         if len(body) > 2 * 1024 * 1024:
             reject()
-        paths = strict_json(body)['paths']
-    if (len(paths) != 37 or sum(key in METHODS for methods in paths.values() for key in methods) != 44
-            or 'post' not in paths.get('/api/users/me/recommendations/content', {})
-            or 'put' not in paths.get('/api/users/me/password', {})):
-        reject()
+        docs = strict_json(body)
+    verify_openapi_scope(docs)
 
 
 def child_environments(env):
@@ -259,23 +246,9 @@ def child_environments(env):
     return backend, frontend, recommendation
 
 
-@contextmanager
-def lifecycle_record(local):
-    record = {}
-    try:
-        yield record
-    finally:
-        if 'directory' in record:
-            children = record['children']
-            stopped = all(c.poll() is not None and not local.group_exists(c.pid) for c in children)
-            write_json(record['directory'] / 'stopped.json', {
-                'application_processes_stopped': stopped, 'database_retained': True,
-                'pids': [c.pid for c in children]})
-
-
 def start(local, args):
     env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only)
-    with local.operation_lock(), lifecycle_record(local) as audit, ExitStack() as stack:
+    with local.operation_lock(), ExitStack() as stack:
         ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT']
         for key in ports:
             with socket.socket() as candidate:
@@ -289,7 +262,6 @@ def start(local, args):
             reject()
         backend_env, frontend_env, recommendation_env = child_environments(env)
         children = []
-        audit.update(directory=run_dir, children=children)
         def spawn(name, cwd, command, child_env):
             log = stack.enter_context((run_dir / (name + '.log')).open('x'))
             os.chmod(run_dir / (name + '.log'), 0o600)
@@ -331,9 +303,6 @@ def start(local, args):
                 if pending:
                     time.sleep(0.25)
             local.probe('backend', 'http://127.0.0.1:' + env['PUBBURI_FRONTEND_PORT'] + '/api/products?page=1&size=1')
-        write_json(run_dir / 'ready.json', {'provider': manifest['provider'], 'source_commit': manifest['source_commit'],
-            'jar_sha256': manifest['jar_sha256'], 'backend_only': args.backend_only,
-            'pids': [c.pid for c in children], 'api_paths': 37, 'api_operations': 44})
         print('PostgreSQL applications ready (37 paths / 44 operations); database retained on every exit.', flush=True)
         if args.command == 'up':
             while all(child.poll() is None for child in children):

@@ -83,7 +83,7 @@ total 일치), DATABASE_FALLBACK(오류/불일치/미지원)으로 구분한다.
 [페이지 범위](https://docs.opensearch.org/latest/search-plugins/searching-data/paginate/),
 [검색 API](https://docs.opensearch.org/latest/api-reference/search-apis/search/)를 따른다.
 명시한 index는 기존 [source-bound relay](SEARCH-RELAY.md)로 준비하며 공개 앱이 자동 재색인하거나
-유실된 index/alias를 복구하지 않는다. [구현/검증 기록](plans/2026-11-04-public-search-fallback.md)을 따른다.
+유실된 index/alias를 복구하지 않는다. [구현/검증 기록](https://github.com/Pubburi/Backend/blob/41eeffb3257a6b26d6ba530d58f67ff0bc443c11/docs/plans/2026-11-04-public-search-fallback.md)을 따른다.
 
 예를 들어 다음은 원화/도수와 명시 태그를 모두 만족하는 상품의 첫 페이지를 조회한다. 태그는
 계약 설명용 값이며 실제 상품의 맛을 주장하지 않는다.
@@ -92,6 +92,6 @@ total 일치), DATABASE_FALLBACK(오류/불일치/미지원)으로 구분한다.
 /api/products?minPriceKrw=1000&maxPriceKrw=20000&minAbvPercent=0&maxAbvPercent=10&tasteTag=dry&tasteTag=sweet&aromaTag=floral&sort=priceAsc&page=1&size=12
 ~~~
 
-검증·제한은 [작업 계획](plans/2026-11-01-product-search-filters.md)과 [TESTING](TESTING.md)에 둔다.
+검증·제한은 [작업 계획](https://github.com/Pubburi/Backend/blob/de7f80747932996678577b0ce9dfd779667846ed/docs/plans/2026-11-01-product-search-filters.md)과 [TESTING](TESTING.md)에 둔다.
 현재는 두 DB의 필수조건과 명시 엔진 읽기/현재 DB 대체를 제공한다. 전체 F02·재색인/유실 복구·
 기본 스택 전환과 부하/검색 품질 인수 완료를 뜻하지 않는다.

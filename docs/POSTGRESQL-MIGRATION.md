@@ -16,7 +16,7 @@ DB06 실제 전환/rollback과 세 서버 필수 회귀는 MVP를 위한 선행/
 2027-01-01부터는 추가 튜닝·실측 최적화·신뢰성 강화·확대 회귀·최종 인수/문서를 진행한다.
 남은 필수 기능과 기술 선행·필수 결함을 독립 리팩터링/선택 최적화보다 우선한다.
 최종2027-02-05와 2027-02-06 00:00 Asia/Seoul 구현·커밋·병합 중단은 유지한다.
-자세한 판정은 [일정 변경 기록](plans/2026-11-03-mvp-deadline.md)을 따른다.
+자세한 판정은 [일정 변경 기록](https://github.com/Pubburi/Backend/blob/9033935f209df82a6b3dac351762c23ca1359887/docs/plans/2026-11-03-mvp-deadline.md)을 따른다.
 
 ## ADR — 실행 계층과 스키마 책임
 
@@ -132,55 +132,17 @@ python3 scripts/postgresql_schema.py reserve-identities
 [ALTER RESTART는 transactional](https://www.postgresql.org/docs/18/sql-altersequence.html)이다.
 이는 gapless ID 보장이 아니며 관리자 직접 sequence 변경/구 앱 혼용을 자동 통제하는 기능도 아니다.
 
-## 후속·완료 판정
+## 현재 제공과 남은 전환
 
-DB02는 승인 snapshot의16표 전체 행/원문 payload·PK/FK/epoch·시간/문자열/실수·source-next를
-검수하는 빈 target import를 제공한다. 현재 copied source·허구 typed fixture의 실제 근거와
-한계는 [import 기록](plans/2026-11-02-postgresql-source-import.md)을 따른다. 원본 규모/권한/문자열
-질의 동등성과 실제 서비스 재인수·전환까지 전체 DB02/프로젝트 완료로 일반화하지 않는다. DB03은 MyBatis/MySQL 최종 runtime 제거와 실제 JPA API, DB04는 거래/계정 수명,
-DB05는 Psycopg3·DB 실제시각 lease/ACK·검색 대체, DB06은 전체 로컬/CI/웹 인수·cutover/rollback이다.
-DB03의 현재 세션·매장 증분은 별도 폐기 PG/TLS·최소 runtime 역할에서 기존 DTO/서비스·Repository·
-projection·비밀번호 CAS와 사용자 전체 잠금의 실제 의미를 확인한다. 전체 미제공 DAO/업무 API는
-후속이며 [제공 범위/검증 기록](plans/2026-11-02-jpa-market-rehearsal.md)을 따른다.
-이후 [상품/특성 읽기 증분](plans/2026-11-02-jpa-product-reads.md)은 네 기존 GET의 실제 JPA 조회·
-AND 필터/정렬/페이지·단정도/unknown·RR snapshot을 제공한다. 당시 최소 runtime에는 상품/특성/태그 SELECT만 추가했다.
-이어 [상품 쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md)은 기존 상품/특성 Controller·서비스와
-실제 Repository를 연결하고 같은 TX의 version/event/PENDING·삭제 이력·롤백/잠금을 검증한다.
-원문 JSON과 source UUID/binding·ACK를 유지하며 relay·다른 업무와 기본 실행 경로 전환은 미완료다.
-다음 [주문 증분](plans/2026-11-02-jpa-order-transactions.md)은 원래 여섯 주문 작업과 주문/상세/스탬프
-Repository를 연결하고 상품 수·이벤트·회원 합계까지 같은 TX로 묶는다. 전체 DB04/기본 실행 전환과 구분한다.
-이어 [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md)은 원래 가입/사용자 Controller와
-기존 실제 User/Order Repository를 연결한다. 프로필·등급·계정/세션 수명을 같은 공개 계약으로 제공한다.
-[후기 증분](plans/2026-11-03-jpa-comments.md)은 실제 Comment Repository/DTO projection으로 기존
-평점/본문·공개/관리자 페이지·작성자/관리자 변경·부모 cascade와 좁은 권한을 연결한다.
-[찜 증분](plans/2026-11-03-jpa-favorites.md)은 복합 PK/현재 상품 projection과 epoch 단건/RR·
-User→Product 잠금·문장 시각의 conflict-safe INSERT를 연결하며 본인 외 관계를 공개하지 않는다.
-[명시취향 증분](plans/2026-11-03-jpa-preferences.md)은 두 실제 Repository와 원래 서비스의
-RR·사용자 잠금/epoch·헤더/값 전체 교체를 연결한다. skip/reset·미입력/null/[]/0을 보존한다.
-[공개 기본 목록 증분](plans/2026-11-03-jpa-default-recommendations.md)은 원래 B0 호출 계층과
-기존 JPA 후보/현재 상품 projection을 연결한다. 새 DB 권한 없이 짧은 TX·현재 값/삭제 fallback을 유지한다.
-[본인 이름·암호 공급](plans/2026-11-03-self-account-settings.md)은 공통 서비스의 기존 사용자 전체 잠금/
-update로 두 DB에 같은 self API를 추가한다. 역할/스탬프·자격 수명과 SQL 실패 rollback을 유지하며
-새 schema/DAO/GRANT 없이 현재 JPA 범위에 포함한다.
-[Psycopg3 relay 어댑터](plans/2026-11-04-postgresql-search-relay.md)는 같은 명시 CLI/Engine에
-PostgreSQL 실제시각·타입/원문·최소 권한을 연결한다. 기존 MySQL 경로를 보존한다.
-[공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은 같은 GET에서 source-bound 엔진
-ID/total과 현재 canonical RR 결과가 같을 때 현재 DB 필드를 반환한다. 지연/누락/장애도 모든
-필수조건의 PG 응답으로 대체한다. 기존 target SELECT를 재사용해 추가 GRANT/schema는 없다.
-현재 DB 확인 비용을 유지하며 최종 runtime/cutover·전체 DB05–06은 후속이다.
-[본인 문구 caller](plans/2026-11-04-owned-search-phrases.md)는 canonical 취향 서비스의 현재
-epoch-bound snapshot을 명시 제공자에 전달한다. 공통 MySQL/JPA 코드와 기존 권한으로 연결하며
-상품 검색/로컬 추천 fallback·전체 R06 웹/DB05 전환 완료를 뜻하지 않는다.
-[본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 기존 Repository/공통 DTO·canonical 취향과
-두 특성 batch projection을 사용한다. 새 스키마/GRANT 없이 현재 mapped 상품·특성의 RR 전후
-검증과 수명/조건·DB 오류 구분을 제공하며 원격 fit은 TX 밖이다. 기본 runtime 전환은 아니다.
-DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
-이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
-복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.
-실제 검증/제약은 [작업 기록](plans/2026-11-02-postgresql-schema-foundation.md)에 남긴다.
+DB02의 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md)는16표 전체 값/PK·
+7개 고수위·UUID/epoch·원문 JSON/receipt를 검수한다. DB03의 [명시 JPA 제공자](JPA-REHEARSAL.md)는
+37경로/44작업과 거래/계정 수명·취향/찜·기존 추천 caller를 제공한다. [로컬 실행](LOCAL-DEVELOPMENT.md)은
+완료 release를 준비된 소유 copied PG에 연결하며 schema/역할을 만들거나 DB를 초기화하지 않는다.
 
+DB05의 [Psycopg3 relay](SEARCH-RELAY.md)와 [공개 검색/필수조건 대체](PRODUCT-SEARCH.md)는
+같은 source/target binding·기존 ACK·현재 DB 사실을 보존한다. JPA 공개 앱은 엔진/ACK를 쓰지 않는다.
+필수 검증과 원본/자원 보존 정책은 [TESTING](TESTING.md)을 따른다.
 
-DB06의 [명시 로컬 release 증가분](plans/2026-11-04-postgresql-local-release.md)은 현재37/44
-JPA JAR를 source 입력/commit·완료 manifest에 결속하고 준비된 소유 copied PG에서 실행한다.
-기본 MySQL 기동·installer/import와 분리하며 기존 최소 runtime guard와 `/api` 프록시를 재사용한다.
-DB 생성/초기화·권한 확대·기본 DB 전환이나 cutover 후 쓰기의 역이관을 자동화하지 않는다.
+기본 MySQL/MyBatis 제거·실제 전환·콜레이션/전체 업무·웹 재인수·relay 운영·cutover 후 쓰기
+역이관/rollback은 DB03–06의 남은 게이트다. TX/문장/실제시각과 잠금 의미를 이름만 보고 복사하지
+않고 원본/과거 검증을 PG 성과로 바꾸지 않는다. UUID/ACK 초기화·재색인을 복구로 자동 실행하지 않는다.

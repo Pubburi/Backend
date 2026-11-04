@@ -34,48 +34,14 @@ AWS는 후속 사용자 지시 전까지 연결하지 않고 [로컬 개발](LOC
 12월31일 완료는 계획/부분 API나 단위 성공만으로 표시하지 않는다. 각 소유 영역의 실제 기능과
 연결 근거·세 실제 서버 흐름/필수 회귀, 최신 head의 필수 CI/완료 Codex/미해결0과 main 병합을 확인한다.
 검증되지 않은 항목은 미완료/차단으로 남기고 담당·선행 조건·다음 조치를 조정한다.
-이번 일정 변경 자체는 구현·기능 완료가 아니며 [변경 기록](plans/2026-11-03-mvp-deadline.md)에 구분한다.
 
 2026-11-01 최신 사용자 확정 목표는 PostgreSQL18.6·Spring Data JPA(Hibernate)·Flyway Community,
 Python relay는 Psycopg3다. [DB01–DB06 계약](POSTGRESQL-MIGRATION.md)을 우선 적용하며
 11월22일까지 전환과 보존 재인수를 목표로 한다. 기존 MySQL/MyBatis는 이관 전 기준/복사 검증용으로
-보존하고 기술 선정 대기로 두지 않는다. 현재 독립 PostgreSQL schema 도구와 실제 DB 검증은
-DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 완성 단위로 제공한다.
-승인 snapshot의 [빈 PG 복사/전행 검수](SOURCE-IMPORT.md)도 제공한다. DB03의
-[세션·매장 JPA 제공자](JPA-REHEARSAL.md)는 별도 명시 모듈에서 실제 API를 실행한다.
-해당 제공자에 상품 목록/인기/상세·특성 GET도 실제 projection/Criteria로 연결했다.
-상품 CRUD·특성 전체 교체와 같은 TX의 version/outbox/PENDING도 실제 JPA로 연결했다.
-기존 데모 주문 여섯 작업도 같은 제공자에서 주문/상세/스탬프와 상품 수/변경 이벤트를 한 TX로 연결한다.
-원래 UserRestController의 가입/ID 확인·프로필/등급·관리자 계정 관리도 기존 실제 JPA 영속 계층에 연결한다.
-공개 후기/관리자 목록과 작성·수정·삭제도 실제 Comment Repository와 원래 Controller/서비스로 연결한다.
-본인 찜의 단건 상태·페이지·저장/해제도 실제 복합 PK Repository와 기존 수명/멱등 계약으로 연결한다.
-본인 명시취향 조회/전체 교체도 두 실제 Repository와 원래 서비스의 RR·사용자 잠금/epoch·원자 교체로 연결한다.
-공개 비개인 기본 목록도 원래 호출 계층과 기존 JPA의 현재 상품 projection·장애/삭제 fallback으로 연결한다.
-[F09 본인 이름·비밀번호 공급](plans/2026-11-03-self-account-settings.md)은 기존 공통 사용자 서비스와
-잠금/epoch·현재 암호 확인·세션 CAS를 사용해 기본 MySQL과 JPA에 같은 API를 제공한다.
-전체 F09 React 인수와 전체 DB03–06/기본 DB 전환 완료는 각각의 실제 연결/전환 게이트로 판정한다.
-[R06 본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향의 canonical snapshot과 별도 검색
-선택을 기존 제공자에 연결한다. 두 DB의 원격 밖 TX·조건/수명/장애 구분을 유지하며 React 문구
-소비·실제 검색 인수와 전체 DB05–06은 별도다.
-[본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 현재 본인 취향과 Recommendation이 검증한
-명시 container-DEMO catalog를 기존 content/R04에 연결한다. 모든 mapped 현재 Product7/특성·
-조건/수명을 다시 확인하며 기본80 자동 fit·서비스 catalog 승인·전체 R02/R04/웹 완료와 구분한다.
-[공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은 기존 GET의 opt-in 엔진 ID/total을
-현재 canonical RR 페이지와 대조하고 모든 오류/불일치에서 같은 필수조건의 DB 응답을 반환한다.
-기존 JSON·기본 비활성·현재 DB 확인 비용을 유지하며 검색 품질/성능·기본 스택 전환을 뜻하지 않는다.
-[읽기 검증](plans/2026-11-02-jpa-product-reads.md), [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md),
-[주문 증분](plans/2026-11-02-jpa-order-transactions.md), [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md),
-[후기 증분](plans/2026-11-03-jpa-comments.md), [찜 증분](plans/2026-11-03-jpa-favorites.md),
-[명시취향 증분](plans/2026-11-03-jpa-preferences.md),
-[공개 기본 목록 증분](plans/2026-11-03-jpa-default-recommendations.md)을 구분하며
-[Psycopg3 명시 relay](plans/2026-11-04-postgresql-search-relay.md)는 기존 Engine/CLI에
-별도 PostgreSQL Store를 연결한다. 기본 runtime과 전체 DB03–06은 후속이다.
-미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
-원본/업무 재인수·relay·cutover 완료와 구분한다.
-
-DB06의 [명시 local release 실행](plans/2026-11-04-postgresql-local-release.md)은 준비된 copied PG와
-현재 JPA37/44 JAR를 source/완료 manifest로 고정해 로컬에서 실행하는 증가분이다. 기본 MySQL은
-유지하며 실제 전환·cutover 후 쓰기의 역이관/rollback·전체 서비스 재인수는 후속 게이트다.
+보존하고 기술 선정 대기로 두지 않는다. 현재 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md),
+[명시 JPA37경로/44작업](JPA-REHEARSAL.md)과 [소유 PG 로컬 실행](LOCAL-DEVELOPMENT.md)을 제공한다.
+기본 MySQL/MyBatis는 아직 이관 전 기준이며 전체 전환·쓰기 중단/역이관·rollback·서비스 재인수는
+미완료다. 부분 API·fixture 통과를 DB03–06 전체 완료로 세지 않는다.
 
 ## 검색·추천 연동
 
@@ -89,42 +55,12 @@ Backend는 추천 요청의 인증·업무 맥락·최신 상품 유효성·시�
 
 ## 작업 소유권·실행
 
-현재 채팅의 4시간 예약·sol/ultra와 조정자/세 영역 에이전트를 유지한다. [운영 경계](AUTOMATION-PLAYBOOK.md)를
-따르고 최신 지시·승인 기획·자기 레포 AGENTS·진행 계획·Git/PR/CI를 확인한다.
-기획 접근 실패를 전체 완료로 보지 않고 마지막 확인 계획의 독립 작업을 진행한다.
-
-작업 전에 활성 채팅·Git·ignored 체크포인트·`.pubburi/automation-lease/`를 확인하고
-`scripts/automation_lease.py`로 소유권을 원자적으로 획득한다. 조정자는 담당/파일/Git 소유자를
-기록하고 동일 파일·index·브랜치를 동시 수정하지 않는다. 살아 있는 소유권을 시간 만료만으로
-빼앗거나 kill/stash/reset하지 않는다. 종료 작업은 실제 종료·Git/프로세스 근거를 확인한 뒤 재개한다.
-사용자 변경·다른 작업자의 프로세스·미병합 브랜치를 보존한다. 다른 사용자 채팅·외부 사람에게
-메시지를 보내지 않고 현 채팅 하위 에이전트 협업은 허용한다. 기존 권한·비용·외부 연락 경계는 유지한다.
-
-MVP 전에는 남은 필수 기능·DB/React/검색/추천의 기술 선행·필수 인수를 막는 결함을 우선한다.
-다른 영역 대기 중에도 독립적인 필수 Backend 작업을 진행하고, 독립 포트폴리오·리팩터링·선택
-최적화로 지연하지 않는다. 추가 개선/실측 최적화는 2027-01-01부터 진행하며, 정합성·권한·
-장애 fallback의 필수 회귀를 그때 처음 검증하는 일정으로 해석하지 않는다.
-근거 없는 리팩터링·반복 문서·빈 커밋은 만들지 않는다.
+[작업 규칙](../AGENTS.md)의 단독 소유권·4시간 운영·리뷰/CI 게이트를 따른다.
+기능/버그와 현재 실행 계약은 해당 정본·코드/테스트에서 관리하고 실행별 경과를 반복 복제하지 않는다.
 
 ## 검증·리뷰·인계
 
-main에 직접 쓰지 않고 Conventional Commit과 작업 브랜치·PR을 사용한다.
-**최신 head의 필수 CI·완료된 Codex 리뷰·관련 검증·미해결 지적 없음**을 확인한 뒤 Squash merge한다.
-대기·실패·쿼터 제한은 승인이 아니며 보호 규칙을 완화하거나 리뷰를 임의 승인·기각·삭제하지 않는다.
-구체적 지적은 수정·검증 후 원래 스레드를 읽고 한국어 커밋/검증 답글과 native conversation 해결을 처리한다.
-outdated만으로 해결을 추정하지 않고 중복 답글을 피한다. PR/head/review/thread/comment ID·상태는
-ignored 체크포인트에 기록한다. 병합 기록·main CI를 확인하고 ff-only 동기화한 뒤
-추가 변경이 없는 병합 브랜치를 원격/로컬 모두 삭제한다.
-
-검증 조건·원값·실패·한계를 기록한다. 성능은 변경 전 병목·가설·기준 커밋·입력/환경·캐시·워밍업·반복을
-정해 실측하고 같은 조건의 변경 후 분포·절대 차이·개선율을 남긴다. 0 기준값·잡음·테스트 수·CI 시간으로
-서비스 성능을 만들지 않으며 문서 변경에 무관한 측정을 강제하지 않는다.
-
-실사용자가 없는 비상업 프로젝트이며 시연 계정/가격/주문을 실제 인기·구매 성과로 표시하지 않는다.
-업무 데이터·권한·개인정보·보관/삭제의 성격을 보존한다. 추천 학습은 사용자 축적을 기다리지 않는
-Recommendation 계획에 따른다. 데이터/모델의 상세 판단과 실험은 추천 레포에서 수행한다.
-
-Backend README는 현재 기능·기술과 실제 사례 네 개를 목표로 관리한다. 더 강한 실제 사례가
-있을 때만 교체하고 없으면 유지한다. 스크린샷·준비 중·후속 프로젝트 소개·관련 프로젝트/개발자/기획
-링크 모음을 넣지 않는다. 검증 근거는 계획·PR·CI에 남긴다. 개인 경로·자격정보·로컬 원문 로그·
-비공개 기획 주소는 공개 근거에 포함하지 않는다.
+기본/실제 DB·세 서버 필수 검사는 [TESTING](TESTING.md)을 따른다. 최신 head의 필수 CI·완료 Codex·
+미해결0과 main 병합/검사까지 확인하며, skip·대기·환경 실패를 성공으로 세지 않는다.
+관측하지 않은 성능/사용자 성과를 만들지 않는다. README의 네 사례와 원래 재현/측정 근거를
+보존하고 새 기능·회귀 수만으로 교체하지 않는다. 개인정보·자격·원문 로그는 공개 기록에 넣지 않는다.

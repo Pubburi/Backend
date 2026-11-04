@@ -95,12 +95,28 @@ def child_environment(environ):
 def verify_jar(path):
     with zipfile.ZipFile(path) as archive:
         names=archive.namelist()
+    if "BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class" not in names:
+        raise ValueError("jpa_runtime_provider_missing")
     if any(name.startswith("BOOT-INF/lib/") and any(bad in name.lower() for bad in ("mybatis","mysql-connector","h2-")) for name in names):
         raise ValueError("jpa_runtime_legacy_driver_rejected")
     if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","JpaSessionController.class")):
         raise ValueError("jpa_runtime_unregistered_scope_rejected")
     if not any("spring-data-jpa-" in name for name in names) or not any("hibernate-core-" in name for name in names):
         raise ValueError("jpa_runtime_provider_missing")
+
+
+def verify_openapi_scope(docs):
+    if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
+            "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
+            "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
+            "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
+            "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
+            "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
+            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content"}:raise ValueError("jpa_runtime_route_scope_changed")
+    operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
+    if operations!=44:raise ValueError("jpa_runtime_operation_scope_changed")
+    verify_content_recommendation_openapi(docs)
+    return operations
 
 
 def cleanup_owned(processes,stop):
@@ -325,16 +341,7 @@ def run(environ):
         expect(request(ordinary,base,"PATCH","/api/admin/orders/"+str(order_id)+"/complete")[0],403)
         expect(request(admin,base,"GET","/api/orders")[0],405)
         status,docs=request(admin,base,"GET","/v3/api-docs");expect(status,200)
-        if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-                "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
-                "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
-                "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
-                "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
-                "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content"}:raise ValueError("jpa_runtime_route_scope_changed")
-        operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=44:raise ValueError("jpa_runtime_operation_scope_changed")
-        verify_content_recommendation_openapi(docs)
+        operations=verify_openapi_scope(docs)
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         default_selection(base)

@@ -8,6 +8,8 @@ import re
 import subprocess
 import signal
 import select
+import socket
+from types import SimpleNamespace
 import sys
 import time
 
@@ -64,6 +66,32 @@ def command(args,env,log,budget=180):
         os.close(read)
         if write is not None:os.close(write)
     if code:raise ValueError("jpa_ci_rehearsal_failed")
+
+def local_release(environ):
+    import local_stack
+    import postgresql_local as pg
+    if environ.get('PUBBURI_JPA_CI') != '1':
+        pg.reject()
+    name = 'pg-local-ci-' + secrets.token_hex(16)
+    directory = local_stack.STATE / name
+    release = local_stack.STATE / (name + '-release')
+    directory.mkdir(mode=0o700)
+    env = {key: environ[key] for key in pg.REQUIRED if not key.endswith('_PORT')}
+    with socket.socket() as one, socket.socket() as two, socket.socket() as three:
+        for listener, key in zip((one,two,three), ('PUBBURI_SERVER_PORT','PUBBURI_FRONTEND_PORT','PUBBURI_RECOMMENDATION_PORT')):
+            listener.bind(('127.0.0.1',0))
+            env[key] = str(listener.getsockname()[1])
+    config = directory / 'config.json'
+    pg.write_json(config, {'schema_version':1,'environment':env})
+    # Run in this process so TERM/KeyboardInterrupt unwinds the launcher's
+    # owned process-group cleanup, rather than killing a nested CLI on timeout.
+    with cleanup_on_termination():
+        pg.package(local_stack, release)
+        pg.start(local_stack, SimpleNamespace(pg_config=config, release_dir=release,
+            backend_only=True, command='smoke'))
+    print('Owned PostgreSQL packaged local launcher passed; database retained.')
+
+
 
 def run(environ,snapshot,directory):
     if environ.get("PUBBURI_JPA_CI")!="1":raise ValueError("jpa_ci_explicit_rehearsal_required")
@@ -126,7 +154,6 @@ def run(environ,snapshot,directory):
     command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","verify"],
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
-    from postgresql_local_ci import run as local_release
     local_release(normal)
     if environ.get("PUBBURI_PG_RELAY_CI")=="1":
         from prepare_postgresql_relay_ci import prepare

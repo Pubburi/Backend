@@ -11,8 +11,8 @@ S01–S05는 F02·R06·R02의 기술 작업이며 R 8개 + F 12개 = 20개 기�
 최신 확정 업무 DB 목표는 [PostgreSQL18.6/JPA 전환](POSTGRESQL-MIGRATION.md)이다. 아래 기존
 MySQL 구현/측정은 이관 전 기준으로 보존하며 PostgreSQL/JPA/Psycopg3의 outbox·현재 상품
 재조회·필수조건 대체 검색을 DB03–DB06에서 재검증한다. schema 도입만으로 검색 전환을 완료하지 않는다.
-[PostgreSQL 명시 relay 증분](plans/2026-11-04-postgresql-search-relay.md)은 기존 MySQL 경로와
-같은 Engine/CLI에 Psycopg Store를 연결한다. 이어 [공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은
+[PostgreSQL 명시 relay 증분](https://github.com/Pubburi/Backend/blob/ac2b0cd15f77f85feffaefbd74b1a228e2839399/docs/plans/2026-11-04-postgresql-search-relay.md)은 기존 MySQL 경로와
+같은 Engine/CLI에 Psycopg Store를 연결한다. 이어 [공개 검색 증분](https://github.com/Pubburi/Backend/blob/41eeffb3257a6b26d6ba530d58f67ff0bc443c11/docs/plans/2026-11-04-public-search-fallback.md)은
 기존 GET의 opt-in 엔진 읽기를 현재 DB의 RR 페이지/total과 대조한다. 모든 오류/불일치는 같은
 필수조건의 PostgreSQL/MySQL 응답으로 대체한다. 기본 스택·재색인/유실 복구·전체 DB05–06은 후속이다.
 
@@ -35,7 +35,7 @@ Backend는 해당 추천 구현을 중복 보관하지 않고 필요한 상품/�
 ## 검색 기술 작업
 
 목표일은 기존 마일스톤 안에 배치한 내부 목표다. S01의 MySQL 필수조건 계약은
-[상품 검색](PRODUCT-SEARCH.md)과 [진행 기록](plans/2026-11-01-product-search-filters.md)에서 다루며
+[상품 검색](PRODUCT-SEARCH.md)과 [진행 기록](https://github.com/Pubburi/Backend/blob/de7f80747932996678577b0ce9dfd779667846ed/docs/plans/2026-11-01-product-search-filters.md)에서 다루며
 S01 전체·OpenSearch와 S02–S05 완료로 표시하지 않는다.
 
 | ID | 담당 | 우선순위·목표일 | 선행 조건 | 완료 기준 |
@@ -74,9 +74,9 @@ bulk의 개별 실패를 처리하고 재색인은 변경 재생을 완료한 �
 현재 구현은 가격/도수·명시 태그 필수조건과 페이지/정렬을 두 DB에서 보존하며 기존 공개 GET의
 명시 엔진 읽기/현재 DB 대조·대체를 제공한다. 현재 DB 확인 쿼리를 유지하므로 성능 개선으로 보지 않는다.
 선택적 OpenSearch3.9.0/nori·strict ID 문서/버전·삭제 표식·명시 재생은
-[S02 기록](plans/2026-11-01-local-search-replay.md)에 둔다. 원자적 업무 버전/outbox 생산은
-[생산 증가분](plans/2026-11-01-product-search-outbox.md), 개별 claim/ack·lease 재전달은
-[relay 증가분](plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·자동완성/동의어/오타·
+[S02 기록](https://github.com/Pubburi/Backend/blob/e7a957babd094442d9e027174bb795aefccc4219/docs/plans/2026-11-01-local-search-replay.md)에 둔다. 원자적 업무 버전/outbox 생산은
+[생산 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-product-search-outbox.md), 개별 claim/ack·lease 재전달은
+[relay 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·자동완성/동의어/오타·
 개인화 검색·성능 개선은 후속이다.
 R06의 [본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향과 별도 선택만 기존 제공자에
 전달하며 원격 뒤 현재 snapshot/수명을 확인한다. 조건 검증·장애/빈 결과는 구분하지만 상품을
