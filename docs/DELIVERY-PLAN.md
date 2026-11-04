@@ -54,6 +54,9 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 [F09 본인 이름·비밀번호 공급](plans/2026-11-03-self-account-settings.md)은 기존 공통 사용자 서비스와
 잠금/epoch·현재 암호 확인·세션 CAS를 사용해 기본 MySQL과 JPA에 같은 API를 제공한다.
 전체 F09 React 인수와 전체 DB03–06/기본 DB 전환 완료는 각각의 실제 연결/전환 게이트로 판정한다.
+[R06 본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향의 canonical snapshot과 별도 검색
+선택을 기존 제공자에 연결한다. 두 DB의 원격 밖 TX·조건/수명/장애 구분을 유지하며 React 문구
+소비·실제 검색 인수와 공개 엔진 검색/PG fallback·전체 DB05–06은 후속이다.
 [읽기 검증](plans/2026-11-02-jpa-product-reads.md), [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md),
 [주문 증분](plans/2026-11-02-jpa-order-transactions.md), [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md),
 [후기 증분](plans/2026-11-03-jpa-comments.md), [찜 증분](plans/2026-11-03-jpa-favorites.md),

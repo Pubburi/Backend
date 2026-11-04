@@ -25,6 +25,16 @@ from search_index import Engine, Http, SearchError, document, decode
 from search_relay import PostgresStore, Relay, connect_database, database_settings, target_identity, relay_status, claim_document
 from relay_smoke import event
 from jpa_smoke import child_environment, request_json, verify_jar, cleanup_on_termination, defer_termination
+from api_smoke import verify_search_phrase_openapi
+
+
+def verify_business_api(spec):
+    methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
+    operations = sum(method in methods for path in spec["paths"].values() for method in path)
+    assert len(spec["paths"]) == 36 and operations == 43
+    assert methods.intersection(spec["paths"].get("/api/users/me/search-phrases", {})) == {"post"}
+    verify_search_phrase_openapi(spec)
+    return {"api_paths": len(spec["paths"]), "api_operations": operations}
 
 
 def settings(environ, control=False):
@@ -475,8 +485,7 @@ def consume_business(http, endpoint, private, environ, index="pubburi-products-v
             expect("POST", "/api/auth/login", {"id": environ["PUBBURI_JPA_ADMIN_ID"], "pass": environ["PUBBURI_JPA_ADMIN_PASSWORD"]})
             before = business_snapshot(owner)
             spec = request("GET", "/v3/api-docs", cookies=anonymous)[1]
-            methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
-            assert len(spec["paths"]) == 35 and sum(method in methods for path in spec["paths"].values() for method in path) == 42
+            api_scope = verify_business_api(spec)
             watch_env = {key: value for key, value in child.items() if not key.startswith(("PUBBURI_", "PG"))}
             watch_env.update(PUBBURI_DB_URL=environ["PUBBURI_PG_URL"], PUBBURI_DB_USER=runtime["user"], PUBBURI_DB_PASSWORD=runtime["password"], PUBBURI_RELAY_DB_CA=runtime["ssl_ca"])
             with defer_termination():
@@ -512,7 +521,7 @@ def consume_business(http, endpoint, private, environ, index="pubburi-products-v
             state["phase"] = "passed"
             return {"environ": environ, "source_id": source_id, "index": index, "final": final,
                     "original_events": len(original_events), "authored_events": 4, "completed_ack_snapshot": completed_ack_snapshot(owner),
-                    "jar_sha256": jar_sha, "api_paths": 35, "api_operations": 42}
+                    "jar_sha256": jar_sha, **api_scope}
         finally:
             try:
                 if product_id is not None and process is not None and process.poll() is None:

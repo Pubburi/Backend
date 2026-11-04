@@ -77,6 +77,9 @@ bulk의 개별 실패를 처리하고 재색인은 변경 재생을 완료한 �
 [생산 증가분](plans/2026-11-01-product-search-outbox.md), 개별 claim/ack·lease 재전달은
 [relay 증가분](plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·공개 엔진 검색·
 개인화 검색·성능 개선은 미구현이다.
+R06의 [본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향과 별도 선택만 기존 제공자에
+전달하며 원격 뒤 현재 snapshot/수명을 확인한다. 조건 검증·장애/빈 결과는 구분하지만 상품을
+검색하지 않는다. React의 명시 선택/문구 클릭·실제 검색/빈 결과와 S04 전체는 별도 후속이다.
 추천 데이터·학습·평가와 관련된 DAT01–DAT04·AI01–AI04의 상세 진행은 Recommendation 정본에서 관리한다.
 
 기술 근거: [로컬 Docker](https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/),

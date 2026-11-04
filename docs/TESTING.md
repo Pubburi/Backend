@@ -132,6 +132,20 @@ legacy 해시·새 암호UTF-8 72바이트/초과·역할/스탬프/자격 보�
 기동 거절·재시작/재로그인과 실제 OpenAPI35경로/42작업을 확인한다.
 [공급/실제 조건](plans/2026-11-03-self-account-settings.md)을 전체 F09 웹·DB 전환과 구분한다.
 
+`JpaSearchPhraseIntegrationTests`는 본인 현재 취향 snapshot·strict 입력과 관리자/타계정 격리,
+원격 밖 TX·현재 null/[]/0/scale·원자 태그·soft 비승격/모든 hard와 변조 wire 거절을 확인한다.
+실제 원격 대기 중 취향 변경409·자격 회전/삭제재가입/로그아웃/다른 로그인401과 이름만 변경200을
+구분한다. 자기 새 계정의 C-key 두 값 k/K를 저장한 조건만으로 최종 검색400과 변조UNAVAILABLE를
+검사하고 원본/constraint는 바꾸지 않는다. 기존75와 신규5의 실제 PG80·단위3/준비2 skip을 구분한다.
+기본 단위는 최대40 UTF-16 태그40개·5문구의 정상 escaped body와128KiB/초과·700ms 미완료 본문,
+중복/추가 JSON·redirect/미디어 오류·DB 예외 전파와 private cache/세션 교체를 확인한다.
+기존 packaged MySQL 취향 계약에도 caller의 strict 입력/소유·원격 실패 경계를 포함하며 실제
+OpenAPI 경로와 별도 JPA JAR의36경로/43작업·재시작은 계속 필수다.
+[호출 기록](plans/2026-11-04-owned-search-phrases.md)의 실제 제공자/두 DB 대조는 fixture와 구분한다.
+PG relay business도 같은 실제 JPA의36경로/43작업과 새 경로의 POST 전용·strict 두 입력/
+owner query 부재·PROVIDER/UNAVAILABLE schema를 검사한다. 숫자만 같고 경로/메서드·소유자
+입력/대체 정책이 다른 문서는 거절하며 기존 실제 전달·재시작 검증을 생략하지 않는다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.

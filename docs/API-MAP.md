@@ -32,6 +32,7 @@
 - `PUT /api/users/me/password`: 본인 현재 암호 검증 후 변경, `{ "currentPassword": "현재 암호", "newPassword": "새 암호" }`
 - `GET /api/users/me/preferences`: 현재 계정만의 명시취향·설문 상태 조회
 - `PUT /api/users/me/preferences`: 현재 계정만의 명시취향 전체 교체
+- `POST /api/users/me/search-phrases`: 본인 현재 취향과 별도 검색 선택의 문구/정확 조건 호출
 - `GET /api/users/me/favorites?page=1&size=20`: 본인 찜의 현재 상품 페이지
 - `GET /api/users/me/favorites/{productId}`: 본인의 단건 찜 상태(없는 관계·없는/삭제 상품도 200 false)
 - `PUT /api/users/me/favorites/{productId}`: 본인 찜 저장(멱등, 기존 추가 순서 유지)
@@ -63,6 +64,10 @@ commit 뒤 관측 ID/epoch와 여전히 같은 요청 세션만 갱신하고 다
 명시취향은 관리자도 본인만 접근한다. soft 주종/태그/목표 도수와 hard 예산/허용 도수를 분리하고
 NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약](EXPLICIT-PREFERENCES.md)과
 [OpenAPI](openapi/explicit-preferences.json)를 따르며 기존 타인 profile/관리자 회원 응답에는 포함하지 않는다.
+
+본인 문구 호출은 strict `{searchOptInFields:[],limit:5}`만 받으며 저장 snapshot을 입력받지 않는다.
+`PROVIDER/result`와 `UNAVAILABLE/null`, 의미 변화409·수명401·최종 조건400·DB 오류500을
+구분하고 필수 조건을 뺀 검색으로 바꾸지 않는다. [호출 계약](SEARCH-PHRASES.md)을 따른다.
 
 찜도 관리자 포함 본인 전용이다. 요청 본문/소유자 선택 없이 세션 계정에 저장하며, 기존 상품 응답의
 현재 일곱 필드를 반환한다. [계정 찜 계약](ACCOUNT-FAVORITES.md)·[OpenAPI](openapi/account-favorites.json)의

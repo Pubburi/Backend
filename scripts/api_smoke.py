@@ -194,6 +194,7 @@ def documentation_contract(port):
     verify_preference_openapi(document)
     verify_favorite_openapi(document)
     verify_default_recommendation_openapi(document)
+    verify_search_phrase_openapi(document)
     verify_product_filter_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
@@ -305,6 +306,21 @@ def product_page_offset_contract(client):
         query = f"/products?page={page}&size={size}&sort=priceAsc"
         expected = f"/products?page=1&size={normalized_size}&sort=priceAsc"
         assert client.request("GET", query, 200)["data"] == client.request("GET", expected, 200)["data"]
+
+
+def verify_search_phrase_openapi(document):
+    operation = document["paths"]["/api/users/me/search-phrases"]["post"]
+    schemas = document["components"]["schemas"]
+    request = operation["requestBody"]["content"]["application/json"]["schema"]
+    request = schemas[request["$ref"].split("/")[-1]]
+    assert request["additionalProperties"] is False
+    assert set(request["properties"]) == {"searchOptInFields", "limit"}
+    assert not operation.get("parameters"), "The owner cannot be chosen with query parameters"
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    envelope = schemas[response["$ref"].split("/")[-1]]
+    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
+    assert set(data["properties"]) == {"source", "result"}
+    assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
 
 
 def default_recommendation_contract(client, expected_source=None):
@@ -825,6 +841,23 @@ def private_preference_contract(environ):
     saved = owner.request("PUT", path, 200, declared)["data"]
     assert saved["softPreferences"] == dict(declared["softPreferences"], categories=["탁주"], tasteTags=["dry", "sweet"])
     assert saved["hardConstraints"] == declared["hardConstraints"]
+    assert owner.request("GET", path, 200)["data"] == saved
+    # The caller reads only this already-stored snapshot; it never accepts another owner's data.
+    phrase_path = "/users/me/search-phrases"
+    public.request("POST", phrase_path, 401, {}, "UNAUTHORIZED")
+    phrases = owner.request("POST", phrase_path, 200, {"searchOptInFields": ["tasteTags"], "limit": 5})["data"]
+    assert set(phrases) == {"source", "result"}
+    assert phrases["source"] in {"PROVIDER", "UNAVAILABLE"}
+    if phrases["source"] == "UNAVAILABLE":
+        assert phrases["result"] is None
+    else:
+        assert phrases["result"]["algorithm"] == "r06-explicit-search-phrases-v1"
+        assert phrases["result"]["product_count"] is None
+    for invalid in ({"userId": user_id}, {"preferences": saved}, {"limit": True}, {"limit": "1"},
+                    {"limit": 1.0}, {"limit": 0}, {"searchOptInFields": None},
+                    {"searchOptInFields": [None]}, {"searchOptInFields": ["tasteTags", "tasteTags"]}):
+        owner.request("POST", phrase_path, 400, invalid, "VALIDATION_FAILED")
+    owner.request("POST", phrase_path + "?userId=other", 400, {}, "BAD_REQUEST")
     assert owner.request("GET", path, 200)["data"] == saved
     assert owner.request("PUT", path, 200, declared)["data"] == saved
     assert other.request("GET", path, 200)["data"] == empty()

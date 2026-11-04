@@ -10,11 +10,18 @@ import org.springframework.context.annotation.Configuration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pubburi.pub.recommendation.BaselineGateway;
 import com.pubburi.pub.recommendation.BaselineHttpClient;
+import com.pubburi.pub.recommendation.SearchPhraseGateway;
+import com.pubburi.pub.recommendation.SearchPhraseHttpClient;
 
 @Configuration
 public class RecommendationConfig {
 	@Bean
 	BaselineGateway baselineGateway(@Value("${pubburi.recommendation.base-url}") String baseUrl, ObjectMapper mapper) {
 		return new BaselineHttpClient(URI.create(baseUrl), Duration.ofMillis(200), Duration.ofMillis(700), mapper);
+	}
+
+	@Bean
+	SearchPhraseGateway searchPhraseGateway(@Value("${pubburi.recommendation.base-url}") String baseUrl, ObjectMapper mapper) {
+		return new SearchPhraseHttpClient(URI.create(baseUrl), Duration.ofMillis(200), Duration.ofMillis(700), mapper);
 	}
 }
