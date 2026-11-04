@@ -243,6 +243,9 @@ group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제
 [명시취향 검증](plans/2026-11-03-jpa-preferences.md)은 두 Repository·전체 교체/실패·RR/계정 수명과 실행 JAR을 다룬다.
 [기본 목록 검증](plans/2026-11-03-jpa-default-recommendations.md)은 실제 B0 전송·현재 상품/삭제·DB 오류/fallback 경계를 다룬다.
 남은 DB03은 필요한 다른 업무 연동과
-전체 MyBatis runtime 제거다. 이번 DB05 증분은 상품 변경의 원자 producer이며 Psycopg3 relay·
-lease/UUID/ACK·검색 대체는 별도다. 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
+전체 MyBatis runtime 제거다. [공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은
+기존36경로/43작업을 늘리지 않고 목록 GET의 opt-in 엔진 읽기·현재 RR ID/total 대조·같은 필터
+DB 대체를 연결한다. source ID는 실제 target SELECT를 재사용하고 원격 대기는 TX 밖이다.
+별도 Psycopg3 relay/CLI가 전달·ACK를 맡으며 공개 앱은 엔진/ACK를 쓰지 않는다.
+전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.

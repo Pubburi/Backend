@@ -163,8 +163,11 @@ RR·사용자 잠금/epoch·헤더/값 전체 교체를 연결한다. skip/reset
 update로 두 DB에 같은 self API를 추가한다. 역할/스탬프·자격 수명과 SQL 실패 rollback을 유지하며
 새 schema/DAO/GRANT 없이 현재 JPA 범위에 포함한다.
 [Psycopg3 relay 어댑터](plans/2026-11-04-postgresql-search-relay.md)는 같은 명시 CLI/Engine에
-PostgreSQL 실제시각·타입/원문·최소 권한을 연결한다. 기존 MySQL 경로를 보존하며 공개 엔진 검색·
-PG 필수조건 fallback·최종 runtime/cutover와 전체 DB05–06은 후속이다.
+PostgreSQL 실제시각·타입/원문·최소 권한을 연결한다. 기존 MySQL 경로를 보존한다.
+[공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은 같은 GET에서 source-bound 엔진
+ID/total과 현재 canonical RR 결과가 같을 때 현재 DB 필드를 반환한다. 지연/누락/장애도 모든
+필수조건의 PG 응답으로 대체한다. 기존 target SELECT를 재사용해 추가 GRANT/schema는 없다.
+현재 DB 확인 비용을 유지하며 최종 runtime/cutover·전체 DB05–06은 후속이다.
 [본인 문구 caller](plans/2026-11-04-owned-search-phrases.md)는 canonical 취향 서비스의 현재
 epoch-bound snapshot을 명시 제공자에 전달한다. 공통 MySQL/JPA 코드와 기존 권한으로 연결하며
 상품 검색/로컬 추천 fallback·전체 R06 웹/DB05 전환 완료를 뜻하지 않는다.

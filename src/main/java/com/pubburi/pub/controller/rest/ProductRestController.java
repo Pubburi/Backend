@@ -26,6 +26,7 @@ import com.pubburi.pub.controller.response.ProductResponse;
 import com.pubburi.pub.controller.response.ResponseMapper;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.service.ProductService;
+import com.pubburi.pub.model.service.PublicProductSearchService;
 
 import jakarta.servlet.http.HttpSession;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,10 +45,12 @@ public class ProductRestController {
 
 	private final ProductService productService;
 	private final AccessGuard accessGuard;
+	private final PublicProductSearchService publicSearch;
 
-	public ProductRestController(ProductService productService, AccessGuard accessGuard) {
+	public ProductRestController(ProductService productService, AccessGuard accessGuard, PublicProductSearchService publicSearch) {
 		this.productService = productService;
 		this.accessGuard = accessGuard;
+		this.publicSearch = publicSearch;
 	}
 
 	@GetMapping(value = "/products", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -65,9 +68,9 @@ public class ProductRestController {
 			HttpServletRequest request) {
 		ProductSearchFilters filters = ProductSearchFilters.fromQuery(minPriceKrw, maxPriceKrw, minAbvPercent, maxAbvPercent,
 				request.getParameterValues("tasteTag"), request.getParameterValues("aromaTag"));
-		PageResponse<ProductResponse> products = productService.searchProducts(type, q, sort, filters,
-				PageCriteria.of(page, size, 12)).map(ResponseMapper::product);
-		return ResponseEntity.ok(ApiResponse.ok(products));
+		var result = publicSearch.search(type, q, sort, filters, PageCriteria.of(page, size, 12));
+		PageResponse<ProductResponse> products = result.page().map(ResponseMapper::product);
+		return ResponseEntity.ok().header("X-Pubburi-Search-Source", result.source().name()).body(ApiResponse.ok(products));
 	}
 
 	@GetMapping("/products/popular")

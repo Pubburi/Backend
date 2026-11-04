@@ -91,7 +91,10 @@ NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약]
 고객 상품 화면의 기존 query contract는 `type`, `q`, `sort(popular|priceAsc|priceDesc|name)`, `page`다.
 Backend는 `minPriceKrw/maxPriceKrw`, `minAbvPercent/maxAbvPercent`, 반복 `tasteTag/aromaTag`의
 필수 AND 필터도 제공한다. [단위·검수/unknown·페이지 계약](PRODUCT-SEARCH.md)과
-[부분 OpenAPI](openapi/product-search.json)를 따른다. 현재 웹 필터 UI 전체 연결과 OpenSearch는 별도다.
+[부분 OpenAPI](openapi/product-search.json)를 따른다. 명시 엔진 읽기도 같은 JSON을 반환하고
+`X-Pubburi-Search-Source`는 DATABASE/ENGINE_VERIFIED/DATABASE_FALLBACK을 구분한다.
+엔진의 ID/total과 현재 canonical DB를 대조하며 오류/불일치도 모든 필수조건을 유지한다.
+기본 비활성·설정/한계는 [상품 검색](PRODUCT-SEARCH.md)을 따른다. 자동완성/의미 검색은 별도다.
 
 기존 ProductResponse의 7필드/주종은 유지한다. 별도 특성의 volumeMl·설명·맛/향 태그·출처와
 null/빈 배열·검증·삭제/원자 교체는 [특성 계약](PRODUCT-FEATURES.md)과 [OpenAPI](openapi/product-features.json)를 따른다.

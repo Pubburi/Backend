@@ -37,7 +37,7 @@ class ControllerBehaviorTests {
 	void missingProductDeleteReturnsNotFound() {
 		ProductService productService = new MissingProductService();
 		AccessGuard accessGuard = SessionFixtures.guard(SessionFixtures.user("admin", "ADMIN"));
-		ProductRestController controller = new ProductRestController(productService, accessGuard);
+		ProductRestController controller = new ProductRestController(productService, accessGuard, null);
 		MockHttpSession session = new MockHttpSession();
 		session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(SessionFixtures.user("admin", "ADMIN")));
 

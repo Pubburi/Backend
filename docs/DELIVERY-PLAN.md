@@ -56,14 +56,17 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 전체 F09 React 인수와 전체 DB03–06/기본 DB 전환 완료는 각각의 실제 연결/전환 게이트로 판정한다.
 [R06 본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향의 canonical snapshot과 별도 검색
 선택을 기존 제공자에 연결한다. 두 DB의 원격 밖 TX·조건/수명/장애 구분을 유지하며 React 문구
-소비·실제 검색 인수와 공개 엔진 검색/PG fallback·전체 DB05–06은 후속이다.
+소비·실제 검색 인수와 전체 DB05–06은 별도다.
+[공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은 기존 GET의 opt-in 엔진 ID/total을
+현재 canonical RR 페이지와 대조하고 모든 오류/불일치에서 같은 필수조건의 DB 응답을 반환한다.
+기존 JSON·기본 비활성·현재 DB 확인 비용을 유지하며 검색 품질/성능·기본 스택 전환을 뜻하지 않는다.
 [읽기 검증](plans/2026-11-02-jpa-product-reads.md), [쓰기·producer 증분](plans/2026-11-02-jpa-product-writes.md),
 [주문 증분](plans/2026-11-02-jpa-order-transactions.md), [계정/프로필 증분](plans/2026-11-03-jpa-account-profile.md),
 [후기 증분](plans/2026-11-03-jpa-comments.md), [찜 증분](plans/2026-11-03-jpa-favorites.md),
 [명시취향 증분](plans/2026-11-03-jpa-preferences.md),
 [공개 기본 목록 증분](plans/2026-11-03-jpa-default-recommendations.md)을 구분하며
 [Psycopg3 명시 relay](plans/2026-11-04-postgresql-search-relay.md)는 기존 Engine/CLI에
-별도 PostgreSQL Store를 연결한다. 검색 대체·기본 runtime과 전체 DB03–06은 후속이다.
+별도 PostgreSQL Store를 연결한다. 기본 runtime과 전체 DB03–06은 후속이다.
 미제공 업무는 등록하지 않으며 기본 MySQL 스택을 전환하지 않는다. 전체 API/JPA·모든
 원본/업무 재인수·relay·cutover 완료와 구분한다.
 

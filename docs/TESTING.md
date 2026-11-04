@@ -146,6 +146,23 @@ PG relay business도 같은 실제 JPA의36경로/43작업과 새 경로의 POST
 owner query 부재·PROVIDER/UNAVAILABLE schema를 검사한다. 숫자만 같고 경로/메서드·소유자
 입력/대체 정책이 다른 문서는 거절하며 기존 실제 전달·재시작 검증을 생략하지 않는다.
 
+
+`JpaPublicSearchIntegrationTests`는 기존 GET의 opt-in 엔진 ID/total과 현재 RR 페이지 대조,
+remote 밖 TX·실제 관리자 가격/태그/삭제 commit·같은 조건 fallback·빈 결과와 DB 오류를 확인한다.
+기본 Java 단위는 source/물리 UUID·strict IDs/total/shards·128KiB/전체 기한·redirect/잘못된 JSON과
+미지원 LIKE/offset의 무원격 대체를 확인한다. 실제 통합은 기존80에 신규4를 더한84이며 단위3/
+준비2 skip을 따로 센다. API 경로/작업은36/43으로 유지한다.
+
+필수 search smoke는 기존 relay restart/물리 교체와 완료 ACK 전행 대조를 마친 **뒤** 별도
+`public_search_smoke`를 실행한다. 같은 소유 PG business/예약 physical index에서 실제 relay의
+현재/지연/변경/삭제를 만들고 DB-only/명시 엔진/미기동 origin의 전체 상태·ApiResponse JSON을
+대조한다. 원본12업무표·기존 version/원문 event/DELIVERED ACK/source UUID를 분리 보존하며,
+기존 신규 작성 관리자 로그인만 SHA256→bcrypt CAS를 허용한다. 정확 그 ID의 hash 외 epoch/역할/
+이름/스탬프·타계정·상품 변경은 거절한다. 로그인 전/후/종료 스냅샷과 원문은 private에만 남기고
+CI artifact로 업로드하지 않는다. 소유 앱/상품만 finally 정리하며 queue reset으로 복구하지 않는다.
+[공개 검색 기록](plans/2026-11-04-public-search-fallback.md)의 실제 MySQL/PG·원본 투영 감사와
+첫 미보존 RAM 비교의 한계는 fixture 단위/운영 데이터 보호 성과와 구분한다.
+
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
 새 프로세스의 시작 로그·PID와 HTTP 응답을 확인한 뒤 API 검증을 수행한다.
