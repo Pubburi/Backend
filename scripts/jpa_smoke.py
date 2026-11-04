@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from postgresql_schema import ROOT, verify_owned_postgres
 from search_index import _DeadlineConnection
+from api_smoke import verify_content_recommendation_openapi
 
 
 @contextmanager
@@ -254,6 +255,12 @@ def run(environ):
         expect(request(account,base,"POST",phrase_path+"?userId=other",{})[0],400)
         expect(request(account,base,"POST",phrase_path,{"preferences":{}})[0],400)
         if request(account,base,"GET",preference_path)[1]["data"]!=expected_preference:raise ValueError("jpa_runtime_search_phrase_mutated_preferences")
+        content_path="/api/users/me/recommendations/content"
+        expect(request(anonymous,base,"POST",content_path,{})[0],401)
+        status,content=request(account,base,"POST",content_path,{});expect(status,200)
+        if content["data"]!={"source":"UNAVAILABLE","catalogScope":"REVIEWED_DEMO","result":None,"products":[]}:raise ValueError("jpa_runtime_unapproved_content_catalog_sent")
+        expect(request(account,base,"POST",content_path,{"catalog":[]})[0],400)
+        expect(request(account,base,"POST",content_path+"?userId=other",{})[0],400)
         if market_id<int(environ.get("PUBBURI_JPA_EXPECTED_MARKET_NEXT","1")):raise ValueError("jpa_runtime_identity_reused")
         if set(created["data"])!={"id","name","latitude","longitude","image"}:raise ValueError("jpa_runtime_market_shape_changed")
         payload["name"]="Authored packaged edited";expect(request(admin,base,"PUT","/api/admin/markets/"+str(market_id),payload)[0],200)
@@ -324,9 +331,10 @@ def run(environ):
                 "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
                 "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
                 "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases"}:raise ValueError("jpa_runtime_route_scope_changed")
+                "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content"}:raise ValueError("jpa_runtime_route_scope_changed")
         operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-        if operations!=43:raise ValueError("jpa_runtime_operation_scope_changed")
+        if operations!=44:raise ValueError("jpa_runtime_operation_scope_changed")
+        verify_content_recommendation_openapi(docs)
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         default_selection(base)
@@ -394,7 +402,7 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":36,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":37,"registered_api_operations":operations,
             "public_default_current_fallback":True,
             "self_profile_password_and_session_rotation":True,
             "private_preferences_and_lifecycle":True,

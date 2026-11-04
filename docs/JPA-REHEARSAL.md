@@ -51,10 +51,11 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | PUT | `/api/users/me/profile` | 본인 이름만 변경·현재 역할/스탬프/자격 보존·잠금 뒤 epoch 재확인 |
 | PUT | `/api/users/me/password` | 본인 현재 암호 확인·새 hash/epoch·현재 세션 CAS 유지/다른 기존 세션 회수 |
 | POST | `/api/users/me/search-phrases` | 본인 현재 취향·별도 검색 선택만 전달·정확 조건/수명·장애 구분 |
+| POST | `/api/users/me/recommendations/content` | 본인 현재 취향·검수 container-DEMO B1/R04·현재 상품/특성·필수조건/수명 재확인 |
 
-매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 개인화 추천 등의
+매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른여섯 개/마흔세 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른일곱 개/마흔네 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과
@@ -249,3 +250,7 @@ DB 대체를 연결한다. source ID는 실제 target SELECT를 재사용하고 
 별도 Psycopg3 relay/CLI가 전달·ACK를 맡으며 공개 앱은 엔진/ACK를 쓰지 않는다.
 전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
 이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.
+
+[본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 기존 canonical 취향/상품과 특성 batch projection으로
+명시 검수 container-DEMO binding을 RR 전후 대조한다. 기존36경로/43작업에 이 private POST만
+추가한37경로/44작업이며 원격 I/O는 TX 밖이다. 새 schema/GRANT·기본 runtime/cutover는 없다.

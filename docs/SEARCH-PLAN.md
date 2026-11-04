@@ -86,3 +86,7 @@ R06의 [본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향과 별�
 기술 근거: [로컬 Docker](https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/),
 [자동완성](https://docs.opensearch.org/latest/search-plugins/searching-data/autocomplete/),
 [필터](https://docs.opensearch.org/latest/search-plugins/filter-search/).
+
+[R02/R04 본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 현재 취향·검수 container-DEMO와
+현재 업무 사실/필수조건을 기존 content·typed 설명에 연결하는 부분 증분이다. 기존 공개 B0/R06와
+독립이며 개인화 검색 순위·전체 서비스 catalog/품질·R02/R04/S04 완료로 세지 않는다.

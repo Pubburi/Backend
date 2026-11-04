@@ -15,6 +15,17 @@
         SELECT kind, tag FROM t_product_feature_tag WHERE product_id = #{productId}
     </select>
 
+    <select id="selectByProductIds" resultType="ProductFeatures">
+        SELECT p.id AS product_id, f.volume_ml, f.description, f.source_name, f.source_url, f.source_note,
+               COALESCE(f.taste_known, FALSE) AS taste_known, COALESCE(f.aroma_known, FALSE) AS aroma_known
+        FROM t_product p LEFT JOIN t_product_feature f ON f.product_id = p.id
+        WHERE p.id IN <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    </select>
+    <select id="selectTagsByProductIds" resultType="ProductFeatureTagRow">
+        SELECT product_id, kind, tag FROM t_product_feature_tag
+        WHERE product_id IN <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    </select>
+
     <insert id="upsert" parameterType="ProductFeatures">
         INSERT INTO t_product_feature
             (product_id, volume_ml, description, taste_known, aroma_known, source_name, source_url, source_note)

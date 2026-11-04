@@ -158,3 +158,13 @@ nullable을 표시한다. [삭제 이력·전환 계약](ORDER-HISTORY-PRESERVAT
 - endpoint path, request DTO, response DTO, page 기본값이 바뀌면 이 문서를 갱신한다.
 - frontend API client를 바꾸면 관련 화면/store도 함께 확인한다.
 - API path가 그대로라도 내부 응답 필드, validation, 권한, pagination 기본값이 바뀌면 이 문서를 갱신한다.
+
+## Owned content recommendations
+
+- `POST /api/users/me/recommendations/content`: 로그인한 현재 본인 취향과 운영자가 고정한 검수
+  container-DEMO catalog의 기존 B1/R04 caller. strict `{"limit":4}`(기본4·정수1–12)만 허용한다.
+- ApiResponse data는 `source`, `catalogScope`, `result`, `products`. source는 PROVIDER/UNAVAILABLE,
+  scope는 REVIEWED_DEMO다. 정상 result는 검증한 원 B1/R04, products는 같은 ID순의 현재 Product7이다.
+  UNAVAILABLE은 result=null/products=[]이며 기본 B0 추천으로 꾸미지 않는다.
+- private/no-store·query/owner/catalog/profile 주입400·수명401·현재 취향/승인 상품 변화409·DB500을
+  구분한다. 원본80 자동 전송/fit·서비스 SKU 승인·전체 R02/R04는 아니다. [공급 계약](CONTENT-RECOMMENDATIONS.md)을 따른다.

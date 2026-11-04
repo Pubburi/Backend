@@ -195,6 +195,7 @@ def documentation_contract(port):
     verify_favorite_openapi(document)
     verify_default_recommendation_openapi(document)
     verify_search_phrase_openapi(document)
+    verify_content_recommendation_openapi(document)
     verify_product_filter_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
@@ -321,6 +322,23 @@ def verify_search_phrase_openapi(document):
     data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
     assert set(data["properties"]) == {"source", "result"}
     assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
+
+
+def verify_content_recommendation_openapi(document):
+    path = document["paths"]["/api/users/me/recommendations/content"]
+    assert {method for method in path if method in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"post"}
+    operation = path["post"]; schemas = document["components"]["schemas"]
+    request = operation["requestBody"]["content"]["application/json"]["schema"]
+    request = schemas[request["$ref"].split("/")[-1]]
+    assert request["additionalProperties"] is False and set(request["properties"]) == {"limit"}
+    assert request["properties"]["limit"]["minimum"] == 1 and request["properties"]["limit"]["maximum"] == 12
+    assert not operation.get("parameters"), "Owned content cannot accept owner or catalog selectors"
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    envelope = schemas[response["$ref"].split("/")[-1]]
+    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
+    assert set(data["properties"]) == {"source", "catalogScope", "result", "products"}
+    assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
+    assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO"]
 
 
 def default_recommendation_contract(client, expected_source=None):
@@ -860,6 +878,14 @@ def private_preference_contract(environ):
     owner.request("POST", phrase_path + "?userId=other", 400, {}, "BAD_REQUEST")
     assert owner.request("GET", path, 200)["data"] == saved
     assert owner.request("PUT", path, 200, declared)["data"] == saved
+    content_path = "/users/me/recommendations/content"
+    public.request("POST", content_path, 401, {}, "UNAUTHORIZED")
+    assert owner.request("POST", content_path, 200, {})["data"] == {
+        "source": "UNAVAILABLE", "catalogScope": "REVIEWED_DEMO", "result": None, "products": []}
+    for invalid in ({"profile": {}}, {"preferences": saved}, {"catalog": []}, {"limit": True}, {"limit": "1"}, {"limit": 1.0}, {"limit": 0}, {"limit": 13}):
+        owner.request("POST", content_path, 400, invalid, "VALIDATION_FAILED")
+    owner.request("POST", content_path + "?userId=other", 400, {}, "BAD_REQUEST")
+    assert owner.request("GET", path, 200)["data"] == saved
     assert other.request("GET", path, 200)["data"] == empty()
     assert admin.request("GET", path + "?userId=" + user_id, 200)["data"] == empty()
     admin.request("PUT", path, 200, {"surveyStatus": "COMPLETED", "userId": user_id,

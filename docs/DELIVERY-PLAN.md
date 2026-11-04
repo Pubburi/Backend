@@ -57,6 +57,9 @@ DB02 일부이며 [읽기 전용 원본 추출](SOURCE-SNAPSHOT.md)도 별도 �
 [R06 본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향의 canonical snapshot과 별도 검색
 선택을 기존 제공자에 연결한다. 두 DB의 원격 밖 TX·조건/수명/장애 구분을 유지하며 React 문구
 소비·실제 검색 인수와 전체 DB05–06은 별도다.
+[본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 현재 본인 취향과 Recommendation이 검증한
+명시 container-DEMO catalog를 기존 content/R04에 연결한다. 모든 mapped 현재 Product7/특성·
+조건/수명을 다시 확인하며 기본80 자동 fit·서비스 catalog 승인·전체 R02/R04/웹 완료와 구분한다.
 [공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은 기존 GET의 opt-in 엔진 ID/total을
 현재 canonical RR 페이지와 대조하고 모든 오류/불일치에서 같은 필수조건의 DB 응답을 반환한다.
 기존 JSON·기본 비활성·현재 DB 확인 비용을 유지하며 검색 품질/성능·기본 스택 전환을 뜻하지 않는다.

@@ -20,13 +20,19 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         paths["/api/users/me/search-phrases"] = {"post": {
             "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Input"}}}},
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}}}
+        paths["/api/users/me/recommendations/content"] = {"post": {
+            "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentInput"}}}},
+            "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentEnvelope"}}}}}}}
         return {"paths": paths, "components": {"schemas": {
+            "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}}},
+            "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
+            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO"]}, "result": {}, "products": {}}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
             "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
 
     def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
-        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 36, "api_operations": 43})
+        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 37, "api_operations": 44})
         missing = copy.deepcopy(spec)
         missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
         extra_method = copy.deepcopy(spec)
@@ -43,6 +49,15 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         weaker = copy.deepcopy(spec); weaker["components"]["schemas"]["Response"]["properties"]["source"]["enum"].append("FALLBACK")
         for invalid in (old, owner, query, weaker):
             with self.assertRaises(AssertionError): verify_business_api(invalid)
+
+    def test_content_route_strict_ownerless_input_demo_scope_and_unavailable_policy_are_required(self):
+        spec = self.business_api()
+        path = copy.deepcopy(spec); path["paths"]["/foreign-content"] = path["paths"].pop("/api/users/me/recommendations/content")
+        owner = copy.deepcopy(spec); owner["components"]["schemas"]["ContentInput"]["properties"]["catalog"] = {}
+        scope = copy.deepcopy(spec); scope["components"]["schemas"]["ContentResponse"]["properties"]["catalogScope"]["enum"] = ["SERVICE_APPROVED"]
+        weaker = copy.deepcopy(spec); weaker["components"]["schemas"]["ContentResponse"]["properties"]["source"]["enum"].append("FALLBACK")
+        for invalid in (path, owner, scope, weaker):
+            with self.assertRaises((AssertionError, KeyError)): verify_business_api(invalid)
 
     def test_missing_opt_in_role_collision_and_reused_business_database_never_reach_database(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -171,6 +171,9 @@ ID/total과 현재 canonical RR 결과가 같을 때 현재 DB 필드를 반환�
 [본인 문구 caller](plans/2026-11-04-owned-search-phrases.md)는 canonical 취향 서비스의 현재
 epoch-bound snapshot을 명시 제공자에 전달한다. 공통 MySQL/JPA 코드와 기존 권한으로 연결하며
 상품 검색/로컬 추천 fallback·전체 R06 웹/DB05 전환 완료를 뜻하지 않는다.
+[본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 기존 Repository/공통 DTO·canonical 취향과
+두 특성 batch projection을 사용한다. 새 스키마/GRANT 없이 현재 mapped 상품·특성의 RR 전후
+검증과 수명/조건·DB 오류 구분을 제공하며 원격 fit은 TX 밖이다. 기본 runtime 전환은 아니다.
 DB의 TX/문장/실제시각 함수와 잠금/격리 의미를 이름만 보고 복사하지 않는다.
 이관 전 완료 이력은 보존하되 PostgreSQL 통과로 간주하지 않는다. 재색인·UUID/ACK 초기화를
 복구 수단으로 자동 실행하지 않으며 cutover 후 쓰기의 역이관 방안 없이 즉시 rollback을 약속하지 않는다.
