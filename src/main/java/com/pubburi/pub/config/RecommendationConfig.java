@@ -20,8 +20,9 @@ import com.pubburi.pub.recommendation.PinnedContentCatalog;
 @Configuration
 public class RecommendationConfig {
 	@Bean ContentCatalogSource contentCatalogSource(@Value("${pubburi.recommendation.content-catalog-path:}") String path,
-			@Value("${pubburi.recommendation.content-catalog-sha256:}") String sha,ObjectMapper mapper){
-		return new PinnedContentCatalog(path,sha,mapper,java.time.Clock.systemUTC());
+			@Value("${pubburi.recommendation.content-catalog-sha256:}") String sha,
+			@Value("${pubburi.recommendation.content-family-browse-demo-enabled:false}") boolean familyBrowseDemoEnabled,ObjectMapper mapper){
+		return new PinnedContentCatalog(path,sha,mapper,java.time.Clock.systemUTC(),familyBrowseDemoEnabled);
 	}
 	@Bean ContentGateway contentGateway(@Value("${pubburi.recommendation.base-url}") String baseUrl,ObjectMapper mapper){
 		return new ContentHttpClient(URI.create(baseUrl),Duration.ofMillis(200),Duration.ofSeconds(3),mapper);

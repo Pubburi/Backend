@@ -338,7 +338,7 @@ def verify_content_recommendation_openapi(document):
     data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
     assert set(data["properties"]) == {"source", "catalogScope", "result", "products"}
     assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
-    assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO"]
+    assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]
 
 
 def default_recommendation_contract(client, expected_source=None):

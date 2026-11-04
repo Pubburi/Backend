@@ -34,7 +34,7 @@ public class OwnedContentRecommendationService {
         if(response.isPresent()){
             try{
                 var result=contract.validate(response.get(),catalog.catalog(),before.preferences(),limit);
-                return new ContentRecommendationResponse(Source.PROVIDER,CatalogScope.REVIEWED_DEMO,result,
+                return new ContentRecommendationResponse(Source.PROVIDER,catalog.scope(),result,
                     result.items().stream().map(item->current.products().get(item.productId()).currentProduct()).toList());
             }catch(IllegalArgumentException invalid){/* No local score, replacement catalog or weaker B0 result. */}
         }

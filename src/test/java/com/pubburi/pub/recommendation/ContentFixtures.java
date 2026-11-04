@@ -24,6 +24,13 @@ public final class ContentFixtures {
         for(String field:List.of("source_catalog_sha256","business_snapshot_sha256","mapping_sha256"))checked.put(field,"a".repeat(64));
         var hashes=checked.putObject("artifact_sha256");for(String field:List.of("receipt.json","export-report.json","b0-demo-request.json","b1-demo-request.json"))hashes.put(field,"b".repeat(64));return root;
     }
+    public static ObjectNode familyBundle()throws Exception{
+        var root=bundle();root.withObject("/checked_export").put("data_scope","reviewed_source_family_browse_demo_only").put("snapshot_origin","demo_fixture");
+        root.withObject("/records/0").put("eligibility_scope","reviewed_source_family_browse_demo_only");
+        root.withObject("/catalog/0").putNull("volume_ml");
+        var features=root.withObject("/records/0/features/data");for(String key:List.of("volumeMl","description","tasteTags","aromaTags"))features.putNull(key);
+        return root;
+    }
     private static void flags(ObjectNode root){root.put("service_catalog_approved",false);root.put("model_loaded",false);root.put("current_business_revalidation_required",true);}
     public static ContentCatalogSource.Catalog catalog()throws Exception{return PinnedContentCatalog.validate(bundle(),"c".repeat(64),NOW);}
     public static ObjectNode twoBundle()throws Exception{var root=bundle();var product=root.withArray("catalog").get(0).deepCopy();((ObjectNode)product).put("product_id",82).put("category","증류주");root.withArray("catalog").add(product);var record=root.withArray("records").get(0).deepCopy();((ObjectNode)record).put("backend_product_id",82).put("catalog_record_id","authored:two");record.withObject("/product/data").put("id",82).put("type","증류주");record.withObject("/features/data").put("productId",82);root.withArray("records").add(record);return root;}

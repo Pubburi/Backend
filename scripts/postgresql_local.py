@@ -26,7 +26,8 @@ REQUIRED = frozenset(('PUBBURI_PG_URL', 'PUBBURI_PG_DB_NAME', 'PUBBURI_PG_USER',
     'PUBBURI_RECOMMENDATION_PORT'))
 OPTIONAL = frozenset(('PUBBURI_LOG_LEVEL', 'PUBBURI_RECOMMENDATION_BASE_URL',
     'PUBBURI_SEARCH_ENABLED', 'PUBBURI_SEARCH_ENDPOINT', 'PUBBURI_SEARCH_INDEX',
-    'PUBBURI_CONTENT_CATALOG_PATH', 'PUBBURI_CONTENT_CATALOG_SHA256'))
+    'PUBBURI_CONTENT_CATALOG_PATH', 'PUBBURI_CONTENT_CATALOG_SHA256',
+    'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED'))
 INPUTS = ('pom.xml', 'mvnw', '.mvn', 'src/main', 'tools/jpa-rehearsal/pom.xml',
           'tools/jpa-rehearsal/src/main', 'tools/postgresql-migration/src/main/resources')
 
@@ -97,8 +98,9 @@ def configuration(path):
                     or not url.port or url.username is not None or url.password is not None
                     or url.path not in ('', '/') or url.query or url.fragment):
                 reject()
-    if 'PUBBURI_SEARCH_ENABLED' in env and env['PUBBURI_SEARCH_ENABLED'] not in ('true', 'false'):
-        reject()
+    for key in ('PUBBURI_SEARCH_ENABLED', 'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED'):
+        if key in env and env[key] not in ('true', 'false'):
+            reject()
     return dict(env)
 
 

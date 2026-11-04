@@ -26,7 +26,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         return {"paths": paths, "components": {"schemas": {
             "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}}},
             "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
-            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO"]}, "result": {}, "products": {}}},
+            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]}, "result": {}, "products": {}}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
             "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
@@ -55,8 +55,9 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         path = copy.deepcopy(spec); path["paths"]["/foreign-content"] = path["paths"].pop("/api/users/me/recommendations/content")
         owner = copy.deepcopy(spec); owner["components"]["schemas"]["ContentInput"]["properties"]["catalog"] = {}
         scope = copy.deepcopy(spec); scope["components"]["schemas"]["ContentResponse"]["properties"]["catalogScope"]["enum"] = ["SERVICE_APPROVED"]
+        missing_family = copy.deepcopy(spec); missing_family["components"]["schemas"]["ContentResponse"]["properties"]["catalogScope"]["enum"] = ["REVIEWED_DEMO"]
         weaker = copy.deepcopy(spec); weaker["components"]["schemas"]["ContentResponse"]["properties"]["source"]["enum"].append("FALLBACK")
-        for invalid in (path, owner, scope, weaker):
+        for invalid in (path, owner, scope, missing_family, weaker):
             with self.assertRaises((AssertionError, KeyError)): verify_business_api(invalid)
 
     def test_missing_opt_in_role_collision_and_reused_business_database_never_reach_database(self):
