@@ -47,7 +47,7 @@ Tomcat 10.1·Servlet 6.0을 지원한다. 다만 [의존성 재정의 안내](ht
 
 Boot BOM 전체를 올리는 대안은 다른 Spring/Jackson/로깅/DB 드라이버까지 동시에 바꾼다. 이번
 직접 재현한 multipart 경계는 Tomcat으로 제한해 인과와 롤백 범위를 좁혔다. 이전 springdoc
-2.8.17/2.10의 matcher 실패는 [기존 기록](plans/2026-11-01-product-feature-contract.md)을 따르며,
+2.8.17/2.10의 matcher 실패는 [기존 기록](https://github.com/Pubburi/Backend/blob/75b30c32a51685dec8be8120343c1d7c0e7644a7/docs/plans/2026-11-01-product-feature-contract.md)을 따르며,
 호환 검증된 2.8.9를 유지한다. 장기적으로 Boot/BOM과 나머지 의존성의 보안·지원 수명을 계속 확인해야 한다.
 
 | 추가 확인한 공식 공지 | 현재 코드/로컬 구성에서의 조건 판정 |
@@ -103,5 +103,5 @@ crypto 6.5.0은 [CVE-2025-22234](https://spring.io/security/cve-2025-22234/)에 
 [DPoP 공지](https://spring.io/security/cve-2026-41707/) 역시 현재 WebAuthn/분산 세션·DPoP 모듈이
 없다. 이 한정 판정을 모든 crypto/API 보안의 안전 판정으로 확대하지 않는다.
 
-재현·실행 근거는 [Tomcat 기록](plans/2026-11-01-tomcat-security-patch.md)과
-[Jackson 기록](plans/2026-11-01-jackson-reader-security.md)에 구분해 둔다.
+재현·실행 근거는 [Tomcat 기록](https://github.com/Pubburi/Backend/blob/e1693a763e50f7399636c9a66461a5a7fd6b6055/docs/plans/2026-11-01-tomcat-security-patch.md)과
+[Jackson 기록](https://github.com/Pubburi/Backend/blob/6860c51ac2fb7f0ce8432e358f9c9dbc2f9eb65b/docs/plans/2026-11-01-jackson-reader-security.md)에 구분해 둔다.

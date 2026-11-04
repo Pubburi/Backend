@@ -166,7 +166,7 @@ canonical 취향 RR snapshot의 commit 뒤 원격을 호출하고 현재 snapsho
 새 암호는 literal4–100/UTF-8 최대72바이트를 저장 전에 확인하고 기존 hasher와 새 epoch를 쓴다.
 현재 암호는 짧은 기존 값도 허용한다. 같은 변경 결과의 epoch만 AccessGuard에서 세션 CAS로
 반영하며 동시 로그아웃/다른 로그인 상태를 복원하지 않는다. 새 DB 권한/스키마는 없다.
-같은 공유 코드의 기본 MySQL 공급·실제 경합/rollback은 [F09 공급 기록](plans/2026-11-03-self-account-settings.md)과 구분한다.
+같은 공유 코드의 기본 MySQL 공급·실제 경합/rollback은 [F09 공급 기록](https://github.com/Pubburi/Backend/blob/8f593168ed7dbfe629c70e20fcd0ea020d6fb366/docs/plans/2026-11-03-self-account-settings.md)과 구분한다.
 
 Hibernate는 실제 사용한 User/Market/Product/Feature/Tag/Order/OrderDetail/Stamp/Comment/Favorite/Preference/PreferenceValue 매핑의 `ddl-auto=validate`, OSIV off다. Flyway는 기존 V1/V2 checksum을
 **validate만** 한다. migrate/clean/repair/baseline·자동 SQL 초기화는 실행하지 않는다. 모든 업무표의
@@ -229,31 +229,6 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 잠금 선택의 근거는 [실제 translator](https://github.com/hibernate/hibernate-orm/blob/6.6.53/hibernate-core/src/main/java/org/hibernate/dialect/PostgreSQLSqlAstTranslator.java)와
 [PostgreSQL 행 잠금](https://www.postgresql.org/docs/18/explicit-locking.html)이다.
 
-필수 CI는 기존 MySQL HTTP·검색·snapshot/import 검사와 함께 새 PG 두 DB에서 실제 이 제공자를
-실행한다. 안전한 요약만 보존하고 통합 XML/원문 SQL·서버 로그/자격·복사 artifact는 업로드하지
-않는다. 실제 조건·실패·회귀의 상세 근거는 [최신 상품 쓰기 기록](plans/2026-11-02-jpa-product-writes.md)에 둔다.
-검증 HTTP는 연결·쓰기·헤더·본문에 요청 소유 절대 기한을 적용하며 cookie를 유지한다.
-각 요청은 최대6초와 전체 남은120초 중 짧은 예산을 사용한다. 실행 supervisor는 작업 종료 뒤에도
-소유 session의 식별을 유지해 자식 정리 후 leader를 reap한다. 정상/오류·SIGTERM·기한 초과는
-같은 정리 경로를 사용하며 startup/cleanup 시간은 HTTP 지연 성능 수치가 아니다.
-group 종료 signal은 비동기이므로 테스트는 소유 listener의 해제를 제한 시간 안에 관찰한다.
-기한 뒤 점유와 다른 bind 오류는 계속 실패하며 supervisor wait를 모든 자식의 즉시 회수로 해석하지 않는다.
-
-주문/후반 단계 rollback·동시성·시각/권한·실행 JAR의 검증은 [주문 기록](plans/2026-11-02-jpa-order-transactions.md)을 따른다.
-[계정/프로필 검증](plans/2026-11-03-jpa-account-profile.md)은 전체 사용자 화면 인수와 구분한다.
-[후기 검증](plans/2026-11-03-jpa-comments.md)은 단정도·소유권·실패/경합·부모 수명과 실행 JAR을 다룬다.
-검증 도구의 PUBBURI_JPA_EXPECTED_COMMENT_NEXT는 승인 snapshot의 sourceNext.t_comment를 사용한다.
-[찜 검증](plans/2026-11-03-jpa-favorites.md)은 본인 수명·멱등성·RR/자격 경합·실패와 실행 JAR을 다룬다.
-[명시취향 검증](plans/2026-11-03-jpa-preferences.md)은 두 Repository·전체 교체/실패·RR/계정 수명과 실행 JAR을 다룬다.
-[기본 목록 검증](plans/2026-11-03-jpa-default-recommendations.md)은 실제 B0 전송·현재 상품/삭제·DB 오류/fallback 경계를 다룬다.
-남은 DB03은 필요한 다른 업무 연동과
-전체 MyBatis runtime 제거다. [공개 검색 증분](plans/2026-11-04-public-search-fallback.md)은
-기존36경로/43작업을 늘리지 않고 목록 GET의 opt-in 엔진 읽기·현재 RR ID/total 대조·같은 필터
-DB 대체를 연결한다. source ID는 실제 target SELECT를 재사용하고 원격 대기는 TX 밖이다.
-별도 Psycopg3 relay/CLI가 전달·ACK를 맡으며 공개 앱은 엔진/ACK를 쓰지 않는다.
-전체 거래/웹 인수와 cutover/rollback도 DB04–DB06에서 검증한다.
-이 실제 부분 제공자의 성공을 전체 전환·운영 성능 개선으로 확대하지 않는다.
-
-[본인 B1 caller](CONTENT-RECOMMENDATIONS.md)는 기존 canonical 취향/상품과 특성 batch projection으로
-명시 검수 container-DEMO binding을 RR 전후 대조한다. 기존36경로/43작업에 이 private POST만
-추가한37경로/44작업이며 원격 I/O는 TX 밖이다. 새 schema/GRANT·기본 runtime/cutover는 없다.
+필수 CI는 기본 MySQL과 분리된 소유 PG에서 실제 제공자·실패/경합·JAR 재시작을 검사한다.
+실행 방법·fixture 격리·원본/권한 보존·기한과 자식 정리·보고서 개인정보 정책은 [TESTING](TESTING.md)이 정본이다.
+현재 source UUID/ACK·V1/V2·기본 runtime은 보존하며 전체 DB03–06 cutover/rollback과 거래/웹 인수는 별도다.

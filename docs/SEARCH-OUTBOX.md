@@ -45,7 +45,7 @@ JSONB 변환·기존 event 재직렬화·source UUID/binding·ACK 초기화는 �
 기본 쓰기는 PostgreSQL READ COMMITTED다. 앞선 RR snapshot과 다르게 갱신된 행을 나중에
 잠그면 serialization failure가 발생할 수 있으므로 MySQL current read 의미를 모든 격리에
 일반화하지 않는다. 상품/태그 full 잠금·실패 뒤 업무/삭제 FK·version/event/delivery rollback·
-같은 ID 후속 버전·raw JSON 조건은 [실제 작업 기록](plans/2026-11-02-jpa-product-writes.md)에 둔다.
+같은 ID 후속 버전·raw JSON 조건은 [실제 작업 기록](https://github.com/Pubburi/Backend/blob/75f99af9418f7f934a2283796e35eeec900622d2/docs/plans/2026-11-02-jpa-product-writes.md)에 둔다.
 현재 기본 API/relay는 MySQL 기준을 보존하며 Psycopg3 relay·로컬 기본 전환은 후속이다.
 
 ## 007 수동 전환
@@ -93,5 +93,5 @@ CI의 폐기 HTTP는 직접 작성한 상품의 실제 이벤트 batch만 `.pubb
 재생하고, 삭제 뒤 오래된 갱신 거절·volume 재시작을 확인한다. 공개 artifact에는 원문/receipt를
 올리지 않는다. 자료 성격은 실제 사용자 이력이 아닌 허구 검증 입력이다.
 
-실제 조건과 검증은 [생산 계획](plans/2026-11-01-product-search-outbox.md)과
-[relay 계획](plans/2026-11-01-durable-search-relay.md)에 기록한다.
+실제 조건과 검증은 [생산 계획](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-product-search-outbox.md)과
+[relay 계획](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)에 기록한다.

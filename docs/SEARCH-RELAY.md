@@ -124,6 +124,6 @@ watch는 Ctrl+C로 중단한다. 급작스러운 종료는 미ACK lease를 남�
 재claim한다. 실패를 없애려고 delivered_at/token/UUID를 수정하거나 이벤트를 삭제하지 않는다.
 추가 metadata 조회·DB 쓰기/잠금·이력 보관과 반복 전송 비용이 있다. 처리량/지연 개선 수치는 미측정이다.
 
-기존 MySQL 구현/실제 조건·실패는 [전달 기록](plans/2026-11-01-durable-search-relay.md),
-PG 제공/검증 범위는 [어댑터 기록](plans/2026-11-04-postgresql-search-relay.md)에 구분한다.
+기존 MySQL 구현/실제 조건·실패는 [전달 기록](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md),
+PG 제공/검증 범위는 [어댑터 기록](https://github.com/Pubburi/Backend/blob/ac2b0cd15f77f85feffaefbd74b1a228e2839399/docs/plans/2026-11-04-postgresql-search-relay.md)에 구분한다.
 공개 엔진 검색·필수조건 PG fallback·기본 runtime/cutover와 전체 DB05–06은 후속이다.

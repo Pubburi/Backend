@@ -2,7 +2,7 @@
 
 현재 로그인한 계정만 자신의 찜을 저장·해제·조회한다. 관리자의 타인 조회 예외는 없다.
 기존 저장/조회 계약이며 추천 모델·실제 인기의 근거가 아니다. 기본 MySQL API와 별도 PostgreSQL
-JPA 제공자에서 같은 계약을 제공하며 [PG 재인수](plans/2026-11-03-jpa-favorites.md)를 전체 cutover와 구분한다.
+JPA 제공자에서 같은 계약을 제공하며 [PG 재인수](https://github.com/Pubburi/Backend/blob/43e15aa64e04c395ea48aa1ec9f336d4cbcf7814/docs/plans/2026-11-03-jpa-favorites.md)를 전체 cutover와 구분한다.
 [부분 OpenAPI](openapi/account-favorites.json)와 실행 `/v3/api-docs`가 같은 응답 구조를 사용한다.
 
 ## HTTP 계약
@@ -72,4 +72,4 @@ DDL은 자동 멱등 전환이나 트랜잭션 rollback을 제공하지 않는�
 새 테이블 삭제는 사용자가 새로 저장한 찜을 잃으므로 실제 행/백업·승인을 확인한 별도 절차다.
 기존 개발·사용자 볼륨에 폐기 테스트를 실행하지 않는다.
 
-검증 방법과 실제 실행 결과는 [TESTING](TESTING.md)·[작업 기록](plans/2026-11-01-account-favorites.md)에 둔다.
+검증 방법과 실제 실행 결과는 [TESTING](TESTING.md)·[작업 기록](https://github.com/Pubburi/Backend/blob/b1997ac8b65c0afc4e16aa46e553bb2e3dd4e953/docs/plans/2026-11-01-account-favorites.md)에 둔다.

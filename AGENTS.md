@@ -1,41 +1,29 @@
-# Backend working guide
+# Backend 작업 기준
 
-- Target PostgreSQL18.6 + Spring Data JPA(Hibernate) + Flyway Community; the Python relay target is Psycopg3. This latest user decision supersedes older MySQL/MyBatis-preservation wording. Preserve Java17, Spring Boot, /api, ApiResponse and session-based AccessGuard behavior while migrating.
-- Keep transaction boundaries, batched order-detail queries and atomic stamp updates.
-- Root commands: ./scripts/check.sh and ./scripts/dev.sh. The current API still runs the pre-cutover MySQL baseline; its Compose/data.sql and prior migrations remain intact until the verified PostgreSQL cutover. Do not call PostgreSQL schema preparation a completed API/JPA migration.
-- Do not commit .env, credentials, target/ or real database settings. Update docs with changes.
-- Branches use PRs and Conventional Commits. CI must pass before squash merging.
-- 커밋 제목은 `type: 한국어 변경 요약` 또는 `type(scope): 한국어 변경 요약`으로 쓰고 필요한 본문도 한국어로 작성한다. 유형은 feat/fix/refactor/perf/test/ci/build/docs/chore/revert이며 식별자는 원문을 유지할 수 있다.
-- 커밋은 하나의 검토 가능한 목적별로 나누고 구현·필수 테스트/문서는 함께 묶는다. 독립 기능/수정/리팩터링/의존성 변경은 분리하며 각 커밋을 빌드·검증 가능하게 남긴다. 파일별 억지 분할·WIP·빈 커밋은 만들지 않는다.
-- PR 제목·최종 Squash 제목은 한국어 Conventional Commit 형식, 필요한 Squash 본문은 한국어로 작성한다. 기존 Squash 방식을 유지하므로 main에서도 독립 보존할 목적은 PR부터 분리한다. 언어 변경을 위해 병합 이력을 다시 쓰지 않는다. 자세한 기준은 CONTRIBUTING.md를 따른다.
-- Implement the approved recommendation and integrity roadmap; keep AWS disconnected until a later user instruction. Mobile is separately owned.
+## 구현·검증
 
-## Delivery and automation
+- Java17·Spring, `/api`·ApiResponse·세션 인증을 보존한다. 목표는 PostgreSQL18.6·JPA(Hibernate)·Flyway Community·Psycopg3이며, DB06 전환 인수 전 기본 MySQL/MyBatis와 원본을 유지한다.
+- Backend는 업무 API·DB·인증·트랜잭션·검색/동기화·추천 호출을 소유한다. UI는 Frontend, 데이터·모델·평가는 Recommendation이 소유하며 상세 설계를 복제하지 않는다.
+- 기준 문서는 [전환 계약](docs/POSTGRESQL-MIGRATION.md), [검색 계획](docs/SEARCH-PLAN.md), [검증](docs/TESTING.md), [현재 백엔드 계획](docs/DELIVERY-PLAN.md)이다. 기본 명령은 `./scripts/check.sh`, `./scripts/dev.sh`다.
+- Repository/DTO projection과 필요한 원자 SQL·잠금을 사용한다. OSIV off·ddl-auto=validate·Flyway versioned SQL을 유지하고 자동 create/update/clean을 금지한다. 금액/삭제 이력·ID/epoch·sequence·원문 이벤트·UUID/ACK와 rollback 경계를 보존한다.
+- 기존 사용자 DB를 초기화하지 않는다. DB 검증은 소유 marker·TLS·최소 권한의 폐기 환경에서 수행한다. 행위·계약 변경에는 실패 경계를 포함한 의미 있는 회귀를 유지한다. 문서 변경에도 기존 필수 CI를 실행한다.
 
-- Backend owns business APIs, PostgreSQL/JPA migration and business persistence, auth/session, search indexing/API integration, backend tests and backend docs/PRs. MySQL is the preserved migration-source/baseline. Frontend owns UI/routes/state/API consumption/browser tests/assets and its docs/PRs. Recommendation owns source ingestion/curation, features, model training/scoring/reasons/evaluation and its docs/PRs.
-- DB01–DB06 are required migration work, not extra user features. Use JPA repositories/projections and deliberate native queries for atomic SQL/queue boundaries; no replacement-technology decision remains pending. Disable OSIV; Hibernate ddl-auto=validate and versioned PostgreSQL Flyway migrations own the target schema. Preserve source IDs, epochs, order snapshots, immutable outbox JSON text/source UUID and delivery state. Do not reset source/target IDs or treat MySQL test results as PostgreSQL validation. See docs/POSTGRESQL-MIGRATION.md.
-- Recommendation/docs/DATA-AND-MODEL-PLAN.md is the data/model/evaluation canonical plan (sibling checkout or GitHub main). Backend owns docs/SEARCH-PLAN.md and integration contracts. Reference other owners rather than copying detailed plans or mixing their implementation into Backend PRs; coordinate shared contracts in approved planning.
-- Follow approved planning referenced by this chat/private context and this repo's docs/DELIVERY-PLAN.md for Backend work. Frontend and Recommendation own their role plans. All 20 MVP features must be implemented, connected and pass required validation by 2026-12-31 inclusive Asia/Seoul. Keep the November 22 DB/React and December 13 P1 milestones; complete P2 on December 14–31. January 1 onward is for additional tuning, measured optimization, hardening and final acceptance/documentation. Final deadline remains 2027-02-05 inclusive Asia/Seoul; no new implementation, commits or merges from 2027-02-06 00:00.
-- All R01–R08 and F01–F12 are required; P1/P2 determines order only. Keep chatbot, mobile implementation, real payments/shipping and AWS resource creation outside this work. AWS requires a later user instruction.
-- Resume the current chat every four hours with sol/ultra. Read latest planning, docs/plans, Git, PR reviews and CI. Before the MVP gate, prioritize remaining required features, technical prerequisites and defects that block required acceptance; do not delay them for independent portfolio work, refactoring or optional optimization. Required model fit and feature/auth/integrity/failure-fallback regressions belong before December 31, not January.
-- Check active task ownership and acquire this repo's ignored .pubburi/automation-lease using Backend/scripts/automation_lease.py. Never steal a live lease or overwrite user work. Preserve .pubburi/ and private context; never commit or print their sensitive contents.
-- Automated PRs require successful required CI, completed Codex review of the latest head, relevant manual validation and no unresolved findings before squash merge. Pending/failed/quota-limited review is not approval. Request review and reply to fixed findings in Korean with commit and validation evidence before native resolution; avoid duplicate replies.
-- Confirm merge and main CI, ff-only sync and remove only fully merged branches without extra work. Do not relax existing protection.
-- Record only observed completion and reproducible measurements. Keep private paths, credentials and private planning URLs out of new public evidence.
-- README describes current functionality. Do not add successor-project narration or invented results. Backend/Recommendation need no screenshot section; Frontend uses verified real screens only.
+## 공통 운영
 
-## Review guidelines
+- 최신 사용자 지시가 우선이다. 필수 R01–R08/F01–F12 전체 MVP는 2026-12-31 KST, DB/React는11월22일·P1은12월13일 목표다. 추가 최적화는 전체 MVP 뒤2027-01-01부터, 최종 기한은2027-02-05다. 2027-02-06 00:00 KST부터 새 구현·커밋·병합을 중단하고 안전하게 인계한다.
+- 현재 채팅의 4시간·gpt-6.1-sol/ultra 예약 하나를 유지한다. 조정자와 세 영역 담당자, 최대4명이다. 새 채팅/예약·타 프로젝트·외부 연락·AWS/유료 서비스·모바일/챗봇·실제 결제/배송은 범위 밖이다. PAY는 별도 구현 승인 전 설계안이다.
+- 시작 시 최신 기획·Git/PR/CI·활성 작업과 ignored 인계를 확인한다. `scripts/automation_lease.py`로 원자 lease를 획득하고 한 레포/파일/index/branch에 한 쓰기 소유자만 둔다. 살아 있는 작업의 잠금을 빼앗거나 사용자 변경을 reset/stash/kill하지 않는다. 이번 소유자만 해제한다.
+- 조정자는 공통 API/ERD·공유 서버/DB/포트·Notion·최종 PR 게이트를 맡는다. 담당자는 자기 레포만 수정한다. 독립 검사는 병렬화하되 실제 성능 측정과 공유 실행 자원은 예약한다.
+- `codex/` 브랜치와 `type(scope): 한국어 변경 설명`을 사용한다. 한 커밋/PR은 한 검토 목적이며 필요한 테스트·문서만 묶는다. 새로 만든 열린 PR은 ois0886와 적합한 주요 라벨을 지정한다. 닫힌/병합된 PR은 읽기 전용이며 댓글·본문·담당자·라벨을 추가/수정하지 않는다.
+- 최신 head 필수 CI·완료 Codex·관련 검증·구체적 미해결0과 기존 보호 규칙을 충족해야 한국어 제목/본문으로 Squash한다. 수정 답글은 한국어로 원 스레드에 남기고 실제 Resolve한다. 병합/main CI·ff-only와 추가 변경 없음을 확인한 뒤 양쪽 브랜치를 삭제한다.
+- 비밀·개인 경로·비공개 기획 주소·원본 데이터/모델·로컬 로그는 공개 문서/PR에 넣지 않는다. 실제 성능 비교에는 동일 조건의 전후 원값과 한계가 필요하다. 검사 수·CI 시간·시연 행동을 서비스 성능/실사용자 품질로 쓰지 않는다.
 
-- Write review findings in Korean. Focus on concrete correctness, ownership, data preservation and API compatibility issues introduced by the diff.
-- Do not treat future roadmap items as implemented or require out-of-scope product features in documentation/setup PRs.
+## 문서·코드 최소화
 
-## Role agents, case studies and continuous improvement
+- **Notion은 해야 할 일과 한 일만 관리한다.** 기능·목표일·완료 여부를 짧게 고치고 회차별 요약·설계·PR 본문·테스트/CI 수치·로컬 실패 과정을 붙이지 않는다. 필요한 실행 일감/상세 논의는 기존 GitHub Project/Discussion을 먼저 사용하며 단순 진행 보고를 위한 새 항목은 만들지 않는다.
+- **주제당 현재 정본 하나를 갱신한다.** 새 날짜별 계획/완료 보고서·일상 감사 문서를 만들지 않는다. 실행 이력·검증은 PR/CI/Git, 자동화 재개에는 현재 ignored 체크포인트 하나를 사용한다. 독립 실측이나 필요한 출처/설계만 별도 보존한다.
+- 기존 동작을 공유할 수 있으면 기존 구현을 쓴다. 실제 소비자가 없는 일회성 실험·중복 래퍼/검증·추상화는 제거한다. 파일/줄 수를 줄이기 위해 권한·데이터·실패 경계나 유효한 테스트를 없애지 않는다.
+- README는 현재 기능과 실제 대표 사례만 둔다. 목표는 레포별4개지만 근거 없는 사례/성과로 채우지 않는다. 사례를 바꾸는 경우에만 register를 갱신하고 매 실행의 '유지' 기록은 쓰지 않는다. 회귀/CI 집계·관련 프로젝트/개발자 표·기획/출처 링크 모음은 추가하지 않는다. Backend/Recommendation에는 스크린샷 항목을 두지 않는다.
+- 실제 진척·실패·사용자 조치가 있을 때만 PR·동작·검증·남은 범위를 짧게 보고한다. 정리만을 위한 새 문서/코드를 만들거나 기록량을 진척으로 세지 않는다.
 
-- Use coordinator + Backend/Frontend/Recommendation workers in this same chat on each scheduled run. See Backend/docs/AUTOMATION-PLAYBOOK.md (sibling checkout or GitHub main). No separate user chats or duplicate schedules.
-- Coordinator records atomic repository ownership and delegated files/Git owner. One writer per repo/file; no concurrent staging or branch changes. Workers stay inside their assigned repo. Coordinator owns shared API/ERD decisions, shared runtime integration, PR gates and the single Notion update. Internal worker coordination is allowed; messaging other user chats or external people is not.
-- Final README target is exactly four real, independently justified hiring-relevant problem-solving cases. Order: 문제 → 원인 → 해결 → 결과 → 대체안/회고 → 코드. Use substantial real code excerpts, displayed by default, and live source links.
-- Never invent past failures, personal contribution, model results or performance. Do not split one bootstrap/CI topic into filler cases. If evidence is insufficient, record the actual count and concrete acquisition tasks in docs/case-study-register.md and planning; fill the four only after implementation/verification.
-- On every run compare current cases with candidates from the work. Replace only when a genuinely stronger real problem-solving case is discovered for hiring reviewers, based on actual impact, state/async/data difficulty, cause evidence, alternatives, implementation contribution and reproducible outcomes. Replace stronger cases immediately, one or many; record why. No forced replacement; preserve cases when no better evidence exists. Do not select by novelty, code size, test totals or arbitrary scores.
-- Keep regression evidence, test counts/lists and CI aggregation in plans/PR/CI rather than README. Performance requires real comparable before/after measurements; correctness counts, audit reductions and CI time are not application performance.
-- Do not restore the README related-project/developer section, repository/responsibility or developer tables, planning/collaboration/provenance link collections, mobile-role narration or their ToC/anchors. Preserve source provenance documents themselves. Backend/Recommendation need no screenshots; Frontend uses verified real completed screens only.
-- Until the MVP gate, continue with independently executable required features, prerequisites and acceptance-blocking defects when another task is blocked; report missing dependencies rather than substituting optional improvements. From 2027-01-01, continue reproducing and fixing existing-project defects and measured optimization opportunities until the final deadline. Coordinator adds deduplicated evidence-based tasks with owner, impact, priority and acceptance criteria. Do not stop at monitoring, expand commercial scope, invent issues or churn empty changes. Keep all existing CI/latest-review/manual-validation/merge/branch-cleanup and cost/account approval rules.
+리뷰는 한국어로 구체적인 정확성·권한/수명·데이터 보존·호환성 결함에 집중하며 범위 밖 기능을 요구하지 않는다.

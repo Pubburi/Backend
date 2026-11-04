@@ -85,7 +85,7 @@ verify-import는 쓰기가 중단된 같은 target/source 승인 조건에서 RE
 
 ## 검증과 범위
 
-[작업 기록](plans/2026-11-02-postgresql-source-import.md)에 기본 copied source와 별도 authored
+[작업 기록](https://github.com/Pubburi/Backend/blob/3748f25718e13a2e76012d1a86c5a9fd36b75fe6/docs/plans/2026-11-02-postgresql-source-import.md)에 기본 copied source와 별도 authored
 타입 fixture를 나눠 기록한다. raw snapshot/비밀번호 hash/개인값/SourceImportIntegration XML은
 공개하지 않는다. required backend-ci는 기존 PG/source/MySQL HTTP/엔진을 유지하며 새 import와
 복구·충돌·타입 조건을 같은 필수 job에서 실행한다. 전체 프로젝트 이관/모델 품질·성능 성과로

@@ -5,7 +5,7 @@
 추천 품질을 증명하는 API가 아니다. [부분 OpenAPI](openapi/default-recommendations.json)와
 실행 `/v3/api-docs`가 제공자 계약이다.
 기본 MySQL과 [별도 JPA 제공자](JPA-REHEARSAL.md)는 같은 원래 호출 계층을 사용한다.
-[JPA 연결/검증 범위](plans/2026-11-03-jpa-default-recommendations.md)는 기본 PG 전환·B1 개인화와 구분한다.
+[JPA 연결/검증 범위](https://github.com/Pubburi/Backend/blob/7cd38cf1cc1e4e27b95ebc92460d23f374d20815/docs/plans/2026-11-03-jpa-default-recommendations.md)는 기본 PG 전환·B1 개인화와 구분한다.
 
 성공은 ApiResponse의 data에 다음 두 필드만 둔다.
 
@@ -59,4 +59,4 @@ HTTP future와 body subscription에 취소를 요청한다. [JDK17 문서](https
 
 원격 실패는 정상 FALLBACK 경로이며 원문 오류·URL·응답 본문을 공개 API에 노출하지 않는다.
 기존 ApiResponse·400/406·DB 오류500과 ProductResponse를 유지한다. 설치/검증은
-[TESTING](TESTING.md)과 [작업 근거](plans/2026-11-01-default-recommendation-integration.md)를 따른다.
+[TESTING](TESTING.md)과 [작업 근거](https://github.com/Pubburi/Backend/blob/5e4dc00678b700df22c33fe118d33733417a886c/docs/plans/2026-11-01-default-recommendation-integration.md)를 따른다.

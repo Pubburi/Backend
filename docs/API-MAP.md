@@ -57,7 +57,7 @@ trim하지 않는다. 누락/null·잘못된 타입·추가 body 필드는 `400 
 commit 뒤 관측 ID/epoch와 여전히 같은 요청 세션만 갱신하고 다른 기존 세션은 다음 보호
 요청에서401이다. 동시 로그아웃/다른 계정 로그인으로 바뀐 세션을 복원하지 않는다.
 암호/해시/epoch를 응답에 넣지 않으며 새 schema/DAO·runtime 권한은 없다.
-[F09 공급·검증 범위](plans/2026-11-03-self-account-settings.md)는 실제 웹 인수와 구분한다.
+[F09 공급·검증 범위](https://github.com/Pubburi/Backend/blob/8f593168ed7dbfe629c70e20fcd0ea020d6fb366/docs/plans/2026-11-03-self-account-settings.md)는 실제 웹 인수와 구분한다.
 
 현재 로그인한 관리자는 자기 계정을 삭제하거나 자신의 `ADMIN` 역할을 제거할 수 없다. 관리자 수정의 `role`은 `USER` 또는 `ADMIN`만 허용한다.
 

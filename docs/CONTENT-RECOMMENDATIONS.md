@@ -55,5 +55,5 @@ binding과 다르면409이고 제공자에 보내지 않는다. 원격 대기 �
 원문 파일/계정/응답 오류를 오류 메시지에 반사하지 않는다. 마지막 읽기 이후의 수정까지 잠그는
 보장은 아니며 주문 가격은 원래 주문 시점 스냅샷을 사용한다.
 
-[검증/한계](plans/2026-11-04-owned-content-recommendations.md)를 따르며 전체 R02/R04·서비스
+[검증/한계](https://github.com/Pubburi/Backend/blob/6fda9d3c2fb42e7d118e15602e601389f92695dd/docs/plans/2026-11-04-owned-content-recommendations.md)를 따르며 전체 R02/R04·서비스
 SKU 승인/학습 품질·기본 PostgreSQL cutover 완료로 확대하지 않는다.
