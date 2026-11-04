@@ -44,6 +44,7 @@
         <include>com/pubburi/pub/controller/rest/DefaultRecommendationController.java</include><include>com/pubburi/pub/model/service/DefaultRecommendationService.java</include>
         <include>com/pubburi/pub/controller/rest/SearchPhraseController.java</include><include>com/pubburi/pub/model/service/SearchPhraseService.java</include><include>com/pubburi/pub/controller/request/SearchPhraseRequest.java</include>
         <include>com/pubburi/pub/config/RecommendationConfig.java</include><include>com/pubburi/pub/recommendation/*.java</include>
+        <include>com/pubburi/pub/config/ProductSearchConfig.java</include><include>com/pubburi/pub/search/*.java</include><include>com/pubburi/pub/model/service/PublicProductSearchService.java</include><include>com/pubburi/pub/model/dao/ProductSearchIdentityDao.java</include>
         <include>com/pubburi/pub/model/dto/*.java</include><include>com/pubburi/pub/model/dao/UserDao.java</include><include>com/pubburi/pub/model/dao/MarketDao.java</include>
         <include>com/pubburi/pub/model/dao/ProductDao.java</include><include>com/pubburi/pub/model/dao/ProductFeatureDao.java</include><include>com/pubburi/pub/model/dao/ProductSearchOutboxDao.java</include>
         <include>com/pubburi/pub/model/dao/OrderDao.java</include><include>com/pubburi/pub/model/dao/OrderDetailDao.java</include><include>com/pubburi/pub/model/dao/StampDao.java</include>

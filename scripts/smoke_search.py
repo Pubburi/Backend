@@ -207,6 +207,9 @@ def main():
             pg_business_after(http, pg_business)
             pg_after(http, endpoint, pg_relay, replace_pg_index)
             report["completed"].append("PostgreSQL business/queue binding and tombstone survive engine restart; replacement remains unacknowledged")
+            from public_search_smoke import verify as verify_public_search
+            verify_public_search(http, endpoint, private, pg_fixture["business"], pg_business["index"])
+            report["completed"].append("opt-in public engine search preserves current PostgreSQL filters/pages and safe database fallback")
         source = private / "events.json"
         source.write_text(json.dumps({"schemaVersion": 1, "dataKind": "authored_fixture", "events": events}))
         base = [sys.executable, "scripts/search_index.py"]

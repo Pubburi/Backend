@@ -1,8 +1,9 @@
 # 현재 상품 검색·필수 필터 계약
 
-`GET /api/products`는 공개 MySQL 조회다. [부분 OpenAPI](openapi/product-search.json)와 실행
+`GET /api/products`는 기본 DB 조회와 명시한 엔진 읽기를 같은 공개 계약으로 제공한다. [부분 OpenAPI](openapi/product-search.json)와 실행
 `/v3/api-docs`가 제공자 계약이며 기존 ApiResponse·ProductResponse 일곱 필드와 PageResponse를
-유지한다. OpenSearch·자동완성·한국어 분석·추천 재정렬을 구현한 API로 표시하지 않는다.
+유지한다. 기본 스택은 MySQL이고 별도 JPA 제공자는 PostgreSQL을 사용한다. 자동완성·한국어
+질의 품질·추천 재정렬과 기본 DB 전환 완료로 표시하지 않는다.
 
 ## 조건과 단위
 
@@ -44,12 +45,45 @@ sourceName·known 표시 자체가 외부 사실이나 사용 권리의 승인�
 items와 total은 같은 공통 필터 SQL을 사용한다. 태그별 EXISTS로 확인해 여러 태그가 상품 행을
 증식시키거나 total을 부풀리지 않는다. 각 정렬은 기존 id 오름차순 tie-break를 유지한다.
 한 요청의 목록/개수는 짧은 read-only REPEATABLE READ 트랜잭션의 같은 스냅샷에서 읽으며
-원격 호출이 없다. 다른 페이지/재조회 요청까지 같은 상품 상태를 고정하는 보장은 아니다.
+이 DB 읽기는 원격 호출을 포함하지 않는다. 다른 페이지/재조회 요청까지 같은 상품 상태를 고정하는 보장은 아니다.
 
 결과가 없으면 items=[], total=0, totalPages=0, hasNext=false다. DB 오류는500이며 빈 성공으로
 숨기지 않는다. 가격/도수는 현재 업무 컬럼을 그대로 사용한다. 판매 상태/재고 필드가 없으므로
 판매·매진·원천 사실 확인을 완료했다고 주장하지 않는다. 이 GET은 상품/특성/주문수·계정 취향을
 수정하지 않고 추천 서버·외부 키·AWS 없이 동작한다.
+
+## 명시 엔진 읽기와 현재 DB fallback
+
+`PUBBURI_SEARCH_ENABLED=true`, `PUBBURI_SEARCH_ENDPOINT`, `PUBBURI_SEARCH_INDEX`를 명시하면
+같은 GET이 source-bound 로컬 OpenSearch를 읽는다. 기본 false는 종전 DB 경로 그대로이며 기본
+기동/Compose에 엔진을 추가하지 않는다. origin은 운영자가 지정한 numeric loopback HTTP,
+index는 기존 products-v1 physical 이름만 허용한다. 요청으로 host/index/source를 받지 않는다.
+
+현재 DB의 기존 relay source UUID를 실제 DAO에서 읽고, 물리 index의 owner/schema/data-kind/
+source와 UUID를 검색 전후 확인한다. 앱은 색인 생성/변경·relay binding/ACK/source reset을 하지 않는다.
+검색은 deleted=false와 모든 필수 범위·주종·known 태그 AND, 기존 네 정렬/ID tie와 정확 total을
+요청한다. 엔진 source 문서는 받지 않으며 임의 후보/부분 shard/timeout·부정확 total은 거절한다.
+connect200ms·metadata/검색/재확인을 합친 전체700ms·응답별128KiB와 중복 JSON/추가 문서/
+redirect 거부를 적용한다. 엔진 원격 대기는 업무 DB 트랜잭션 밖이다.
+
+그 뒤 기존 canonical 서비스의 짧은 RR items/count를 읽는다. **현재 페이지의 ID순과 total이 모두
+같을 때만** 엔진 확인으로 분류하고, 응답 필드는 현재 DB의 Product7을 쓴다. 누락·지연·삭제·
+필수조건/정렬·collation 차이·엔진 장애에는 같은 모든 조건의 DB 응답을 반환한다. DB 예외는
+500이며 빈 성공으로 바꾸지 않는다. 엔진이 빈 결과라도 현재 DB와 같아야 확인 결과다.
+이 단계는 DB 확인 쿼리를 유지하고 원격 비용을 추가한다. 속도/DB 부하 감소나 검색 품질 개선을
+주장하지 않으며 현재 페이지/total의 일치를 전체 색인의 정합성 증명으로 확대하지 않는다.
+
+JSON은 그대로이고 `X-Pubburi-Search-Source`만 DATABASE(비활성), ENGINE_VERIFIED(현재 페이지/
+total 일치), DATABASE_FALLBACK(오류/불일치/미지원)으로 구분한다. q의 기존 LIKE `%`/`_`/backslash,
+100 UTF-16 단위를 넘는 q와 from+size>10000은 DB 의미를 그대로 사용한다. 그 밖의 q는 keyword
+필드의 literal wildcard 후보를 만들고 DB와 대조한다. Nori 의미 검색/동의어/오타로 q를 바꾸지 않는다.
+엔진에서 지원하지 않는 collation/비용 정책도 필터를 제거하지 않고 DB로 대체한다.
+
+[wildcard의 의미/비용 제한](https://docs.opensearch.org/latest/query-dsl/term/wildcard/),
+[페이지 범위](https://docs.opensearch.org/latest/search-plugins/searching-data/paginate/),
+[검색 API](https://docs.opensearch.org/latest/api-reference/search-apis/search/)를 따른다.
+명시한 index는 기존 [source-bound relay](SEARCH-RELAY.md)로 준비하며 공개 앱이 자동 재색인하거나
+유실된 index/alias를 복구하지 않는다. [구현/검증 기록](plans/2026-11-04-public-search-fallback.md)을 따른다.
 
 예를 들어 다음은 원화/도수와 명시 태그를 모두 만족하는 상품의 첫 페이지를 조회한다. 태그는
 계약 설명용 값이며 실제 상품의 맛을 주장하지 않는다.
@@ -59,5 +93,5 @@ items와 total은 같은 공통 필터 SQL을 사용한다. 태그별 EXISTS로 
 ~~~
 
 검증·제한은 [작업 계획](plans/2026-11-01-product-search-filters.md)과 [TESTING](TESTING.md)에 둔다.
-현 구현은 S01/F02의 MySQL 필수조건 증가분이며 검색 엔진 색인/동기화·전체 F02와 부하/검색 품질
-인수 완료를 뜻하지 않는다.
+현재는 두 DB의 필수조건과 명시 엔진 읽기/현재 DB 대체를 제공한다. 전체 F02·재색인/유실 복구·
+기본 스택 전환과 부하/검색 품질 인수 완료를 뜻하지 않는다.

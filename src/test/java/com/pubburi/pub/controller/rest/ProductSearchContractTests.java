@@ -28,7 +28,8 @@ class ProductSearchContractTests {
 					seen.set((ProductSearchFilters) args[3]);
 					return PageResponse.of(List.of(new Product(1, "Fixture", "맥주", 1000, "fixture.png", 5.1f)), (PageCriteria) args[4], 1);
 				});
-		var mvc = MockMvcBuilders.standaloneSetup(new ProductRestController(service, null)).setControllerAdvice(new GlobalExceptionHandler()).build();
+		var search = new com.pubburi.pub.model.service.PublicProductSearchService(service, () -> null, com.pubburi.pub.search.ProductSearchGateway.disabled());
+		var mvc = MockMvcBuilders.standaloneSetup(new ProductRestController(service, null, search)).setControllerAdvice(new GlobalExceptionHandler()).build();
 		String result = mvc.perform(get("/api/products").param("minPriceKrw", "0").param("maxPriceKrw", "1000")
 				.param("minAbvPercent", "0").param("maxAbvPercent", "5.10").param("tasteTag", " Sweet ", "dry,fruit")
 				.param("aromaTag", " FLORAL ").param("page", "0").param("size", "0"))
@@ -47,7 +48,8 @@ class ProductSearchContractTests {
 	void invalidRangesTypesAndTagsFailBeforeAnyServiceRead() throws Exception {
 		ProductService service = (ProductService) Proxy.newProxyInstance(ProductService.class.getClassLoader(), new Class<?>[] {ProductService.class},
 				(proxy, method, args) -> { throw new AssertionError("Invalid filter must not query products"); });
-		var mvc = MockMvcBuilders.standaloneSetup(new ProductRestController(service, null)).setControllerAdvice(new GlobalExceptionHandler()).build();
+		var search = new com.pubburi.pub.model.service.PublicProductSearchService(service, () -> null, com.pubburi.pub.search.ProductSearchGateway.disabled());
+		var mvc = MockMvcBuilders.standaloneSetup(new ProductRestController(service, null, search)).setControllerAdvice(new GlobalExceptionHandler()).build();
 		for (String price : List.of("", "-1", "1.1", "NaN", "2147483648", "1e2", " 1", "true"))
 			mvc.perform(get("/api/products").param("minPriceKrw", price)).andExpect(status().isBadRequest());
 		for (String abv : List.of("", "-0.1", "100.01", "5.555", "NaN", "Infinity", "1e1", " 5.1"))
