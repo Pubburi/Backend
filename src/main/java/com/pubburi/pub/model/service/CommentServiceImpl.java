@@ -1,6 +1,10 @@
 package com.pubburi.pub.model.service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import com.pubburi.pub.controller.api.CommentTasteTags;
+import com.pubburi.pub.model.dto.CommentTasteTag;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +50,13 @@ public class CommentServiceImpl implements CommentService {
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public CommentPageResponse<Comment> getCommentsPage(int productId, PageCriteria criteria, CommentSort sort,
 			boolean includeSummary) {
+        return getCommentsPage(productId, criteria, sort, includeSummary, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public CommentPageResponse<Comment> getCommentsPage(int productId, PageCriteria criteria, CommentSort sort,
+            boolean includeSummary, boolean includeTasteTags) {
 		if ((long) (criteria.page() - 1) * criteria.size() > Integer.MAX_VALUE) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Review page offset is too large");
 		}
@@ -54,6 +65,13 @@ public class CommentServiceImpl implements CommentService {
 					includeSummary ? CommentRatingSummary.from(0, null) : null);
 		}
 		var comments = commentDao.selectByProductIdPaged(productId, criteria.size(), criteria.offset(), sort);
+        if (includeTasteTags && !comments.isEmpty()) {
+            Map<Integer, List<String>> tags = commentDao.selectTasteTags(comments.stream().map(Comment::getId).toList())
+                    .stream().collect(Collectors.groupingBy(CommentTasteTag::commentId,
+                            Collectors.mapping(CommentTasteTag::tag, Collectors.toList())));
+            comments.forEach(comment -> comment.setTasteTags(tags.getOrDefault(comment.getId(), List.of())
+                    .stream().sorted().toList()));
+        }
 		int count = commentDao.countByProductId(productId);
 		var summary = includeSummary ? CommentRatingSummary.from(count, commentDao.averageRatingByProductId(productId)) : null;
 		return CommentPageResponse.from(PageResponse.of(comments, criteria, count), summary);
@@ -76,7 +94,10 @@ public class CommentServiceImpl implements CommentService {
 		if (comment == null || comment.getUserId() == null || comment.getProductId() <= 0 || comment.getRating() < 0) {
 			return 0;
 		}
-		return commentDao.insert(comment);
+        var tags = CommentTasteTags.normalize(comment.getTasteTags());
+        int changed = commentDao.insert(comment);
+        if (changed > 0 && tags != null && !tags.isEmpty()) commentDao.insertTasteTags(comment.getId(), tags);
+        return changed;
 	}
 
 	@Override
@@ -85,7 +106,14 @@ public class CommentServiceImpl implements CommentService {
 		if (comment == null || comment.getId() <= 0) {
 			return 0;
 		}
-		return commentDao.update(comment);
+        var tags = CommentTasteTags.normalize(comment.getTasteTags());
+        // The row UPDATE serializes competing opinion replacements in the same transaction.
+        int changed = commentDao.update(comment);
+        if (changed > 0 && tags != null) {
+            commentDao.deleteTasteTags(comment.getId());
+            if (!tags.isEmpty()) commentDao.insertTasteTags(comment.getId(), tags);
+        }
+        return changed;
 	}
 
 	@Override

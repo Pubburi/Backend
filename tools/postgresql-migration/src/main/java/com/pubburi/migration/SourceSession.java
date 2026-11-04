@@ -87,6 +87,7 @@ final class SourceSession implements AutoCloseable {
             }
         }
         Set<String> expected=new HashSet<>(SourceContract.TABLES.stream().map(SourceContract.Table::name).toList());expected.add("pubburi_source_snapshot_guard");
+        if(tables.contains("t_comment_taste_tag")) { expected.add("t_comment_taste_tag"); emptyTasteTags(connection,settings.database()); }
         if(!tables.equals(expected)) throw new IllegalArgumentException("source_table_set_changed");
         for(var table:SourceContract.TABLES) {
             try(PreparedStatement s=connection.prepareStatement("SELECT COLUMN_NAME,DATA_TYPE,IS_NULLABLE,CHARACTER_MAXIMUM_LENGTH,NUMERIC_PRECISION,NUMERIC_SCALE,DATETIME_PRECISION,COLUMN_TYPE,CHARACTER_SET_NAME,COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION")) {
@@ -123,7 +124,9 @@ final class SourceSession implements AutoCloseable {
                 if(group!=null) indexes.add(new SchemaIndexContract.Key(table,unique,columns));
             }
         }
-        if(!indexes.equals(SchemaIndexContract.expected())) throw new IllegalArgumentException("source_index_contract_changed");
+        var expectedIndexes=new HashSet<>(SchemaIndexContract.expected());
+        if(tables.contains("t_comment_taste_tag")) expectedIndexes.add(new SchemaIndexContract.Key("t_comment_taste_tag",true,"comment_id:A:-,tag:A:-"));
+        if(!indexes.equals(expectedIndexes)) throw new IllegalArgumentException("source_index_contract_changed");
         Map<String,String> primary=new LinkedHashMap<>();
         try(PreparedStatement s=connection.prepareStatement("SELECT TABLE_NAME,COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND INDEX_NAME='PRIMARY' AND TABLE_NAME<>'pubburi_source_snapshot_guard' ORDER BY TABLE_NAME,SEQ_IN_INDEX")) {
             s.setString(1,settings.database());try(ResultSet r=s.executeQuery()) {while(r.next()) primary.merge(r.getString(1),r.getString(2),(a,b)->a+","+b);}
@@ -138,13 +141,31 @@ final class SourceSession implements AutoCloseable {
                 }
             }
         }
-        if(!foreign.equals(Set.copyOf(new String(SourceContract.resource("source-foreign-contract.tsv"),StandardCharsets.UTF_8).lines().toList()))) throw new IllegalArgumentException("source_foreign_contract_changed");
+        var expectedForeign=new HashSet<>(new String(SourceContract.resource("source-foreign-contract.tsv"),StandardCharsets.UTF_8).lines().toList());
+        if(tables.contains("t_comment_taste_tag")) {
+            if(!"comment_id,tag".equals(primary.get("t_comment_taste_tag"))) throw new IllegalArgumentException("source_review_tag_shape_changed");
+            expectedForeign.add("t_comment_taste_tag\tcomment_id\tt_comment\tid\tCASCADE");
+        }
+        if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("source_foreign_contract_changed");
         // Check row references with the source engine's own collation, never a Java approximation.
         for(String line:foreign) {
             String[] p=line.split("\t");
             try(Statement s=connection.createStatement();ResultSet r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM `"+p[0]+"` child LEFT JOIN `"+p[2]+"` parent ON child.`"+p[1]+"`=parent.`"+p[3]+"` WHERE child.`"+p[1]+"` IS NOT NULL AND parent.`"+p[3]+"` IS NULL LIMIT 1)")) {
                 r.next();if(r.getBoolean(1)) throw new IllegalArgumentException("source_orphan_reference");
             }
+        }
+    }
+    static void emptyTasteTags(Connection c,String schema) throws SQLException {
+        // v1 has no opinion rows. Explicit SELECT also rejects a hidden/denied table; never infer empty from metadata.
+        try(var s=c.prepareStatement("SELECT COLUMN_NAME,DATA_TYPE,IS_NULLABLE,CHARACTER_MAXIMUM_LENGTH,COLLATION_NAME,COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='t_comment_taste_tag' ORDER BY ORDINAL_POSITION")) {
+            s.setString(1,schema);try(var r=s.executeQuery()) {
+                if(!r.next() || !"comment_id".equals(r.getString(1)) || !"int".equals(r.getString(2)) || !"NO".equals(r.getString(3)) || !"int".equals(r.getString(6))
+                        || !r.next() || !"tag".equals(r.getString(1)) || !"varchar".equals(r.getString(2)) || !"NO".equals(r.getString(3)) || r.getInt(4)!=40 || !"utf8mb4_bin".equals(r.getString(5)) || r.next())
+                    throw new IllegalArgumentException("source_review_tag_shape_changed");
+            }
+        }
+        try(var s=c.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM t_comment_taste_tag)")) {
+            if(!r.next() || r.getBoolean(1)) throw new IllegalArgumentException("source_v1_review_tags_unsupported");
         }
     }
     Map<String,String> highwater() throws SQLException {
@@ -160,7 +181,10 @@ final class SourceSession implements AutoCloseable {
     }
     void finish() throws Exception {
         if(!next.equals(highwater())) throw new IllegalArgumentException("source_highwater_changed");
-        try(Connection current=settings.connect()) {if(!server.equals(guard(current,settings))) throw new IllegalArgumentException("source_window_changed");}
+        try(Connection current=settings.connect()) {readOnlyGrants(current,settings);if(!server.equals(guard(current,settings))) throw new IllegalArgumentException("source_window_changed");
+            try(var s=current.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t_comment_taste_tag')")) {
+                r.next();if(r.getBoolean(1)) emptyTasteTags(current,settings.database());
+            }}
         connection.commit();committed=true;
     }
     @Override public void close() throws SQLException {

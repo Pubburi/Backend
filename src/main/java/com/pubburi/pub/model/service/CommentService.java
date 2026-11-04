@@ -23,6 +23,9 @@ public interface CommentService {
 	CommentPageResponse<Comment> getCommentsPage(int productId, PageCriteria criteria, CommentSort sort,
 			boolean includeSummary);
 
+    CommentPageResponse<Comment> getCommentsPage(int productId, PageCriteria criteria, CommentSort sort,
+            boolean includeSummary, boolean includeTasteTags);
+
 	List<Comment> getAllComments();
 
 	PageResponse<Comment> getAllComments(PageCriteria criteria);

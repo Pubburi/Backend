@@ -13,8 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class JpaCommentDao implements CommentDao {
     private static final String VIEW = "select new com.pubburi.pub.model.dto.Comment(c.id,c.userId,c.productId,c.rating,c.comment) from RehearsalComment c";
     private final CommentRepository comments;
+    private final CommentTagRepository tags;
     @PersistenceContext private EntityManager entityManager;
-    public JpaCommentDao(CommentRepository comments) { this.comments = comments; }
+    public JpaCommentDao(CommentRepository comments, CommentTagRepository tags) { this.comments = comments; this.tags = tags; }
     private List<Comment> page(Integer productId, int limit, int offset, CommentSort sort) {
         String order = switch (sort) {
             case LATEST -> "c.id desc";
@@ -27,6 +28,12 @@ public class JpaCommentDao implements CommentDao {
     }
     @Override public List<Comment> selectByProductId(int productId) { return page(productId, Integer.MAX_VALUE, 0, CommentSort.LATEST); }
     @Override public List<Comment> selectByProductIdPaged(int productId, int limit, int offset, CommentSort sort) { return page(productId, limit, offset, sort); }
+    @Override public List<com.pubburi.pub.model.dto.CommentTasteTag> selectTasteTags(List<Integer> ids) { return tags.opinions(ids); }
+    @Override @Transactional public int deleteTasteTags(int id) { return tags.deleteForComment(id); }
+    @Override @Transactional public int insertTasteTags(int id, List<String> values) {
+        tags.saveAllAndFlush(values.stream().map(value -> JpaCommentTag.from(id, value)).toList());
+        return values.size();
+    }
     @Override public int countByProductId(int productId) {
         return Math.toIntExact(entityManager.createQuery("select count(c) from RehearsalComment c where c.productId=:id", Long.class).setParameter("id", productId).getSingleResult());
     }

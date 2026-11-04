@@ -416,3 +416,13 @@ INSERT INTO t_product_search_relay_target(singleton_id, source_id) VALUES (1, UU
 INSERT INTO t_product_search_delivery(event_id)
 SELECT event_id FROM t_product_search_outbox ORDER BY event_id;
 COMMIT;
+
+-- Member review opinions; separate from curated product taste/aroma.
+CREATE TABLE t_comment_taste_tag (
+    comment_id INT NOT NULL,
+    tag VARCHAR(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    PRIMARY KEY (comment_id, tag),
+    CONSTRAINT ck_comment_taste_tag_nonblank CHECK (CHAR_LENGTH(TRIM(tag)) > 0),
+    CONSTRAINT fk_comment_taste_tag FOREIGN KEY (comment_id)
+        REFERENCES t_comment(id) ON DELETE CASCADE
+);

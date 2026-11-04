@@ -51,4 +51,21 @@ class JpaCommentFailureIntegrationTests extends JpaAccountTestSupport {
             assertEquals(operation.equals("INSERT") ? 201 : 200, request(owner, method, path, body).status());
         } finally { clean(sql, user, product, List.of()); }
     }
+    @Test void failedOpinionInsertRollsBackReviewAndFailedReplacementRetainsTheWholeOriginal() throws Exception {
+        var sql=control();var admin=loggedIn("ADMIN");String user=join();int product=create(admin,ownName());
+        try {
+            var owner=login(user,password);var first=Map.of("productId",product,"rating",3.75,"comment","before","tasteTags",List.of("before"));
+            int id=request(owner,"POST","/api/comments",first).body().path("data").path("id").intValue();
+            sql.execute("CREATE FUNCTION pubburi.ci_jpa_opinion_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.tag='authored-fail' THEN RAISE EXCEPTION 'authored opinion failure'; END IF; RETURN NEW; END $$");
+            try {
+                sql.execute("CREATE TRIGGER ci_jpa_opinion_failure AFTER INSERT ON pubburi.t_comment_taste_tag FOR EACH ROW EXECUTE FUNCTION pubburi.ci_jpa_opinion_failure()");
+                assertEquals(500,request(owner,"POST","/api/comments",Map.of("productId",product,"rating",1.25,"comment","must roll back","tasteTags",List.of("authored-fail"))).status());
+                assertEquals(1,sql.queryForObject("SELECT count(*) FROM pubburi.t_comment WHERE product_id=?",Integer.class,product));
+                assertEquals(500,request(owner,"PUT","/api/comments/"+id,Map.of("rating",1.25,"comment","must roll back","tasteTags",List.of("authored-fail"))).status());
+                assertEquals("before",sql.queryForObject("SELECT comment FROM pubburi.t_comment WHERE id=?",String.class,id));assertEquals(3.75f,sql.queryForObject("SELECT rating FROM pubburi.t_comment WHERE id=?",Float.class,id));
+                assertEquals(List.of("before"),sql.queryForList("SELECT tag FROM pubburi.t_comment_taste_tag WHERE comment_id=?",String.class,id));
+            } finally {sql.execute("DROP TRIGGER IF EXISTS ci_jpa_opinion_failure ON pubburi.t_comment_taste_tag");sql.execute("DROP FUNCTION pubburi.ci_jpa_opinion_failure()");}
+        } finally {clean(sql,user,product,List.of());}
+    }
+
 }

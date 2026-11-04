@@ -98,6 +98,7 @@ def run(environ):
         sql("CREATE USER '" + reader + "'@'%' IDENTIFIED BY '" + password + "' REQUIRE SSL; GRANT SELECT, SHOW VIEW ON " + literal_scope + " TO '" + reader + "'@'%'; "
             "CREATE USER '" + control + "'@'%' IDENTIFIED BY '" + control_password + "' REQUIRE SSL; GRANT SELECT ON " + literal_scope + " TO '" + control + "'@'%'; "
             "GRANT UPDATE,INSERT,ALTER ON " + database + ".t_product TO '" + control + "'@'%'; GRANT UPDATE ON " + database + ".t_user TO '" + control + "'@'%'; "
+            "GRANT INSERT,DELETE,ALTER ON " + database + ".t_comment_taste_tag TO '" + control + "'@'%'; "
             "USE " + database + "; CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); "
             "INSERT INTO pubburi_source_snapshot_guard VALUES ('" + token + "','QUIESCED','" + window + "'); GRANT UPDATE ON " + database + ".pubburi_source_snapshot_guard TO '" + control + "'@'%';")
         # A colliding database proves '_' is a privilege wildcard, not an identifier quote escape.

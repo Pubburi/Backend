@@ -127,6 +127,7 @@ def run(environ,snapshot,directory):
                 "GRANT SELECT,INSERT ON pubburi.t_stamp TO "+runtime+"; "
                 "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment TO "+runtime+"; "
                 "GRANT UPDATE(rating,comment) ON pubburi.t_comment TO "+runtime+"; "
+                "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment_taste_tag TO "+runtime+"; "
                 "GRANT USAGE ON SEQUENCE pubburi.t_comment_id_seq TO "+runtime+"; "
                 "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_favorite TO "+runtime+"; "
                 "GRANT SELECT,INSERT ON pubburi.t_user_preference TO "+runtime+"; "
