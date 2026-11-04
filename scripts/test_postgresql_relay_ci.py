@@ -2,16 +2,48 @@
 from pathlib import Path
 import tempfile
 import json
+import copy
 import unittest
 from unittest.mock import patch
 
 from prepare_postgresql_relay_ci import prepare
-from postgresql_relay_smoke import validate_business_events
+from postgresql_relay_smoke import validate_business_events, verify_business_api
 from relay_smoke import event
 from search_index import SearchError
 
 
 class PostgreSQLRelayPreparationTests(unittest.TestCase):
+    def business_api(self):
+        # Authored cardinality fixture; real route names and runtime schemas remain checked by packaged CI.
+        paths = {"/authored/" + str(index): {"get": {}} for index in range(35)}
+        for index in range(7): paths["/authored/" + str(index)]["put"] = {}
+        paths["/api/users/me/search-phrases"] = {"post": {
+            "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Input"}}}},
+            "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}}}
+        return {"paths": paths, "components": {"schemas": {
+            "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
+            "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
+            "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
+
+    def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
+        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 36, "api_operations": 43})
+        missing = copy.deepcopy(spec)
+        missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
+        extra_method = copy.deepcopy(spec)
+        extra_method["paths"]["/api/users/me/search-phrases"]["get"] = {}
+        del extra_method["paths"]["/authored/0"]["put"]
+        for invalid in (missing, extra_method):
+            with self.assertRaises(AssertionError): verify_business_api(invalid)
+
+    def test_old_totals_and_owner_override_or_weaker_fallback_schemas_are_rejected(self):
+        spec = self.business_api()
+        old = copy.deepcopy(spec); del old["paths"]["/api/users/me/search-phrases"]
+        owner = copy.deepcopy(spec); owner["components"]["schemas"]["Input"]["properties"]["userId"] = {}
+        query = copy.deepcopy(spec); query["paths"]["/api/users/me/search-phrases"]["post"]["parameters"] = [{"name": "userId"}]
+        weaker = copy.deepcopy(spec); weaker["components"]["schemas"]["Response"]["properties"]["source"]["enum"].append("FALLBACK")
+        for invalid in (old, owner, query, weaker):
+            with self.assertRaises(AssertionError): verify_business_api(invalid)
+
     def test_missing_opt_in_role_collision_and_reused_business_database_never_reach_database(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); (root / ".pubburi").mkdir()

@@ -79,6 +79,20 @@ float32 binary까지 같았다. MySQL 전체 회귀의 새20계정/3주문·자�
 최신 head 필수 CI·완료 Codex·미해결0/main 병합은 후속 게이트다. 실제 React R06 소비·문구 선택→
 검색/빈 결과 인수와 전체 R06/AI02·공개 엔진 검색/PG fallback·DB05–06/cutover는 미완료다.
 
+첫 [필수 CI41742248618](https://github.com/Pubburi/Backend/actions/runs/41742248618)는 source
+`fb9dc77`의 기본/실DB·packaged·기존 MySQL 검사를 통과한 뒤 PG queue18 검증 다음 business에서
+실패했다. 별도 relay business의 OpenAPI 기대가 이전35경로/42작업으로 남은 원인이었다.
+같은 head의 Codex 완료/지적 없음은 CI 성공을 대신하지 않으며 실패 원문과 재현 근거를 보존했다.
+
+이 경계도 현재36경로/43작업에 맞추고 새 본인 경로의 POST 전용·strict 입력 두 필드·owner
+query 부재·PROVIDER/UNAVAILABLE schema를 함께 검사한다. 같은 개수의 잘못된 경로/추가
+메서드·계정 선택 입력/완화된 대체 enum도 거절하는 회귀를 추가했다. 실제 엔진 전달·원문/
+UUID/ACK·별도 business 입력은 그대로이며 검사 삭제/skip이나 범위 완화로 처리하지 않는다.
+Java/운영 relay 어댑터·동결 두 JAR와 앞의 실제80/11응답 근거는 변경하지 않았다. 실제 DB를
+reset하거나 앞의 통합을 억지 재실행하지 않고, 수정된 도구 검사와 새 head 필수 전체 CI로 확인한다.
+수정 후 Python3.12 전체 도구97개와 repository 검사가 통과했다. 기존 전달 동작이나80개
+실DB 회귀를 줄이지 않았으며 최신 source의 실제 전체 CI/완료 Codex는 새로 확인한다.
+
 README 네 사례를 비교했다. 이번 새 소비자 연결은 과거 운영 실패나 측정 성능을 증명하지 않으므로
 독립적으로 더 강한 원인·영향 근거가 있는 기존 네 본문과 순서를 보존한다.
 전체20개 MVP12월31일·DB/React11월22일, 추가 개선은 MVP 뒤1월1일부터라는 기준을 유지한다.

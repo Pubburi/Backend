@@ -142,6 +142,9 @@ legacy 해시·새 암호UTF-8 72바이트/초과·역할/스탬프/자격 보�
 기존 packaged MySQL 취향 계약에도 caller의 strict 입력/소유·원격 실패 경계를 포함하며 실제
 OpenAPI 경로와 별도 JPA JAR의36경로/43작업·재시작은 계속 필수다.
 [호출 기록](plans/2026-11-04-owned-search-phrases.md)의 실제 제공자/두 DB 대조는 fixture와 구분한다.
+PG relay business도 같은 실제 JPA의36경로/43작업과 새 경로의 POST 전용·strict 두 입력/
+owner query 부재·PROVIDER/UNAVAILABLE schema를 검사한다. 숫자만 같고 경로/메서드·소유자
+입력/대체 정책이 다른 문서는 거절하며 기존 실제 전달·재시작 검증을 생략하지 않는다.
 
 PR·main push·수동 실행의 `backend-ci`는 별도 MySQL 8.4 서비스에 `data.sql`을 초기화하고
 패키징한 실제 jar를 기동한다. 포트가 이미 사용 중이면 다른 서버를 테스트하지 않고 실패한다.
