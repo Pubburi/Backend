@@ -15,7 +15,7 @@
 - [현재 기능과 범위](#features)
 - [기술 스택](#technology)
 - [시스템 구조](#architecture)
-- [문제 해결](#case-studies)
+- [문제 해결](#problem-solving)
 - [로컬 실행](#development)
 - [검증과 협업](#verification)
 - [개발 계획](#roadmap)
@@ -38,8 +38,8 @@
 | 명시취향 | 본인 전용 조회·전체 교체 API, 설문 상태·미입력/빈 선호·soft 목표/hard 범위 구분 |
 | 계정 찜 | 본인 전용 저장·해제·단건 상태·페이지 API, 반복 요청 멱등성·현재 상품 정보·삭제/재가입 격리 |
 | 기본 주류 목록 | 비개인 ID순 B0 연결, 전체 응답 대기·크기 제한, 현재 DB 재조회와 장애 대체 |
-| 본인 B1 DEMO API | 현재 본인 취향·명시 검수 container catalog의 B1/R04 호출, 현재 상품/조건 재확인·제공 불가 구분. 일반 서비스 catalog/웹 연결은 후속 |
-| 검색 문구 API | 본인 현재 취향·별도 검색 선택의 정확 조건 호출, 필수조건/수명 검증과 제공 불가 구분. 화면 연결은 후속 |
+| 본인 B1 DEMO API | 현재 본인 취향·명시 검수 container catalog의 B1/R04 호출, 현재 상품/조건 재확인·제공 불가 구분. 검수 DEMO 웹 연결 제공. 일반 서비스 catalog/최종 인수는 후속 |
+| 검색 문구 API | 본인 현재 취향·별도 검색 선택의 정확 조건 호출, 필수조건/수명 검증과 제공 불가 구분. 검색 화면 연결 제공 |
 | 상품 | 목록·이름/주종 검색, 가격·도수·명시 맛/향 AND 필터·정렬·페이지 이동, 상세·인기 상품 |
 | 상품 특성 | 별도 조회·관리자 전체 교체 API, 용량·설명·맛/향 태그·출처, 미확인/검수된 빈 태그 구분 |
 | 색인 관리 | 업무 트랜잭션의 상품 버전·변경 기록과 전송 예약, 별도 실행 relay의 claim/ack·재전달, 선택적 로컬 OpenSearch·nori와 삭제 표식. 명시 공개 검색·현재 DB 대조와 필수조건 대체 |
@@ -54,41 +54,38 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 
 ## ⚙️ 기술 스택
 
-| 영역 | 기술 |
-|---|---|
-| 언어·런타임 | Java 17 |
-| 서버 | Spring Boot 3.5.0, Tomcat 10.1.61, Bean Validation |
-| JSON | Jackson BOM 2.21.8 · 문자셋/엄격 입력 계약 |
-| 현재 API 저장 | MyBatis 3.0.3, MySQL 8.4 · 이관 전 기준 |
-| 확정 저장 전환 | PostgreSQL 18.6 · Spring Data JPA(Hibernate) · Flyway Community |
-| 별도 JPA 제공자 | Boot 3.5.16 · Spring Data JPA 3.5.13 · Hibernate 6.6.53.Final · 계정/프로필·매장·상품/특성·데모 주문·후기·본인 찜/명시취향·공개 기본 목록·상품 변경 이벤트 |
-| 로컬 색인 | OpenSearch 3.9.0 · analysis-nori 3.9.0 · 명시 관리 CLI |
-| 명시 Python relay | Python 3.12 · MySQL/PyMySQL 1.2.3 · PostgreSQL/Psycopg 3.3.7 · 검증 TLS·개별 claim/ACK |
-| API 문서 | springdoc 2.8.9 · OpenAPI 3.1 · Swagger UI |
-| 빌드·테스트 | Maven Wrapper 3.9.9, JUnit 5 |
-| CI | GitHub Actions · backend-ci |
-
-PostgreSQL의 독립 Flyway 스키마·설치/검증 도구와 [읽기 전용 원본 추출 도구](docs/SOURCE-SNAPSHOT.md), [승인 자료의 빈 대상 복사·검증 도구](docs/SOURCE-IMPORT.md)를 제공합니다. 전체 데이터 이관과 JPA API 전환은
-[전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따르며, 현재 API 실행 경로와 과거 검증을 보존합니다.
-별도 [세션·매장 JPA 제공자](docs/JPA-REHEARSAL.md)는 복사한 PostgreSQL에서 기존 계약으로
-로그인·매장/상품 CRUD·상품 필터 조회·특성 전체 교체와 같은 트랜잭션의 변경 이벤트/전송 예약을
-실행합니다. 데모 주문의 생성·이력·완료/삭제와 금액/상품 스냅샷·스탬프도 제공합니다.
-가입/ID 확인·현재 프로필/등급과 관리자 계정 관리도 기존 계약으로 제공합니다.
-본인 이름 수정과 현재 암호 검증 후 변경은 기본 MySQL과 JPA에서 같은 세션·자격 수명으로 제공합니다.
-공개 후기와 작성자/관리자의 작성·수정·삭제도 실제 JPA로 제공합니다.
-본인 찜의 상태·현재 상품 목록·저장/해제도 같은 계정 수명 계약으로 제공합니다.
-본인 명시취향의 조회·전체 교체·건너뛰기/초기화도 같은 공개 계약으로 제공합니다.
-공개 기본 목록도 원래 비개인 B0 호출과 현재 DB fallback으로 제공합니다.
-별도 [명시 relay](docs/SEARCH-RELAY.md)는 MySQL과 PostgreSQL을 선택해 같은 Engine/CLI로 전달합니다.
-[공개 상품 검색](docs/PRODUCT-SEARCH.md)은 명시적으로 엔진을 읽고 현재 DB의 페이지/total과
-대조합니다. 누락·지연·장애에도 같은 필수조건의 현재 DB 응답을 반환합니다. 기본은 비활성이며
-DB 확인 쿼리를 유지합니다. 기본 스택 전환·자동완성/검색 품질·성능 인수는 후속입니다.
+| 기술 스택 |
+|---|
+| Java |
+| Spring Boot |
+| Tomcat |
+| Bean Validation |
+| Jackson |
+| MyBatis |
+| MySQL |
+| PostgreSQL |
+| Spring Data JPA |
+| Hibernate |
+| Flyway |
+| OpenSearch |
+| analysis-nori |
+| Python |
+| PyMySQL |
+| Psycopg |
+| springdoc |
+| OpenAPI |
+| Swagger UI |
+| Maven Wrapper |
+| JUnit |
+| GitHub Actions |
 
 <a id="architecture"></a>
 
 ## 🏛️ 시스템 구조
 
-~~~mermaid
+기본 실행은 MySQL/MyBatis이며 PostgreSQL/JPA는 별도 제공자로 동작합니다. 전체 기본 스택 전환과 cutover 인수는 아직 미완료입니다.
+
+```mermaid
 flowchart LR
     Web["웹 클라이언트"] --> API["/api · 세션 인증"]
     API --> Service["서비스 · 트랜잭션"]
@@ -97,10 +94,17 @@ flowchart LR
     Service -->|B0/대체| Recommendation["추천 서비스"]
     Events["명시 이벤트 파일"] --> CLI["색인 관리 CLI"]
     CLI --> Search["로컬 OpenSearch · nori"]
-~~~
+```
 
 로컬 색인 기동·재생과 미완료 범위는 [실행 안내](docs/LOCAL-SEARCH.md)를 따릅니다. 현재 상품 검색은 MySQL을 사용합니다.
 
+PostgreSQL의 독립 Flyway 스키마·[읽기 전용 원본 추출](docs/SOURCE-SNAPSHOT.md)·[승인 자료의 빈 대상 복사/검증](docs/SOURCE-IMPORT.md)을 제공합니다. 기존 업무 값·명시 ID·원문 JSON 보존과 전체 전환 범위는 [전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따릅니다.
+별도 [JPA 제공자](docs/JPA-REHEARSAL.md)는 회원·세션/프로필, 매장·상품/특성, 후기·본인 찜/명시취향, 기본 목록·데모 주문을 기존 API 계약으로 제공합니다.
+
+별도 [명시 relay](docs/SEARCH-RELAY.md)는 MySQL/PostgreSQL을 선택해 같은 Engine/CLI와 검증 TLS·개별 claim/ACK로 전달합니다.
+[공개 상품 검색](docs/PRODUCT-SEARCH.md)은 명시적으로 엔진을 읽고 현재 DB의 페이지/total과 대조하며, 누락·지연·장애에는 같은 필수조건의 현재 DB 응답을 반환합니다. 기본은 비활성이며 DB 확인 쿼리를 유지합니다. 자동완성/검색 품질·성능 인수는 후속입니다.
+
+<a id="problem-solving"></a>
 <a id="case-studies"></a>
 
 ## 🧩 문제 해결
@@ -132,14 +136,14 @@ afterCommit 전달은 기록 유실 틈을 남기고, 업무 안의 엔진 전�
 
 #### 코드
 
-~~~java
+```java
 if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
     throw new IllegalStateException("Search outbox event could not be recorded");
 if (outbox.schedule(productId, version) != 1)
     throw new IllegalStateException("Search delivery could not be scheduled");
-~~~
+```
 
-~~~python
+```python
 def ack(self, claim):
     with self.transaction() as cursor:
         self.fence_target(cursor, claim.fingerprint, claim.source_id)
@@ -148,7 +152,7 @@ def ack(self, claim):
             WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s AND lease_until>NOW(6)""",
             (claim.event_id, claim.token))
         return cursor.rowcount == 1
-~~~
+```
 
 [업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml) · [claim·target 확인·조건부 ACK](scripts/search_relay.py) · [전송·운영 경계](docs/SEARCH-RELAY.md)
 
@@ -176,14 +180,14 @@ Guard가 로그인 때의 역할·이름·스탬프를 신뢰했습니다. ID만
 
 #### 코드
 
-~~~java
+```java
 User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
 if (!sameIdentity(value(session), observed)) {
 	return null;
 }
-~~~
+```
 
-~~~java
+```java
 synchronized (session) {
 	if (sameIdentity(value(session), observed)) {
 		if (!java.util.Objects.equals(updated.id(), observed.id())
@@ -195,7 +199,7 @@ synchronized (session) {
 		}
 	}
 }
-~~~
+```
 
 [현재 계정 확인·조건부 세션 갱신](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java) · [잠금 안의 버전 캡처](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [ID·epoch 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml) · [계약·전환](docs/SESSION-AUTHORITY.md)
 
@@ -223,7 +227,7 @@ PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전�
 
 #### 코드
 
-~~~java
+```java
 boolean attempted=false,confirmed=false;
 try(connection) {
     connection.setAutoCommit(false);
@@ -238,7 +242,7 @@ try(connection) {
     if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
     throw error;
 }
-~~~
+```
 
 [복사·PK tuple 대조·sequence 잠금](tools/postgresql-migration/src/main/java/com/pubburi/migration/SourceImportTool.java) · [commit/자원 종료 분류](tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java) · [typed bind](tools/postgresql-migration/src/main/java/com/pubburi/migration/TargetValues.java) · [복사 계약](docs/SOURCE-IMPORT.md)
 
@@ -268,7 +272,7 @@ try(connection) {
 
 서비스의 트랜잭션 안에서 가격을 캡처하고 저장하는 부분입니다.
 
-~~~java
+```java
 detail.setUnitPrice(product.getPrice());
 try {
 	detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
@@ -277,16 +281,16 @@ try {
 } catch (ArithmeticException ex) {
 	throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
 }
-~~~
+```
 
 상품 삭제 후에도 주문 상세를 남기는 FK 경계입니다.
 
-~~~sql
+```sql
 ALTER TABLE t_order_detail
     MODIFY COLUMN product_id INT NULL,
     ADD CONSTRAINT fk_order_history_product FOREIGN KEY (product_id)
         REFERENCES t_product(id) ON DELETE SET NULL;
-~~~
+```
 
 [가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [회원 삭제 트랜잭션](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [FK 전환 SQL](docs/migrations/002-order-history-preservation.sql) · [삭제 정책](docs/ORDER-HISTORY-PRESERVATION.md)
 
@@ -301,22 +305,22 @@ Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니�
 
 웹·추천 서버까지 함께 실행하려면 [로컬 통합 실행](docs/LOCAL-DEVELOPMENT.md)을 따릅니다. AWS 계정이나 외부 AI 키 없이 사용할 수 있습니다.
 
-~~~bash
+```bash
 ./scripts/local-stack.sh init
 ./scripts/local-stack.sh install
 ./scripts/local-stack.sh up
-~~~
+```
 
 백엔드만 개별 실행할 때는 아래 설정을 사용합니다.
 
 macOS에서 여러 JDK를 사용하는 경우 먼저 export JAVA_HOME=$(/usr/libexec/java_home -v 17)로 Java 17을 선택합니다.
 
-~~~bash
+```bash
 cp .env.example .env
 # .env의 빈 DB 항목을 본인 로컬 값으로 채웁니다.
 docker compose up -d db
 ./scripts/dev.sh
-~~~
+```
 
 - 기본 서버: http://localhost:9987
 - 상품 API: http://localhost:9987/api/products
@@ -332,9 +336,9 @@ docker compose up -d db
 
 ## ✅ 검증과 협업
 
-~~~bash
+```bash
 ./scripts/check.sh
-~~~
+```
 
 검증 명령과 폐기용 DB의 HTTP 검사 절차는 [테스트·CI 안내](docs/TESTING.md), 실행 환경은 [로컬 개발 문서](docs/LOCAL-DEVELOPMENT.md)를 따릅니다. 실행 결과와 회귀 근거는 작업 계획·PR에서 관리합니다.
 
@@ -346,10 +350,6 @@ main은 PR·backend-ci 성공·최신 main 반영·대화 해결을 요구합니
 
 ## 🗺️ 개발 계획
 
-기한은 **2027년 2월 5일**이며 P1·P2 기능 모두 필수 목표입니다. 승인된 기획과 [백엔드 작업·일정](docs/DELIVERY-PLAN.md)을 기준으로 진행합니다.
+전체 R01–R08·F01–F12 MVP의 구현·연결·필수 검증 기한은 **2026년 12월 31일**, 최종 인계는 **2027년 2월 5일**입니다. P1·P2 모두 필수입니다.
 
-- [ ] 상품 맛·향 특성과 출처 관리
-- [ ] 취향·찜·추천 피드백·이벤트 API
-- [ ] 추천 서비스 요청·응답과 실패 시 대체 추천
-- [ ] 주문 당시 단가·상품 삭제 이력 보존 등 기존 정합성 개선
-- [ ] 실제 DB 통합 테스트와 후속 배포 설계
+현재 진행 범위와 완료 기준은 [백엔드 계획](docs/DELIVERY-PLAN.md)을 따릅니다. MVP 완료 이후에는 오류 개선과 실측 최적화를 이어갑니다.
