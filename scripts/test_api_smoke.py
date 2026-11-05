@@ -1,6 +1,8 @@
 """Guard against running mutation smoke checks against an unrelated database."""
 
 import json
+import io
+from email.message import Message
 import os
 from pathlib import Path
 import socket
@@ -240,6 +242,21 @@ class DisposableDatabaseGuardTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         # Passwords travel through the environment, not process arguments/logs.
         self.assertNotIn(self.environ["PUBBURI_DB_PASSWORD"], str(run.call_args.args))
+
+    def test_api_client_sends_surrogates_as_ascii_json_escapes_before_utf8_transport(self):
+        for tag in ("\ud800", "\udfff", "🌾"):
+            response = io.BytesIO(b'{"data":true,"message":null,"error":null}')
+            response.status = 201
+            response.headers = Message()
+            response.headers.set_type("application/json")
+            client = ApiClient(12345)
+            client.opener = Mock()
+            client.opener.open.return_value = response
+            client.request("POST", "/comments", 201, {"tasteTags": [tag]})
+            wire = client.opener.open.call_args.args[0].data
+            self.assertTrue(wire.isascii())
+            self.assertIn(json.dumps(tag, ensure_ascii=True).encode("ascii"), wire)
+            self.assertEqual(json.loads(wire)["tasteTags"], [tag])
 
     def test_api_client_rejects_non_local_port_inputs(self):
         for port in ("0", "65536", "example.invalid", "9987/api"):
