@@ -164,8 +164,9 @@ import 뒤 생긴 주문·후기·비밀번호 변경까지 현재 PG 상태에�
 CID·label·동적 loopback·TLS/marker를 사용하며 source/target은 서로 다른 `*_ci` DB다.
 대상은 **새 marker만 있고 pubburi schema가 없는 DB**여야 한다.
 
-운영자가 앱·relay·관리 쓰기를 중단하고 client 연결을 종료한 뒤 다른 쓰기/sequence 사용 역할을
-별도 control 권한으로 `NOLOGIN`으로 준비한다. 도구는 이를 확인할 뿐 자동 권한 회수·세션 종료·
+운영자가 앱·relay·관리 쓰기를 중단하고 client 연결을 종료한 뒤 해당 DB에 CONNECT가 있는
+다른 non-super 로그인 역할을 별도 control 권한으로 `NOLOGIN`으로 준비한다. 읽기 전용 로그인도
+중단해야 하는 보수적인 프로파일이며, 비상속 SET ROLE 경로를 따로 분류해 허용하지 않는다. 도구는 이를 확인할 뿐 자동 권한 회수·세션 종료·
 DB/역할 생성을 하지 않는다. backup/restore는 별도 non-superuser schema 소유자이며 최소 runtime
 자격을 사용하지 않는다. trusted 관리자나 같은 control 자격의 외부 개입을 막는 fencing은 아니다.
 다른 역할의 통계 열이 가려져도 공개 `datid`·`pid`로 모든 다른 backend를 보수적으로 거절한다.

@@ -131,6 +131,42 @@ def run(environ, runtime, recovery_control):
             with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' LOGIN')
     with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' NOLOGIN')
     try:
+        # A LOGIN can SET a NOLOGIN runtime without inheriting its privileges.
+        # The stopped-writer profile rejects even a CONNECT-only login, so it
+        # needs no privilege-graph allowlist and never expands control privileges.
+        from psycopg import sql
+        probe='ci_recovery_set_'+secrets.token_hex(8)
+        probe_password=secrets.token_hex(24)
+        created_probe=False
+        try:
+            with recovery.connect(admin) as connection:
+                connection.execute(sql.SQL('CREATE ROLE {} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {}').format(sql.Identifier(probe),sql.Literal(probe_password)))
+                created_probe=True
+                connection.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(sql.Identifier(control['PUBBURI_PG_DB_NAME']),sql.Identifier(probe)))
+                connection.execute(sql.SQL('GRANT {} TO {} WITH INHERIT FALSE, SET TRUE').format(sql.Identifier(role),sql.Identifier(probe)))
+            # Prove the non-inherited SET path using capability queries, not data/nextval writes.
+            with recovery.connect(control) as connection:
+                direct=connection.execute("SELECT has_table_privilege(%s,'pubburi.t_comment','INSERT'),pg_has_role(%s,%s,'SET')",(probe,probe,role)).fetchone()
+                if direct!=(False,True):raise ValueError('recovery_ci_set_membership_fixture_changed')
+            with recovery.connect(dict(control,PUBBURI_PG_USER=probe,PUBBURI_PG_PASSWORD=probe_password)) as connection:
+                connection.execute(sql.SQL('SET ROLE {}').format(sql.Identifier(role)))
+                effective=connection.execute("SELECT has_table_privilege(current_user,'pubburi.t_comment','INSERT'),has_sequence_privilege(current_user,'pubburi.t_comment_id_seq','USAGE')").fetchone()
+                if effective!=(True,True):raise ValueError('recovery_ci_effective_set_writer_missing')
+            refused=local_stack.STATE/('pg-refused-'+secrets.token_hex(16))
+            try:recovery.backup(control,refused)
+            except ValueError as error:
+                if 'writers_can_login' not in str(error):raise
+            else:raise ValueError('recovery_ci_set_runtime_login_accepted')
+            with recovery.connect(admin) as connection:connection.execute(sql.SQL('REVOKE {} FROM {}').format(sql.Identifier(role),sql.Identifier(probe)))
+            try:recovery.backup(control,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+            except ValueError as error:
+                if 'writers_can_login' not in str(error):raise
+            else:raise ValueError('recovery_ci_connect_only_login_accepted')
+        finally:
+            if created_probe:
+                with recovery.connect(admin) as connection:
+                    connection.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM {}').format(sql.Identifier(control['PUBBURI_PG_DB_NAME']),sql.Identifier(probe)))
+                    connection.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(probe)))
         # An injected executable object is rejected without emitting a usable archive.
         with recovery.connect(control) as connection:connection.execute("CREATE FUNCTION pubburi.recovery_forbidden() RETURNS int LANGUAGE sql AS 'SELECT 1'")
         try:
@@ -175,7 +211,9 @@ def run(environ, runtime, recovery_control):
         with recovery.connect(target) as connection:connection.execute(runtime_grants(role))
         # The destination has a different marker; preserve it and grant only its read access.
         url=target['PUBBURI_PG_URL'];admin_target=dict(admin,PUBBURI_PG_URL=url,PUBBURI_PG_DB_NAME=target['PUBBURI_PG_DB_NAME'])
-        with recovery.connect(admin_target) as connection:connection.execute('GRANT SELECT ON public.pubburi_pg_migration_guard TO '+role)
+        with recovery.connect(admin_target) as connection:
+            connection.execute('GRANT CONNECT ON DATABASE '+target['PUBBURI_PG_DB_NAME']+' TO '+role)
+            connection.execute('GRANT SELECT ON public.pubburi_pg_migration_guard TO '+role)
     finally:
         with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' LOGIN')
     restored=dict(runtime,**{key:target[key] for key in ('PUBBURI_PG_URL','PUBBURI_PG_DB_NAME','PUBBURI_PG_RUN_TOKEN')})

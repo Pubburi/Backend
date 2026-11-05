@@ -70,7 +70,8 @@ DDL/소유권을 주지 않는다. `PUBBURI_JPA_EXPECTED_COMMENT_NEXT`는 snapsh
 
 같은 source/JPA lifecycle의 `postgresql_recovery_ci`는 실제 HTTP의 import 후 주문·가격 변경·
 태그 후기·찜·비밀번호 회전과 별도 authored claim fixture/rollback으로 소비한 ID를 만든다.
-다른 client·LOGIN 쓰기 역할·추가 함수·틀린 artifact pin을 거절한 뒤 새 marker-only PG에 복구하고
+다른 역할의 기존 세션(NOLOGIN 후 통계 열 가림)·비상속 SET/CONNECT 전용 LOGIN·추가 함수·
+틀린 artifact pin을 거절한 뒤 새 marker-only PG에 복구하고
 17업무표+2control표 binary-cell/스키마·7sequence·UUID/원문/receipt 동일성을 대조한다. JPA 재기동의
 기존 주문 금액/후기·새 암호/찜과 소비 ID 비재사용을 확인하며 그 뒤 새 쓰기와 frozen 동일 상태를
 구분한다. COMMIT 불확실/후행 검수 실패의 단위 주입은 실제 서버 crash나 네트워크 ACK 유실을

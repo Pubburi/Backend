@@ -92,19 +92,12 @@ def guard(connection, env):
 
 
 def stopped_roles(connection):
-    # NOLOGIN must be prepared explicitly by the operator. Never revoke, terminate or change roles here.
+    # Deliberately stronger than classifying current/inherited/SET-role privileges:
+    # all other non-superuser logins that can CONNECT must be stopped, readers too.
+    # Existing sessions are independently rejected by guard(); no roles are changed here.
     if connection.execute("""SELECT EXISTS(SELECT 1 FROM pg_roles r
         WHERE r.rolcanlogin AND NOT r.rolsuper AND r.rolname<>current_user
-          AND has_database_privilege(r.oid,current_database(),'CONNECT')
-          AND (has_database_privilege(r.oid,current_database(),'CREATE')
-            OR has_schema_privilege(r.oid,'pubburi','CREATE')
-            OR pg_has_role(r.oid,(SELECT oid FROM pg_roles WHERE rolname=current_user),'SET')
-            OR EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                WHERE n.nspname='pubburi' AND
-                 ((c.relkind='r' AND (has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER')
-                                    OR has_any_column_privilege(r.oid,c.oid,'INSERT,UPDATE')))
-                  OR (c.relkind='S' AND has_sequence_privilege(r.oid,c.oid,'USAGE,UPDATE'))))))
-        """).fetchone()[0]:
+          AND has_database_privilege(r.oid,current_database(),'CONNECT'))""").fetchone()[0]:
         reject('writers_can_login')
 
 
@@ -316,6 +309,7 @@ def restore(env, archive_directory, expected, destination):
     directory = private.private_directory(destination, local_stack, create=True)
     with connect(env) as connection:
         guard(connection, env)
+        stopped_roles(connection)
         reject_unversioned_objects(connection)
         if connection.execute("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname NOT IN ('pg_catalog','information_schema','public') AND nspname NOT LIKE 'pg_toast%' AND nspname NOT LIKE 'pg_temp_%') OR EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname NOT IN ('pubburi_pg_migration_guard','pubburi_pg_migration_guard_pkey'))").fetchone()[0]:
             reject('empty_marker_only_target_required')
