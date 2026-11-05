@@ -267,4 +267,23 @@ class JpaCommentIntegrationTests extends JpaAccountTestSupport {
         } finally {reset(comments);written.countDown();executor.shutdownNow();assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));clean(sql,user,product,List.of());}
     }
 
+    @Test void rawEscapedSurrogatesCannotCreateOrReplaceReviewOpinions() throws Exception {
+        var sql=control();var admin=loggedIn("ADMIN");String user=join();int product=create(admin,ownName());
+        try {
+            var owner=login(user,password);
+            String valid="{\"productId\":"+product+",\"rating\":3.75,\"comment\":\"paired\",\"tasteTags\":[\"\\ud83c\\udf3e\"]}";
+            assertTrue(valid.chars().allMatch(value->value<128));assertTrue(valid.contains("\\ud83c\\udf3e"));
+            var created=request(owner,"POST","/api/comments",valid);assertEquals(201,created.status());int id=created.body().path("data").path("id").intValue();
+            var before=request(client(),"GET",path(product)+"?includeTasteTags=true&includeSummary=true",null).body().path("data");
+            assertEquals("🌾",before.path("items").get(0).path("tasteTags").get(0).textValue());
+            for(String escape:List.of("\\ud800","\\udfff")) {
+                String raw="{\"productId\":"+product+",\"rating\":1.25,\"comment\":\"must not change\",\"tasteTags\":[\""+escape+"\"]}";
+                assertTrue(raw.chars().allMatch(value->value<128));assertTrue(raw.contains(escape));
+                assertEquals(400,request(owner,"POST","/api/comments",raw).status());
+                assertEquals(400,request(owner,"PUT","/api/comments/"+id,raw.replace("\"productId\":"+product+",","")).status());
+                assertEquals(before,request(client(),"GET",path(product)+"?includeTasteTags=true&includeSummary=true",null).body().path("data"));
+            }
+        } finally {clean(sql,user,product,List.of());}
+    }
+
 }

@@ -63,7 +63,7 @@ class ApiClient:
 
     def request(self, method, path, expected_status, payload=None, error_code=None, *,
                 content_type="application/json", accept="application/json", allowed_methods=None):
-        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        data = None if payload is None else json.dumps(payload, ensure_ascii=True).encode("utf-8")
         request = urllib.request.Request(
             self.base + path, data=data, method=method,
             headers={"Content-Type": content_type, "Accept": accept})
@@ -765,9 +765,23 @@ def comment_rating_contract(environ):
         expected_tags = ["sweet", "과일,향\n산미"]
         assert {item["id"]: item["tasteTags"] for item in tagged["items"]} == {ids[0]: expected_tags, ids[1]: [], ids[2]: []}
         assert all(len(item) == 5 for item in public.request("GET", path + "?includeTasteTags=false", 200)["data"]["items"])
+        before = public.request("GET", path + "?includeTasteTags=true", 200)["data"]
         for invalid in (None, "tag", [1], [True], ["SWEET", "sweet"], [" "], ["x" * 41], ["nul\x00tag"], ["x"] * 21):
             owner.request("PUT", f"/comments/{ids[0]}", 400, {"rating": 1.25, "comment": "must not change", "tasteTags": invalid}, "VALIDATION_FAILED")
-        before = public.request("GET", path + "?includeTasteTags=true", 200)["data"]
+        assert public.request("GET", path + "?includeTasteTags=true", 200)["data"] == before
+        for tag in ("\ud800", "\udfff"):
+            malformed = {"productId": product, "rating": 1.25, "comment": "must not change", "tasteTags": [tag]}
+            wire = json.dumps(malformed, ensure_ascii=True).encode("ascii")
+            assert json.dumps(tag, ensure_ascii=True).encode("ascii") in wire
+            owner.request("POST", "/comments", 400, malformed, "VALIDATION_FAILED")
+            owner.request("PUT", f"/comments/{ids[0]}", 400, malformed, "VALIDATION_FAILED")
+            assert public.request("GET", path + "?includeTasteTags=true", 200)["data"] == before
+        paired = owner.request("POST", "/comments", 201, {"productId": product, "rating": 3.75,
+            "comment": "Valid Unicode pair control", "tasteTags": ["🌾"]})["data"]["id"]
+        tagged_pair = next(item for item in public.request("GET", path + "?includeTasteTags=true", 200)["data"]["items"] if item["id"] == paired)
+        assert tagged_pair["tasteTags"] == ["🌾"]
+        owner.request("DELETE", f"/comments/{paired}", 200)
+        assert public.request("GET", path + "?includeTasteTags=true", 200)["data"] == before
         assert next(item for item in before["items"] if item["id"] == ids[0])["tasteTags"] == expected_tags
         # Failure after updating the review and deleting its old tags must roll back all three fields.
         require_disposable_database(environ)

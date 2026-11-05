@@ -55,4 +55,26 @@ class CommentTasteTagContractTests {
         assertThat(json.readTree(result.getResponse().getContentAsString()).path("data").size()).isEqualTo(5);
         verify(dao).insertTasteTags(9,List.of("sweet"));
     }
+    @Test void rawEscapedLoneSurrogatesFailBeforeWritesAndAValidPairRemainsExact() throws Exception {
+        CommentDao dao=mock(CommentDao.class);AccessGuard guard=mock(AccessGuard.class);
+        when(guard.requireLogin(any())).thenReturn(new SessionUser("author","name",0,"USER","epoch"));
+        when(dao.insert(any())).thenAnswer(call->{call.<Comment>getArgument(0).setId(9);return 1;});
+        var mvc=MockMvcBuilders.standaloneSetup(new CommentRestController(new CommentServiceImpl(dao),guard)).setControllerAdvice(new GlobalExceptionHandler()).build();
+        for(String escape:List.of("\\ud800","\\udfff","\\ud800a","\\udfff\\ud800")) {
+            String raw="{\"productId\":7,\"rating\":3.75,\"comment\":\"unchanged\",\"tasteTags\":[\""+escape+"\"]}";
+            assertThat(raw.chars().allMatch(value->value<128)).isTrue();
+            assertThat(raw).contains(escape);
+            mvc.perform(post("/api/comments").contentType("application/json").content(raw)).andExpect(status().isBadRequest());
+            String edit=raw.replace("\"productId\":7,","");
+            assertThatThrownBy(()->json.readValue(edit,CommentUpdateRequest.class)).isInstanceOf(Exception.class);
+        }
+        verifyNoInteractions(dao);
+        String valid="{\"productId\":7,\"rating\":3.75,\"comment\":\"paired\",\"tasteTags\":[\"\\ud83c\\udf3e\"]}";
+        assertThat(valid.chars().allMatch(value->value<128)).isTrue();
+        assertThat(json.readValue(valid.replace("\"productId\":7,",""),CommentUpdateRequest.class).tasteTags()).containsExactly("🌾");
+        var result=mvc.perform(post("/api/comments").contentType("application/json").content(valid)).andExpect(status().isCreated()).andReturn();
+        assertThat(json.readTree(result.getResponse().getContentAsString()).path("data").size()).isEqualTo(5);
+        verify(dao).insertTasteTags(9,List.of("🌾"));
+    }
+
 }
