@@ -40,17 +40,23 @@ class SourceImportIntegrationTests {
         var legacy=PostgresSchemaTool.Settings.from(env);PostgresSchemaTool.guard(legacy);
         assertEquals(2,PostgresSchemaTool.configuration(legacy,PostgresSchemaTool.LOCATION).target("2").load().migrate().migrationsExecuted);
         var source=SourceImportTool.input(env);var settings=PostgresSchemaTool.Settings.from(env);
-        assertTrue(source.report().rows()>0);assertEquals(source.report(),SourceImportTool.run(env));assertEquals(source.report(),SourceImportTool.verify(env));
+        assertTrue(source.report().rows()>0);
+        // A pending V3 must stop v1 import before rows, identities or a receipt can change.
+        try(Connection c=settings.connect()) {
+            var before=sequences(c);
+            assertThrows(org.flywaydb.core.api.exception.FlywayValidateException.class,()->SourceImportTool.run(env));
+            empty(c);assertEquals(before,sequences(c));
+        }
         assertEquals(1,PostgresSchemaTool.run("migrate",env));
-        assertEquals(source.report(),SourceImportTool.verify(env));
+        assertEquals(source.report(),SourceImportTool.run(env));assertEquals(source.report(),SourceImportTool.verify(env));
         try(Connection c=settings.connect();var sql=c.createStatement()) {
             int id;try(var rows=sql.executeQuery("SELECT id FROM pubburi.t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
             sql.execute("INSERT INTO pubburi.t_comment_taste_tag VALUES("+id+",'authored target opinion')");
             try {var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_v1_review_tags_unsupported",error.getMessage());}
             finally {sql.execute("DELETE FROM pubburi.t_comment_taste_tag WHERE comment_id="+id);}
-            sql.execute("ALTER TABLE pubburi.t_comment_taste_tag ALTER COLUMN tag TYPE VARCHAR(41)");
+            sql.execute("ALTER TABLE pubburi.t_comment_taste_tag ALTER COLUMN tag TYPE VARCHAR(41) COLLATE \"C\"");
             try {var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_review_tag_shape_changed",error.getMessage());}
-            finally {sql.execute("ALTER TABLE pubburi.t_comment_taste_tag ALTER COLUMN tag TYPE VARCHAR(40)");}
+            finally {sql.execute("ALTER TABLE pubburi.t_comment_taste_tag ALTER COLUMN tag TYPE VARCHAR(40) COLLATE \"C\"");}
         }
         assertEquals(source.report(),SourceImportTool.verify(env));
         try(Connection c=settings.connect()) {
