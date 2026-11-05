@@ -156,3 +156,50 @@ DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/res
 불확실한 프로세스 정리에는 기존 잠금을 남긴다. 강제 종료 뒤 잠금/프로세스를 확인하지 않고
 지우거나 다른 실행을 인계받지 않는다. 이전 검증/제약은
 [DB06 증가분 기록](https://github.com/Pubburi/Backend/blob/89adaa8e9a93cf2628703744f7febcb13dae38d8/docs/plans/2026-11-04-postgresql-local-release.md)으로 구분한다.
+
+## 쓰기 정지 PostgreSQL 복사본의 백업·새 대상 복구
+
+import 뒤 생긴 주문·후기·비밀번호 변경까지 현재 PG 상태에서 백업한다. MySQL 원본으로 되돌리거나
+기본 스택을 전환하지 않는다. 기존 사용자 DB/볼륨은 지정하지 않는다. 같은 pinned PG18.6의 소유
+CID·label·동적 loopback·TLS/marker를 사용하며 source/target은 서로 다른 `*_ci` DB다.
+대상은 **새 marker만 있고 pubburi schema가 없는 DB**여야 한다.
+
+운영자가 앱·relay·관리 쓰기를 중단하고 client 연결을 종료한 뒤 다른 쓰기/sequence 사용 역할을
+별도 control 권한으로 `NOLOGIN`으로 준비한다. 도구는 이를 확인할 뿐 자동 권한 회수·세션 종료·
+DB/역할 생성을 하지 않는다. backup/restore는 별도 non-superuser schema 소유자이며 최소 runtime
+자격을 사용하지 않는다. trusted 관리자나 같은 control 자격의 외부 개입을 막는 fencing은 아니다.
+
+기존 relay의 [잠금 의존성](../tools/search-relay/requirements.lock)을 설치한 Python 환경을 쓴다.
+source/target별 설정은 owner-only regular JSON이며 정확히 `schema_version:1`, `writers_stopped:true`,
+`environment`를 둔다. environment에는 `PUBBURI_PG_` 접두사의 `URL`, `DB_NAME`, `USER`, `PASSWORD`,
+`RUN_TOKEN`, `CA`, `CONTAINER_ID`, `VALIDATION_LABEL` **8개 문자열 키만** 지정한다. 중복/추가 키·
+symlink를 거절한다. 실제 설정·archive·manifest에는 인증/업무 정보가 있으므로 공개하거나 Git/CI
+artifact에 올리지 않는다. 결과 폴더는 Backend ignored `.pubburi` 바로 아래 새 private 폴더다.
+
+```bash
+.venv-relay/bin/python scripts/postgresql_recovery.py backup --config <source private JSON> --output-dir <새 백업 폴더>
+.venv-relay/bin/python scripts/postgresql_recovery.py restore --config <target private JSON> --archive-dir <백업 폴더> --expected-sha256 <검수한 manifest SHA256> --output-dir <새 복구 시도 폴더>
+```
+
+백업은 17업무표와 Flyway/원본 receipt를 SHARE 잠금·exported snapshot에 결속한다. 원문 JSON을
+포함한 binary-cell digest·행 수/타입/PK/FK/index/콜레이션과7개 sequence의 정의·현재값·is_called를
+보존한다. 미지 relation·사용자 함수/trigger/rule·extension과 미허용 archive TOC는 거절한다.
+서버/클라이언트는18.6이며 archive는128MiB 이하다. SHA는 파일 동일성 근거이며 임의 SQL의 안전
+승인이 아니며 TOC 검사는 SQL sandbox나 서명이 아니다. 신뢰하는 소유 source/control만 사용하고
+외부 dump를 실행하지 않는다. 원본 archive를 수정하거나 결과 폴더를 재사용해 덮어쓰지 않는다.
+스키마는 V1–V3의 고정 catalog와 대조한다. PG18 dump/reparse가 바꾸는 세 enum CHECK의 캐스트는
+정확한 이름·원본/roundtrip 정의 쌍만 의미 동등하게 비교하며 그 외 차이는 거절한다. 스키마 SQL
+원문 동일성과 이 세 표현의 동등성을 구분하고 데이터/원문 JSON은 별도 binary-cell로 대조한다.
+
+`pg_restore --single-transaction --exit-on-error --no-owner --no-acl`은 자체 COMMIT으로 끝난다.
+**복구 TX 원자성**과 **그 뒤 별도 연결의 exact 검수**를 구분한다. 후행 불일치나 timeout/COMMIT ACK
+불확실에는 `attempt.json`만 남고 `completed.json`을 발행하지 않는다. 대상은 이미 commit되었을 수
+있으므로 격리해 조사한다. 자동 DROP·clean/create·재시도·receipt/UUID 재생성은 없다. 원본과
+archive는 보존한다. 완료 후 기존 최소 runtime GRANT를 별도 적용하고 `NOLOGIN`을 해제한 뒤
+위 JPA release의 doctor/smoke·업무 인수를 수행한다. 새 대상 marker는 유지하며 source UUID·epoch·
+claim/ACK·Flyway/receipt와 소비된 ID를 초기화하지 않는다.
+
+이는 정지 시점의 논리 백업/새 PG 복구이며 PITR·지속/증분 백업·장애 직전 RPO0·PG→MySQL
+역이관을 제공하지 않는다. 백업 후 변경은 포함되지 않는다. 기본 PG 전환·전체 DB06 인수는 후속
+게이트이며 원본 source import를 복구 명령으로 재실행하지 않는다. 근거는 PostgreSQL 공식
+[pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html)·[pg_restore](https://www.postgresql.org/docs/18/app-pgrestore.html)를 따른다.

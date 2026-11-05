@@ -32,6 +32,8 @@ def prepare(environ):
                           (environ["PUBBURI_PG_JPA_FAILURE_DB_NAME"],environ["PUBBURI_PG_JPA_FAILURE_RUN_TOKEN"])])
         if "PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME" in environ:
             databases.append((environ["PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME"],environ["PUBBURI_PG_JPA_RECOMMENDATION_RUN_TOKEN"]))
+    if "PUBBURI_PG_RESTORE_DB_NAME" in environ:
+        databases.append((environ["PUBBURI_PG_RESTORE_DB_NAME"],environ["PUBBURI_PG_RESTORE_RUN_TOKEN"]))
     relay = environ.get("PUBBURI_PG_RELAY_USER") if "PUBBURI_PG_RELAY_DB_NAME" in environ else None
     if "PUBBURI_PG_RELAY_DB_NAME" in environ:
         databases.append((environ["PUBBURI_PG_RELAY_DB_NAME"], environ["PUBBURI_PG_RELAY_RUN_TOKEN"]))

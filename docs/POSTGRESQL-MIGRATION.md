@@ -146,3 +146,9 @@ DB05의 [Psycopg3 relay](SEARCH-RELAY.md)와 [공개 검색/필수조건 대체]
 기본 MySQL/MyBatis 제거·실제 전환·콜레이션/전체 업무·웹 재인수·relay 운영·cutover 후 쓰기
 역이관/rollback은 DB03–06의 남은 게이트다. TX/문장/실제시각과 잠금 의미를 이름만 보고 복사하지
 않고 원본/과거 검증을 PG 성과로 바꾸지 않는다. UUID/ACK 초기화·재색인을 복구로 자동 실행하지 않는다.
+
+DB06의 [명시 쓰기 정지 백업/새 PG 복구](LOCAL-DEVELOPMENT.md#쓰기-정지-postgresql-복사본의-백업새-대상-복구)는
+import 이후 현재17업무표·Flyway/receipt·원문 JSON·epoch/source UUID/claim/ACK와 소비된7개 sequence를
+보존한다. 기존 v1/v2 source artifact와 MySQL 원본은 수정하지 않는다. 복구 TX의 COMMIT 뒤 exact
+검수에 실패하면 이미 commit되었을 수 있는 새 소유 대상을 격리하고 완료 표시를 하지 않는다.
+기본 스택 전환·PG→MySQL 역이관·live/PITR/RPO0 완료로 확대하지 않는다.
