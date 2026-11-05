@@ -112,6 +112,23 @@ def run(environ, runtime, recovery_control):
     except ValueError as error:
         if 'writers_can_login' not in str(error):raise
     else:raise ValueError('recovery_ci_live_role_accepted')
+    # NOLOGIN prevents new authentication, not writes by a pre-existing runtime
+    # session. Its backend_type is hidden from this non-superuser control role.
+    with recovery.connect(runtime) as held_runtime:
+        with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' NOLOGIN')
+        try:
+            with recovery.connect(control) as connection:
+                hidden=connection.execute('SELECT backend_type FROM pg_stat_activity WHERE pid=%s',
+                    (held_runtime.info.backend_pid,)).fetchone()
+                if hidden!=(None,):raise ValueError('recovery_ci_cross_role_stats_boundary_changed')
+            refused=local_stack.STATE/('pg-refused-'+secrets.token_hex(16))
+            try:recovery.backup(control,refused)
+            except ValueError as error:
+                if 'other_clients_present' not in str(error):raise
+            else:raise ValueError('recovery_ci_existing_nologin_runtime_accepted')
+            if (refused/'manifest.json').exists():raise ValueError('recovery_ci_unsafe_backup_completed')
+        finally:
+            with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' LOGIN')
     with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' NOLOGIN')
     try:
         # An injected executable object is rejected without emitting a usable archive.

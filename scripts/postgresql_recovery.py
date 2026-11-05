@@ -84,7 +84,10 @@ def guard(connection, env):
         """, (env['PUBBURI_PG_RUN_TOKEN'],)).fetchone()
     if row != (env['PUBBURI_PG_DB_NAME'], '180006', 'UTF8', True, False, True, False):
         reject('database_guard_rejected')
-    if connection.execute("SELECT count(*) FROM pg_stat_activity WHERE datid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND pid<>pg_backend_pid() AND backend_type='client backend'").fetchone()[0]:
+    # Other roles' backend_type/state can be NULL without pg_read_all_stats.
+    # datid/pid stay public: reject every other backend on this DB, including
+    # an already connected runtime whose role was subsequently made NOLOGIN.
+    if connection.execute("SELECT count(*) FROM pg_stat_activity WHERE datid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND pid<>pg_backend_pid()").fetchone()[0]:
         reject('other_clients_present')
 
 

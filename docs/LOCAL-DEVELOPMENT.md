@@ -168,6 +168,8 @@ CID·label·동적 loopback·TLS/marker를 사용하며 source/target은 서로 
 별도 control 권한으로 `NOLOGIN`으로 준비한다. 도구는 이를 확인할 뿐 자동 권한 회수·세션 종료·
 DB/역할 생성을 하지 않는다. backup/restore는 별도 non-superuser schema 소유자이며 최소 runtime
 자격을 사용하지 않는다. trusted 관리자나 같은 control 자격의 외부 개입을 막는 fencing은 아니다.
+다른 역할의 통계 열이 가려져도 공개 `datid`·`pid`로 모든 다른 backend를 보수적으로 거절한다.
+`NOLOGIN` 뒤에도 남아 있는 기존 세션을 포함하며 통계 조회 권한이나 역할 멤버십을 추가하지 않는다.
 
 기존 relay의 [잠금 의존성](../tools/search-relay/requirements.lock)을 설치한 Python 환경을 쓴다.
 source/target별 설정은 owner-only regular JSON이며 정확히 `schema_version:1`, `writers_stopped:true`,

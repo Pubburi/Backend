@@ -34,6 +34,20 @@ class PostgreSQLRecoveryTests(TestCase):
             file.write_text(json.dumps(value));file.chmod(0o644)
             with self.assertRaises(RuntimeError):recovery.configuration(file)
 
+    def test_every_other_database_backend_is_rejected_using_only_public_stats_fields(self):
+        connection=Mock()
+        valid=(self.env()['PUBBURI_PG_DB_NAME'],'180006','UTF8',True,False,True,False)
+        first=Mock();first.fetchone.return_value=valid
+        for other_backends in (0,1):
+            second=Mock();second.fetchone.return_value=(other_backends,)
+            connection.execute.side_effect=[first,second]
+            if other_backends:
+                with self.assertRaisesRegex(ValueError,'other_clients_present'):recovery.guard(connection,self.env())
+            else:recovery.guard(connection,self.env())
+            query=connection.execute.call_args.args[0]
+            self.assertNotIn('backend_type',query)
+            self.assertNotIn('state=',query)
+
     def test_manifest_and_archive_are_both_pinned_before_any_target_mutation(self):
         with tempfile.TemporaryDirectory() as root, patch.object(local_stack,'STATE',Path(root)),\
             patch.object(recovery,'schema_fingerprint',return_value=recovery.KNOWN_SCHEMA_SHA256):
