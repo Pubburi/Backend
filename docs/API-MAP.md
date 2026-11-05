@@ -131,8 +131,8 @@ Locale.ROOT 소문자, 정렬을 적용하고 공백·중복·null·비문자·U
 기존 MySQL은 백업·쓰기 중단 후 [009 additive SQL](migrations/009-comment-taste-tags.sql)을
 한 번 적용한다. 새 폐기 DB bootstrap에는 같은 스키마가 포함된다. PG는 기존 V1/V2를 보존한
 Flyway V3다. v1 이관의16표/과거 receipt는 유지하며 새 태그 테이블의 shape/빈 상태/읽기 권한이
-확인되지 않거나 태그가 있으면 쓰기 전에 거절한다. 태그를 포함하는 v2 snapshot/import는 DB06
-필수 후속이고11/22 목표를 유지한다([결정](https://github.com/Pubburi/Backend/discussions/48)).
+확인되지 않거나 태그가 있으면 쓰기 전에 거절한다. 태그를 포함하는 명시 v2 [snapshot](SOURCE-SNAPSHOT.md)/[import](SOURCE-IMPORT.md)는 DB06의
+원문 보존 증분이며 기본 전환·복구 인수는 미완료다.11/22 목표를 유지한다([결정](https://github.com/Pubburi/Backend/discussions/48)).
 
 ## Orders
 

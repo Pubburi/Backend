@@ -19,7 +19,7 @@ PR·main·수동 실행의 필수 `backend-ci`는 다음을 유지한다.
 |---|---|
 | 기본 MySQL8.4 | 새 폐기 schema의 data.sql·실제 JAR HTTP/API·세션/권한·업무 쓰기/롤백·OpenAPI/Swagger |
 | PG18.6 schema | `PUBBURI_PG_INTEGRATION=1`: 별도3DB의 새 설치/no-op·checksum·실패DDL 복구·타입/ID/인덱스 |
-| source/import | 별도 TLS source의 읽기 전용 snapshot·승인 파일 검증과 import4DB의16표 전체 typed-cell/PK·7개 고수위·수령증·실패 rollback |
+| source/import | 별도 TLS source의 읽기 전용 snapshot·승인 파일 검증과 import4DB의 v1/16표·태그 포함 v2/17표 전체 typed-cell/PK·7개 고수위·수령증·실패 rollback |
 | JPA | `PUBBURI_JPA_INTEGRATION=1`: normal/failure·빈 카탈로그 scratch의 실제 Repository/HTTP·RR/잠금·수명/실패와 packaged 재시작 |
 | PG local release | `jpa_rehearsal_ci.local_release`: runtime 키만 private 설정에 복사해 실제 package-pg·backend-only37경로/44작업 기동/종료 |
 | 검색/relay | 실제 CLI·현재 업무 producer·두 worker·lease/token·DB 시각·중복/삭제·엔진 재시작/물리 교체와 같은 필수조건의 공개 DB fallback |

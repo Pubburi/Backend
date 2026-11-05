@@ -16,6 +16,8 @@ import java.util.UUID;
 /** A single read-only InnoDB row snapshot; non-MVCC metadata is checked separately. */
 final class SourceSession implements AutoCloseable {
     final SourceSettings settings;
+    final int version;
+    final java.util.List<SourceContract.Table> tables;
     final Connection connection;
     final String server;
     final Map<String,Long> counts=new LinkedHashMap<>();
@@ -59,8 +61,9 @@ final class SourceSession implements AutoCloseable {
         }
         if(!select) throw new IllegalArgumentException("source_read_only_grants_required");
     }
-    SourceSession(SourceSettings settings) throws Exception {
-        this.settings=settings;Connection opened=settings.connect();
+    SourceSession(SourceSettings settings) throws Exception {this(settings,1);}
+    SourceSession(SourceSettings settings,int version) throws Exception {
+        this.settings=settings;this.version=version;this.tables=SourceContract.tables(version);Connection opened=settings.connect();
         try {
             server=guard(opened,settings);readOnlyGrants(opened,settings);
             try(Statement s=opened.createStatement()) {s.execute("SET SESSION information_schema_stats_expiry=0");s.execute("SET SESSION lock_wait_timeout=2");}
@@ -71,9 +74,9 @@ final class SourceSession implements AutoCloseable {
                 if(!r.next() || r.getInt(1)!=1 || !r.getString(2).equals("REPEATABLE-READ") || r.getInt(3)!=0) throw new IllegalArgumentException("source_read_only_snapshot_required");
             }
             // Ordinary reads acquire table metadata locks until this TX ends; no LOCK/RELOAD privilege.
-            for(var table:SourceContract.TABLES) try(Statement s=opened.createStatement();ResultSet ignored=s.executeQuery("SELECT `"+table.primary().get(0)+"` FROM `"+table.name()+"` LIMIT 1")) { }
+            for(var table:tables) try(Statement s=opened.createStatement();ResultSet ignored=s.executeQuery("SELECT `"+table.primary().get(0)+"` FROM `"+table.name()+"` LIMIT 1")) { }
             long total=0;
-            for(var table:SourceContract.TABLES) try(Statement s=opened.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM (SELECT 1 FROM `"+table.name()+"` LIMIT 10001) AS source_count")) {
+            for(var table:tables) try(Statement s=opened.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM (SELECT 1 FROM `"+table.name()+"` LIMIT 10001) AS source_count")) {
                 r.next();long n=r.getLong(1);total+=n;if(n<0 || total>SourceContract.MAX_ROWS) throw new IllegalArgumentException("source_row_limit_exceeded");counts.put(table.name(),n);
             }
             metadata();next=highwater();
@@ -86,10 +89,11 @@ final class SourceSession implements AutoCloseable {
                 while(r.next()) {if(!"InnoDB".equals(r.getString(2)) || !"BASE TABLE".equals(r.getString(3))) throw new IllegalArgumentException("source_innodb_tables_required");tables.add(r.getString(1));}
             }
         }
-        Set<String> expected=new HashSet<>(SourceContract.TABLES.stream().map(SourceContract.Table::name).toList());expected.add("pubburi_source_snapshot_guard");
-        if(tables.contains("t_comment_taste_tag")) { expected.add("t_comment_taste_tag"); emptyTasteTags(connection,settings.database()); }
+        Set<String> expected=new HashSet<>(this.tables.stream().map(SourceContract.Table::name).toList());expected.add("pubburi_source_snapshot_guard");
+        if(tables.contains("t_comment_taste_tag")) { expected.add("t_comment_taste_tag"); reviewTags(connection,settings.database(),version==1); }
+        if(version==2 && !tables.contains("t_comment_taste_tag")) throw new IllegalArgumentException("source_v2_review_tags_required");
         if(!tables.equals(expected)) throw new IllegalArgumentException("source_table_set_changed");
-        for(var table:SourceContract.TABLES) {
+        for(var table:this.tables) {
             try(PreparedStatement s=connection.prepareStatement("SELECT COLUMN_NAME,DATA_TYPE,IS_NULLABLE,CHARACTER_MAXIMUM_LENGTH,NUMERIC_PRECISION,NUMERIC_SCALE,DATETIME_PRECISION,COLUMN_TYPE,CHARACTER_SET_NAME,COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION")) {
                 s.setString(1,settings.database());s.setString(2,table.name());try(ResultSet r=s.executeQuery()) {
                     for(var column:table.columns()) {
@@ -131,7 +135,7 @@ final class SourceSession implements AutoCloseable {
         try(PreparedStatement s=connection.prepareStatement("SELECT TABLE_NAME,COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND INDEX_NAME='PRIMARY' AND TABLE_NAME<>'pubburi_source_snapshot_guard' ORDER BY TABLE_NAME,SEQ_IN_INDEX")) {
             s.setString(1,settings.database());try(ResultSet r=s.executeQuery()) {while(r.next()) primary.merge(r.getString(1),r.getString(2),(a,b)->a+","+b);}
         }
-        for(var table:SourceContract.TABLES) if(!String.join(",",table.primary()).equals(primary.get(table.name()))) throw new IllegalArgumentException("source_primary_contract_changed");
+        for(var table:this.tables) if(!String.join(",",table.primary()).equals(primary.get(table.name()))) throw new IllegalArgumentException("source_primary_contract_changed");
         Set<String> foreign=new HashSet<>();
         try(PreparedStatement s=connection.prepareStatement("SELECT k.TABLE_NAME,k.COLUMN_NAME,k.REFERENCED_TABLE_NAME,k.REFERENCED_COLUMN_NAME,r.DELETE_RULE,r.UPDATE_RULE FROM information_schema.KEY_COLUMN_USAGE k JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA=k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME=k.CONSTRAINT_NAME AND r.TABLE_NAME=k.TABLE_NAME WHERE k.CONSTRAINT_SCHEMA=? AND k.REFERENCED_TABLE_NAME IS NOT NULL")) {
             s.setString(1,settings.database());try(ResultSet r=s.executeQuery()) {
@@ -144,7 +148,7 @@ final class SourceSession implements AutoCloseable {
         var expectedForeign=new HashSet<>(new String(SourceContract.resource("source-foreign-contract.tsv"),StandardCharsets.UTF_8).lines().toList());
         if(tables.contains("t_comment_taste_tag")) {
             if(!"comment_id,tag".equals(primary.get("t_comment_taste_tag"))) throw new IllegalArgumentException("source_review_tag_shape_changed");
-            expectedForeign.add("t_comment_taste_tag\tcomment_id\tt_comment\tid\tCASCADE");
+            expectedForeign.add(SourceContract.REVIEW_FOREIGN);
         }
         if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("source_foreign_contract_changed");
         // Check row references with the source engine's own collation, never a Java approximation.
@@ -155,7 +159,7 @@ final class SourceSession implements AutoCloseable {
             }
         }
     }
-    static void emptyTasteTags(Connection c,String schema) throws SQLException {
+    static void reviewTags(Connection c,String schema,boolean empty) throws SQLException {
         // v1 has no opinion rows. Explicit SELECT also rejects a hidden/denied table; never infer empty from metadata.
         try(var s=c.prepareStatement("SELECT COLUMN_NAME,DATA_TYPE,IS_NULLABLE,CHARACTER_MAXIMUM_LENGTH,COLLATION_NAME,COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='t_comment_taste_tag' ORDER BY ORDINAL_POSITION")) {
             s.setString(1,schema);try(var r=s.executeQuery()) {
@@ -165,7 +169,7 @@ final class SourceSession implements AutoCloseable {
             }
         }
         try(var s=c.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM t_comment_taste_tag)")) {
-            if(!r.next() || r.getBoolean(1)) throw new IllegalArgumentException("source_v1_review_tags_unsupported");
+            if(!r.next() || (empty && r.getBoolean(1))) throw new IllegalArgumentException("source_v1_review_tags_unsupported");
         }
     }
     Map<String,String> highwater() throws SQLException {
@@ -183,7 +187,7 @@ final class SourceSession implements AutoCloseable {
         if(!next.equals(highwater())) throw new IllegalArgumentException("source_highwater_changed");
         try(Connection current=settings.connect()) {readOnlyGrants(current,settings);if(!server.equals(guard(current,settings))) throw new IllegalArgumentException("source_window_changed");
             try(var s=current.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t_comment_taste_tag')")) {
-                r.next();if(r.getBoolean(1)) emptyTasteTags(current,settings.database());
+                r.next();if(r.getBoolean(1)) reviewTags(current,settings.database(),version==1);
             }}
         connection.commit();committed=true;
     }

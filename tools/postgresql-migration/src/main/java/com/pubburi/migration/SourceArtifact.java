@@ -24,7 +24,10 @@ import java.util.UUID;
 
 final class SourceArtifact {
     record Report(int tables,long rows) { }
-    record Snapshot(JsonNode data,Report report,String sha256) { }
+    record Snapshot(JsonNode data,Report report,String sha256) {
+        int version(){return data.path("schemaVersion").intValue();}
+        List<SourceContract.Table> tables(){return SourceContract.tables(version());}
+    }
     private SourceArtifact() { }
     static Path path(Path requested,boolean existing) throws IOException {
         Path dir=requested.toAbsolutePath().normalize();
@@ -55,17 +58,18 @@ final class SourceArtifact {
     static Report export(SourceSession source,Path requested) throws Exception {
         Path dir=path(requested,false);
         Files.createDirectory(dir,PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-        receipt(dir,Map.of("schemaVersion",1,"accepted",false));
+        int version=source.version;int tableCount=source.tables.size();
+        receipt(dir,Map.of("schemaVersion",version,"accepted",false));
         Path partial=dir.resolve("snapshot.partial");
         Files.createFile(partial,PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
         long total=0;String businessId=null;
         try {
             try(var output=new BoundedOutput(Files.newOutputStream(partial));JsonGenerator json=SourceContract.JSON.getFactory().createGenerator(output)) {
-                json.writeStartObject();json.writeStringField("format","pubburi-mysql-source-v1");json.writeNumberField("schemaVersion",1);
+                json.writeStartObject();json.writeStringField("format","pubburi-mysql-source-v"+version);json.writeNumberField("schemaVersion",version);
                 json.writeStringField("timeZone","UTC");json.writeStringField("sourceServer",source.server);json.writeStringField("window",source.settings.window());
-                json.writeStringField("modelSha256",SourceContract.modelHash());json.writeStringField("indexSha256",SourceContract.hash(SourceContract.resource("source-index-contract.tsv")));
+                json.writeStringField("modelSha256",SourceContract.modelHash(version));json.writeStringField("indexSha256",SourceContract.indexHash(version));
                 json.writeObjectField("textCollations",source.textCollations);json.writeArrayFieldStart("tables");
-                for(var table:SourceContract.TABLES) {
+                for(var table:source.tables) {
                     json.writeStartObject();json.writeStringField("name",table.name());json.writeArrayFieldStart("columns");
                     for(var column:table.columns()) {json.writeStartObject();json.writeStringField("name",column.name());json.writeStringField("kind",column.kind());json.writeEndObject();}
                     json.writeEndArray();json.writeArrayFieldStart("rows");long count=0;
@@ -94,14 +98,14 @@ final class SourceArtifact {
             source.finish();
             long bytes=Files.size(partial);String hash=SourceContract.hash(Files.readAllBytes(partial));
             Files.move(partial,dir.resolve("snapshot.json"),StandardCopyOption.ATOMIC_MOVE);
-            Map<String,Object> completed=Map.of("schemaVersion",1,"accepted",true,"bytes",bytes,"sha256",hash,"tables",16,"rows",total);
+            Map<String,Object> completed=Map.of("schemaVersion",version,"accepted",true,"bytes",bytes,"sha256",hash,"tables",tableCount,"rows",total);
             // Validate the complete file before publishing an accepted receipt, including on process interruption.
             validate(dir,SourceContract.parse(SourceContract.JSON.writeValueAsBytes(completed)));
             receipt(dir,completed);
-            return new Report(16,total);
+            return new Report(tableCount,total);
         } catch(Exception error) {
             // A failed/partial artifact stays private and is never reported as accepted.
-            try{receipt(dir,Map.of("schemaVersion",1,"accepted",false,"errorCode","source_export_failed"));}catch(IOException ignored){ }
+            try{receipt(dir,Map.of("schemaVersion",version,"accepted",false,"errorCode","source_export_failed"));}catch(IOException ignored){ }
             throw error;
         }
     }
@@ -132,23 +136,24 @@ final class SourceArtifact {
     }
     private static Snapshot validate(Path dir,JsonNode receipt) throws Exception {
         fields(receipt,"schemaVersion","accepted","bytes","sha256","tables","rows");
-        if(integer(receipt,"schemaVersion")!=1 || !receipt.get("accepted").isBoolean() || !receipt.get("accepted").booleanValue()
-                || integer(receipt,"tables")!=16 || integer(receipt,"bytes")>SourceContract.MAX_BYTES) throw new IllegalArgumentException("source_receipt_not_complete");
+        int version=integer(receipt,"schemaVersion");var contract=SourceContract.tables(version);int tableCount=contract.size();
+        if(!receipt.get("accepted").isBoolean() || !receipt.get("accepted").booleanValue()
+                || integer(receipt,"tables")!=tableCount || integer(receipt,"bytes")>SourceContract.MAX_BYTES) throw new IllegalArgumentException("source_receipt_not_complete");
         byte[] bytes=read(dir.resolve("snapshot.json"),SourceContract.MAX_BYTES);
         if(bytes.length!=integer(receipt,"bytes") || !SourceContract.hash(bytes).equals(string(receipt,"sha256"))) throw new IllegalArgumentException("source_snapshot_hash_mismatch");
         JsonNode snapshot=SourceContract.parse(bytes);
         fields(snapshot,"format","schemaVersion","timeZone","sourceServer","window","modelSha256","indexSha256","tables","sourceId","sourceNext","count","textCollations");
-        if(!string(snapshot,"format").equals("pubburi-mysql-source-v1") || integer(snapshot,"schemaVersion")!=1 || !string(snapshot,"timeZone").equals("UTC")
-                || !string(snapshot,"modelSha256").equals(SourceContract.modelHash()) || !string(snapshot,"indexSha256").equals(SourceContract.hash(SourceContract.resource("source-index-contract.tsv")))) throw new IllegalArgumentException("source_snapshot_contract_mismatch");
+        if(!string(snapshot,"format").equals("pubburi-mysql-source-v"+version) || integer(snapshot,"schemaVersion")!=version || !string(snapshot,"timeZone").equals("UTC")
+                || !string(snapshot,"modelSha256").equals(SourceContract.modelHash(version)) || !string(snapshot,"indexSha256").equals(SourceContract.indexHash(version))) throw new IllegalArgumentException("source_snapshot_contract_mismatch");
         for(String key:List.of("sourceServer","window","sourceId")) {String value=string(snapshot,key);if(!UUID.fromString(value).toString().equals(value)) throw new IllegalArgumentException("source_identity_invalid");}
         JsonNode collations=snapshot.get("textCollations");
-        var textKeys=SourceContract.TABLES.stream().flatMap(t->t.columns().stream().filter(c->Set.of("varchar","char").contains(c.sqlType())).map(c->t.name()+"."+c.name())).toArray(String[]::new);
+        var textKeys=contract.stream().flatMap(t->t.columns().stream().filter(c->Set.of("varchar","char").contains(c.sqlType())).map(c->t.name()+"."+c.name())).toArray(String[]::new);
         fields(collations,textKeys);
         for(String key:textKeys) if(!string(collations,key).matches("(?:ascii|utf8mb4):[a-z0-9_]{1,64}")) throw new IllegalArgumentException("source_text_encoding_unsupported");
-        JsonNode tables=snapshot.get("tables");if(!tables.isArray() || tables.size()!=16) throw new IllegalArgumentException("source_table_set_invalid");
+        JsonNode tables=snapshot.get("tables");if(!tables.isArray() || tables.size()!=tableCount) throw new IllegalArgumentException("source_table_set_invalid");
         long total=0;Map<String,Long> maxima=new java.util.HashMap<>();String business=null;
-        for(int t=0;t<16;t++) {
-            var spec=SourceContract.TABLES.get(t);JsonNode table=tables.get(t);fields(table,"name","columns","rows","count","sha256");
+        for(int t=0;t<tableCount;t++) {
+            var spec=contract.get(t);JsonNode table=tables.get(t);fields(table,"name","columns","rows","count","sha256");
             if(!string(table,"name").equals(spec.name())) throw new IllegalArgumentException("source_table_order_invalid");
             JsonNode columns=table.get("columns");if(!columns.isArray() || columns.size()!=spec.columns().size()) throw new IllegalArgumentException("source_column_set_invalid");
             for(int i=0;i<columns.size();i++) {JsonNode c=columns.get(i);fields(c,"name","kind");if(!string(c,"name").equals(spec.columns().get(i).name()) || !string(c,"kind").equals(spec.columns().get(i).kind())) throw new IllegalArgumentException("source_column_set_invalid");}
@@ -173,6 +178,6 @@ final class SourceArtifact {
             if(identity.table().equals("t_product")) maximum=Math.max(maximum,maxima.getOrDefault("retainedProduct",0L));
             if(!Long.toString(n).equals(text) || n<1 || n>identity.maximum() || n<=maximum) throw new IllegalArgumentException("source_highwater_invalid");
         }
-        return new Snapshot(snapshot,new Report(16,total),SourceContract.hash(bytes));
+        return new Snapshot(snapshot,new Report(tableCount,total),SourceContract.hash(bytes));
     }
 }

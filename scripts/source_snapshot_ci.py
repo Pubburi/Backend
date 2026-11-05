@@ -134,7 +134,7 @@ def run(environ):
             typed = dict(source, PUBBURI_SOURCE_URL=source["PUBBURI_SOURCE_URL"].rsplit("/", 1)[0] + "/" + typed_database,
                          PUBBURI_SOURCE_DB_NAME=typed_database, PUBBURI_SOURCE_USER=typed_reader, PUBBURI_SOURCE_PASSWORD=typed_password,
                          PUBBURI_SOURCE_RUN_TOKEN=typed_token, PUBBURI_SOURCE_WINDOW_UUID=typed_window,
-                         PUBBURI_SOURCE_SNAPSHOT_DIR=str(directory / "typed-accepted"))
+                         PUBBURI_SOURCE_FORMAT_VERSION="2", PUBBURI_SOURCE_SNAPSHOT_DIR=str(directory / "typed-accepted"))
             command(["python3", "scripts/mysql_source_snapshot.py", "export-source"], env=typed, cwd=ROOT, timeout=120)
             source["PUBBURI_SOURCE_TYPED_SNAPSHOT_DIR"] = typed["PUBBURI_SOURCE_SNAPSHOT_DIR"]
             with (directory / "import-integration.log").open("w") as log:
@@ -148,6 +148,7 @@ def run(environ):
             from jpa_rehearsal_ci import run as run_jpa
             jpa = run_jpa(source, directory / "accepted", directory)
         return {"status": "passed", "jpa_rehearsal_verified": jpa, "postgresql_import_verified": imported, "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
+                "typed_source_version": 2 if imported else None, "typed_source_tables": 17 if imported else None,
                 "api_jpa_cutover": False, "source_original_touched": False}
     finally:
         # Diagnostic failures never bypass cleanup; never remove a non-owned container.

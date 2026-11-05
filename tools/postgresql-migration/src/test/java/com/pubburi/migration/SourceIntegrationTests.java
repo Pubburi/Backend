@@ -122,4 +122,31 @@ class SourceIntegrationTests {
         try(SourceSession restored=new SourceSession(settings)){assertEquals(16,restored.counts.size());}
     }
 
+    @Test void explicitV2ExportsRawOpinionsAndIncludesThemInTheGlobalRowLimit() throws Exception {
+        var settings=SourceSettings.from(env);
+        try(Connection c=control();var sql=c.createStatement()) {
+            int id;try(var r=sql.executeQuery("SELECT MIN(id) FROM t_comment")){assertTrue(r.next());id=r.getInt(1);}
+            List<String> tags=List.of("  SWEET  ","Line\nBreak","🌾".repeat(40));
+            try {
+                for(String tag:tags)try(var insert=c.prepareStatement("INSERT INTO t_comment_taste_tag VALUES(?,?)")){insert.setInt(1,id);insert.setString(2,tag);assertEquals(1,insert.executeUpdate());}
+                assertThrows(IllegalArgumentException.class,()->{try(var ignored=new SourceSession(settings)) {}});
+                Path accepted=output("v2-raw");try(var snapshot=new SourceSession(settings,2)){assertEquals(17,SourceArtifact.export(snapshot,accepted).tables());}
+                var artifact=SourceArtifact.load(accepted);assertEquals(2,artifact.version());
+                var values=new HashSet<String>();for(var row:table(artifact.data(),"t_comment_taste_tag").path("rows"))values.add(row.get(1).textValue());assertEquals(Set.copyOf(tags),values);
+                sql.execute("ALTER TABLE t_comment_taste_tag MODIFY tag VARCHAR(41) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL");
+                try {assertThrows(IllegalArgumentException.class,()->{try(var ignored=new SourceSession(settings,2)) {}});}
+                finally {sql.execute("ALTER TABLE t_comment_taste_tag MODIFY tag VARCHAR(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL");}
+            } finally {for(String tag:tags)try(var delete=c.prepareStatement("DELETE FROM t_comment_taste_tag WHERE comment_id=? AND tag=?")){delete.setInt(1,id);delete.setString(2,tag);delete.executeUpdate();}}
+            sql.executeUpdate("INSERT INTO t_comment_taste_tag VALUES("+id+",CONVERT(0x72617700746167 USING utf8mb4))");
+            Path unrepresentable=output("v2-nul");
+            try(var snapshot=new SourceSession(settings,2)){assertThrows(IllegalArgumentException.class,()->SourceArtifact.export(snapshot,unrepresentable));assertFalse(SourceContract.parse(Files.readAllBytes(unrepresentable.resolve("receipt.json"))).path("accepted").booleanValue());}
+            finally {sql.executeUpdate("DELETE FROM t_comment_taste_tag WHERE comment_id="+id+" AND tag=CONVERT(0x72617700746167 USING utf8mb4)");}
+            String digits="(SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)";
+            try {
+                assertEquals(10000,sql.executeUpdate("INSERT INTO t_comment_taste_tag SELECT "+id+",CONCAT('ci_v2_limit_',a.n,b.n,c.n,d.n) FROM "+digits+" a CROSS JOIN "+digits+" b CROSS JOIN "+digits+" c CROSS JOIN "+digits+" d"));
+                var error=assertThrows(IllegalArgumentException.class,()->{try(var ignored=new SourceSession(settings,2)) {}});assertEquals("source_row_limit_exceeded",error.getMessage());
+            } finally {sql.executeUpdate("DELETE FROM t_comment_taste_tag WHERE comment_id="+id+" AND tag LIKE 'ci_v2_limit_%'");}
+        }
+    }
+
 }

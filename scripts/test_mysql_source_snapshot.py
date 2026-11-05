@@ -34,10 +34,10 @@ class MySqlSourceGuardTests(unittest.TestCase):
                 cmd.assert_not_called()
 
     def test_java_child_receives_only_reader_settings_and_offline_gets_no_credentials(self):
-        env={"JAVA_HOME":"authored-java", "PUBBURI_SOURCE_SNAPSHOT_DIR":"authored-private-dir", "PUBBURI_SOURCE_PASSWORD":"reader-only",
+        env={"JAVA_HOME":"authored-java", "PUBBURI_SOURCE_SNAPSHOT_DIR":"authored-private-dir", "PUBBURI_SOURCE_PASSWORD":"reader-only", "PUBBURI_SOURCE_FORMAT_VERSION":"2",
              "PUBBURI_SOURCE_CONTROL_PASSWORD":"control-only", "PUBBURI_SOURCE_WILDCARD_USER":"broad-reader", "PUBBURI_DB_PASSWORD":"app-only",
              "PUBBURI_PG_ADMIN_PASSWORD":"admin-only", "MYSQL_PWD":"root-only", "JAVA_TOOL_OPTIONS":"authored-untrusted-option"}
-        self.assertEqual(child_environment(env,True),{k:env[k] for k in ("JAVA_HOME","PUBBURI_SOURCE_SNAPSHOT_DIR","PUBBURI_SOURCE_PASSWORD")})
+        self.assertEqual(child_environment(env,True),{k:env[k] for k in ("JAVA_HOME","PUBBURI_SOURCE_SNAPSHOT_DIR","PUBBURI_SOURCE_PASSWORD","PUBBURI_SOURCE_FORMAT_VERSION")})
         self.assertEqual(child_environment(env,False),{k:env[k] for k in ("JAVA_HOME","PUBBURI_SOURCE_SNAPSHOT_DIR")})
 
     def test_private_artifact_path_cannot_escape_or_overwrite(self):

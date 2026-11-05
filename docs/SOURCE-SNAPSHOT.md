@@ -1,8 +1,8 @@
 # MySQL 원본 스냅샷 추출 계약
 
-DB02의 **읽기 전용 export와 오프라인 검증**이다. 현재16업무표를 하나의 InnoDB 행 snapshot에서
+DB02의 **읽기 전용 export와 오프라인 검증**이다. v1의16업무표 또는 명시 v2의17업무표를 하나의 InnoDB 행 snapshot에서
 추출한다. PostgreSQL 복사는 [별도 import 도구](SOURCE-IMPORT.md)로 제공하며 JPA API·cutover는
-미완료다. 현재 API/MySQL001–008,
+미완료다. 현재 API/MySQL001–009,
 PostgreSQL Flyway V1과 원본 계정/상품/주문/relay 상태를 자동 변경하지 않는다.
 
 ## 실행과 소유권
@@ -12,7 +12,8 @@ Java17 독립 모듈만 빌드하고 [도구 환경 예시](../tools/postgresql-
 
 ~~~bash
 ./mvnw --batch-mode --no-transfer-progress -f tools/postgresql-migration/pom.xml verify
-python3 scripts/mysql_source_snapshot.py export-source
+# 생략/1은 기존 v1. 저장된 후기 태그를 포함하려면 새 출력 경로와 2를 명시한다.
+PUBBURI_SOURCE_FORMAT_VERSION=2 python3 scripts/mysql_source_snapshot.py export-source
 python3 scripts/mysql_source_snapshot.py validate-source
 ~~~
 
@@ -43,7 +44,7 @@ CA private key를 원본에서 가져오거나 Git/아티팩트에 넣지 않는
 도구가 쓰기를 중지하거나 실제 전체 writer를 통제하는 기능은 아니다. 운영자의 중단 선언을
 그대로 믿는 것만으로 모든 동시 변경/관리자 ABA를 탐지했다고 주장하지 않는다.
 
-한 연결에서 REPEATABLE READ·READ ONLY·WITH CONSISTENT SNAPSHOT을 설정/재확인하고16표의
+한 연결에서 REPEATABLE READ·READ ONLY·WITH CONSISTENT SNAPSHOT을 설정/재확인하고 선택한16/17표의
 일반 읽기로 metadata lock을 유지한다. LOCK TABLES/RELOAD/global 권한을 요구하지 않는다.
 PK/컬럼 타입·nullable·길이/정밀도·InnoDB·FK/delete rule·인덱스 키/NULL 순서의 정규화 계약을
 대조하고 FK 데이터는 원본 MySQL의 실제 collation으로 검사한다. 현재 source의 문자 charset/
@@ -66,6 +67,15 @@ collation 이름도 표/컬럼별로 artifact에 보존한다. 이를 PostgreSQL
 [PK](../tools/postgresql-migration/src/main/resources/source-primary-contract.tsv),
 [FK](../tools/postgresql-migration/src/main/resources/source-foreign-contract.tsv),
 [index](../tools/postgresql-migration/src/main/resources/source-index-contract.tsv)를 따른다.
+
+`PUBBURI_SOURCE_FORMAT_VERSION=2`는 `pubburi-mysql-source-v2`/schemaVersion2를 선택한다.
+v1의16표/92컬럼·기존 hash를 바꾸지 않고 후기 `t_comment_taste_tag(comment_id,tag)`를 마지막에
+더한다. v2 모델/index hash·17표·문자 collation·전체 행수는 artifact와 승인 receipt에 함께 결합된다.
+v1은 알려진 태그 표가 비어 있을 때만 허용하고, v2는 현재 태그 표/PK/FK/타입이 필요하다.
+태그를 API 입력 규칙으로 trim/lower하거나20개/40 UTF-16으로 줄이지 않는다. DB의 VARCHAR40은
+40 codepoint까지이며 원문 공백·대소문자·개행·supplementary를 그대로 보존한다. NUL·잘못된 Unicode처럼
+PG가 표현할 수 없는 값은 승인 파일로 만들지 않고 거절한다. MySQL utf8mb4_bin의 PAD SPACE와
+PG C collation의 질의/정렬 동등성을 이 원문 왕복 성공으로 주장하지 않는다.
 
 - 정수/금액/ID/source-next는 canonical 10진 **문자열**이다. JS 정수/실수 변환으로 정밀도를 잃지 않는다.
 - FLOAT/DOUBLE은 각각8/16자리 IEEE754 raw bit hex다. 기존 단정도·음수0을 보존하며 비유한 값은 거절한다.
