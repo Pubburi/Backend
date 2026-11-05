@@ -21,11 +21,11 @@ public class OwnedContentRecommendationController {
     @ModelAttribute public void privateResponse(HttpServletResponse response){response.setHeader("Cache-Control","private, no-store");response.setHeader("Vary","Cookie");}
     @PostMapping(value="/api/users/me/recommendations/content",consumes=MediaType.APPLICATION_JSON_VALUE,produces=MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary="Use the current account's stored preferences with only an explicitly checked DEMO catalog",
-        description="Limit only; no owner, profile or catalog override. Current RR preferences and mapped product/features are checked before and after bounded B1 I/O. Changed inputs409, expired sessions401. REVIEWED_DEMO is container DEMO; explicit opt-in REVIEWED_FAMILY_BROWSE_DEMO is browse-only with unknown volume. Neither approves a service SKU or rights. UNAVAILABLE has null result and empty products; no weaker local recommendation. This read performs no business write.")
+        description="Optional includeActivity uses current own favorites and newest high-rated reviews only when stored categories are unknown; no owner, profile or catalog override. Current RR preferences and mapped product/features are checked before and after bounded B1 I/O. Changed inputs409, expired sessions401. REVIEWED_DEMO is container DEMO; explicit opt-in REVIEWED_FAMILY_BROWSE_DEMO is browse-only with unknown volume. Neither approves a service SKU or rights. UNAVAILABLE has null result and empty products; no weaker local recommendation. This read performs no business write.")
     public ApiResponse<ContentRecommendationResponse> recommend(@Valid @RequestBody ContentRecommendationRequest input,
             @Parameter(hidden=true) @RequestParam Map<String,String> query,HttpSession session){
         var observed=guard.requireLogin(session);if(!query.isEmpty())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Query parameters are not supported");
-        var result=service.recommend(observed.id(),observed.authEpoch(),input.getLimit());var current=guard.requireLogin(session);
+        var result=service.recommend(observed.id(),observed.authEpoch(),input.getLimit(),input.getIncludeActivity());var current=guard.requireLogin(session);
         if(!Objects.equals(observed.id(),current.id()) || !Objects.equals(observed.authEpoch(),current.authEpoch()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Account session is no longer current");
         return ApiResponse.ok(result);
     }

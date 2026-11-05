@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 import com.pubburi.pub.controller.response.UserPreferencesResponse;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse.CatalogScope;
+import com.pubburi.pub.controller.response.ContentRecommendationResponse.ActivityEvidence;
 import com.pubburi.pub.model.service.OwnedContentSnapshotService;
 import com.pubburi.pub.recommendation.*;
 import com.sun.net.httpserver.*;
@@ -52,6 +53,143 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             source.value.set(Optional.empty());var unavailable=request(f.owner,"POST",PATH,Map.of());assertEquals(200,unavailable.status());assertEquals("UNAVAILABLE",unavailable.body().at("/data/source").textValue());assertTrue(unavailable.body().at("/data/result").isNull());assertEquals(0,unavailable.body().at("/data/products").size());assertEquals(calls,remote.calls.get());assertEquals(state,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
         }
     }
+    @Test void optInUsesOwnCurrentPositiveSignalsAndDisclosesOnlyReturnedCategoryContributions() throws Exception {
+        try (var f = new Fixture()) {
+            int beer = f.ids.get(0), spirit = f.ids.get(1);
+            String other = join();
+            try {
+                var otherSession = login(other, password);
+                assertEquals(200, request(f.owner, "PUT", "/api/users/me/favorites/" + beer, null).status());
+                assertEquals(200, request(f.owner, "PUT", "/api/users/me/favorites/1", null).status());
+                assertEquals(200, request(otherSession, "PUT", "/api/users/me/favorites/" + spirit, null).status());
+                review(f.owner, spirit, 5);
+                int newest = review(f.owner, spirit, 3.99);
+                review(otherSession, spirit, 5);
+                review(f.owner, 1, 5);
+                String epoch = control().queryForObject("SELECT auth_epoch::text FROM pubburi.t_user WHERE id=?", String.class, f.user);
+                var stats = entityManagerFactory.unwrap(org.hibernate.SessionFactory.class).getStatistics();
+                stats.clear();
+                var snapshot = snapshots.read(f.user, epoch, f.ids, f.ids);
+                assertEquals(7, stats.getPrepareStatementCount());
+                assertEquals(new ActivityEvidence(List.of("맥주"), List.of()), snapshot.activity());
+
+                for (var input : List.of(Map.of(), Map.of("includeActivity", false))) {
+                    var ordinary = request(f.owner, "POST", PATH, input);
+                    assertEquals("PROVIDER", ordinary.body().at("/data/source").textValue());
+                    assertFalse(ordinary.body().path("data").has("activityEvidence"));
+                    assertFalse(remote.last.get().has("activity_categories"));
+                }
+                remote.handler.set((exchange, body) -> remote.reply(exchange, 200, positiveCategory(body, beer)));
+                var selected = request(f.owner, "POST", PATH, Map.of("includeActivity", true, "limit", 1));
+                assertEquals(200, selected.status());
+                assertEquals("PROVIDER", selected.body().at("/data/source").textValue());
+                assertEquals(json.valueToTree(Map.of("favoriteCategories", List.of("맥주"), "highlyRatedCategories", List.of())),
+                    selected.body().at("/data/activityEvidence"));
+                assertEquals(json.valueToTree(Map.of("favorite_categories", List.of("맥주"), "highly_rated_categories", List.of())),
+                    remote.last.get().path("activity_categories"));
+                assertEquals(request(f.owner, "GET", PREFS, null).body().path("data"), remote.last.get().path("preferences"));
+                assertFalse(remote.last.get().toString().contains(f.user));
+                assertFalse(remote.last.get().toString().contains("private authored review"));
+                assertNull(remote.cookie.get());
+                assertNull(remote.authorization.get());
+
+                assertEquals(200, request(f.owner, "PUT", "/api/comments/" + newest, Map.of("rating", 4, "comment", "private authored review")).status());
+                var used = request(f.owner, "POST", PATH, Map.of("includeActivity", true, "limit", 1));
+                assertEquals("PROVIDER", used.body().at("/data/source").textValue());
+                assertEquals(json.valueToTree(List.of("증류주")), remote.last.get().at("/activity_categories/highly_rated_categories"));
+                assertEquals(0, used.body().at("/data/activityEvidence/highlyRatedCategories").size());
+
+                remote.handler.set((exchange, body) -> remote.reply(exchange, 200, positiveCategory(body, spirit)));
+                var usedReview = request(f.owner, "POST", PATH, Map.of("includeActivity", true, "limit", 1));
+                assertEquals("PROVIDER", usedReview.body().at("/data/source").textValue());
+                assertEquals("증류주", usedReview.body().at("/data/activityEvidence/highlyRatedCategories/0").textValue());
+                assertEquals(0, usedReview.body().at("/data/activityEvidence/favoriteCategories").size());
+
+                assertEquals(200, request(f.owner, "PUT", PREFS, Map.of("surveyStatus", "COMPLETED",
+                    "hardConstraints", Map.of("maxPriceKrw", 0))).status());
+                remote.handler.set((exchange, body) -> remote.reply(exchange, 200, zero(body).put("supported_profile_tokens", 2)));
+                var hard = request(f.owner, "POST", PATH, Map.of("includeActivity", true));
+                assertEquals("PROVIDER", hard.body().at("/data/source").textValue());
+                assertEquals(0, hard.body().at("/data/result/items").size());
+                assertFalse(hard.body().path("data").has("activityEvidence"));
+                assertEquals(0, remote.last.get().at("/preferences/hardConstraints/maxPriceKrw").intValue());
+                assertTrue(remote.last.get().at("/preferences/softPreferences/categories").isNull());
+
+                assertEquals(200, request(f.owner, "PUT", PREFS, Map.of("surveyStatus", "COMPLETED",
+                    "softPreferences", Map.of("categories", List.of()))).status());
+                remote.handler.set((exchange, body) -> remote.reply(exchange, 200, zero(body)));
+                var explicit = request(f.owner, "POST", PATH, Map.of("includeActivity", true));
+                assertEquals("PROVIDER", explicit.body().at("/data/source").textValue());
+                assertFalse(explicit.body().path("data").has("activityEvidence"));
+                assertFalse(remote.last.get().has("activity_categories"));
+                assertEquals(json.createArrayNode(), remote.last.get().at("/preferences/softPreferences/categories"));
+                stats.clear();
+                assertNull(snapshots.read(f.user, epoch, f.ids, f.ids).activity());
+                assertEquals(5, stats.getPrepareStatementCount());
+            } finally {
+                clean(control(), other, null, List.of());
+            }
+        }
+    }
+
+    @Test void unavailableCatalogRowsAndLateActivityChangesDoNotReturnStaleEvidence() throws Exception {
+        try (var f = new Fixture()) {
+            int beer = f.ids.get(0), spirit = f.ids.get(1);
+            assertEquals(200, request(f.owner, "PUT", "/api/users/me/favorites/" + beer, null).status());
+            review(f.owner, spirit, 5);
+            var catalog = source.value.get().orElseThrow();
+            var candidates = (ArrayNode) catalog.catalog().deepCopy();
+            ((ObjectNode) candidates.get(1)).put("available", false);
+            source.value.set(Optional.of(new ContentCatalogSource.Catalog(candidates, catalog.bindings(),
+                catalog.validUntil(), catalog.sha256(), catalog.scope())));
+            var secondSession = login(f.user, password);
+            remote.handler.set((exchange, body) -> {
+                assertEquals(200, request(secondSession, "DELETE", "/api/users/me/favorites/" + beer, null).status());
+                remote.reply(exchange, 503, json.createObjectNode());
+            });
+            assertEquals(409, request(f.owner, "POST", PATH, Map.of("includeActivity", true)).status());
+            assertEquals(json.valueToTree(Map.of("favorite_categories", List.of("맥주"), "highly_rated_categories", List.of())),
+                remote.last.get().path("activity_categories"));
+            assertEquals(Boolean.FALSE, observed.inside.get());
+        }
+    }
+
+    private int review(java.net.http.HttpClient owner, int product, double rating) throws Exception {
+        var created = request(owner, "POST", "/api/comments", Map.of("productId", product, "rating", rating,
+            "comment", "private authored review"));
+        assertEquals(201, created.status());
+        return created.body().at("/data/id").intValue();
+    }
+
+    private ObjectNode positiveCategory(JsonNode body, int id) {
+        var root = zero(body);
+        var activity = body.path("activity_categories");
+        var categories = new HashSet<String>();
+        for (String key : List.of("favorite_categories", "highly_rated_categories")) {
+            activity.path(key).forEach(category -> categories.add(category.textValue()));
+        }
+        String category = "";
+        for (var product : body.path("catalog")) {
+            if (product.path("product_id").intValue() == id) category = product.path("category").textValue();
+        }
+        root.put("supported_profile_tokens", categories.size());
+        root.putNull("fallback_reason");
+        var item = root.putArray("items").addObject();
+        item.put("product_id", id).put("score", 0.5);
+        item.putArray("reasons").add("available").add("content_similarity");
+        item.putArray("contributions").addObject().put("component", "text").put("feature", "category:" + category).put("contribution", 0.5);
+        var explanation = item.putObject("explanation");
+        explanation.put("version", "r04-facts-v1").put("basis", "content_similarity");
+        explanation.putObject("comparison").put("kind", "profile");
+        explanation.putArray("score_evidence").addObject().put("kind", "category_match").put("label", "주종 일치")
+            .put("actual_value", category).put("target_value", category).put("contribution", 0.5);
+        explanation.put("total_positive_contributions", 1).put("score_evidence_truncated", false);
+        explanation.putArray("filter_evidence").addObject().put("kind", "availability_filter")
+            .put("label", "입력 가용 조건 충족").put("actual_value", true);
+        explanation.putNull("fallback_reason");
+        return root;
+    }
+
     @Test void familyBrowseKeepsUnknownFactsAndRechecksThemAfterRemoteWithoutChangingTheExistingWire()throws Exception{
         try(var f=new Fixture()){
             for(int id:f.ids)assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+id+"/features",Map.of("sourceName","Authored family-browse fixture")).status());
@@ -106,10 +244,10 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
     }
     @Test void snapshotReadsStayBatchedAndRepeatableAcrossProductAndFeatureCommits()throws Exception{
         try(var f=new Fixture()){
-            var stats=entityManagerFactory.unwrap(org.hibernate.SessionFactory.class).getStatistics();stats.clear();var initial=snapshots.read(f.user,control().queryForObject("SELECT auth_epoch::text FROM pubburi.t_user WHERE id=?",String.class,f.user),f.ids);assertEquals(5,stats.getPrepareStatementCount());assertEquals(2,initial.products().size());
+            var stats=entityManagerFactory.unwrap(org.hibernate.SessionFactory.class).getStatistics();stats.clear();var initial=snapshots.read(f.user,control().queryForObject("SELECT auth_epoch::text FROM pubburi.t_user WHERE id=?",String.class,f.user),f.ids,List.of());assertEquals(5,stats.getPrepareStatementCount());assertEquals(2,initial.products().size());
             String epoch=control().queryForObject("SELECT auth_epoch::text FROM pubburi.t_user WHERE id=?",String.class,f.user);var executor=Executors.newSingleThreadExecutor();gate.entered=new CountDownLatch(1);gate.release=new CountDownLatch(1);gate.armed.set(true);
             try{
-                var pending=executor.submit(()->snapshots.read(f.user,epoch,f.ids));assertTrue(gate.entered.await(3,TimeUnit.SECONDS));var body=new HashMap<String,Object>(product(ownName(),3000));body.put("type","맥주");body.put("abv",0);assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+f.ids.get(0),body).status());assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+f.ids.get(0)+"/features",Map.of("volumeMl",750,"tasteTags",List.of(),"sourceName","New authored tags")).status());gate.release.countDown();var old=pending.get(5,TimeUnit.SECONDS);assertEquals(1000,old.products().get(f.ids.get(0)).product().path("price").intValue());assertEquals(2,old.products().get(f.ids.get(0)).features().path("tasteTags").size());var current=snapshots.read(f.user,epoch,f.ids);assertEquals(3000,current.products().get(f.ids.get(0)).product().path("price").intValue());assertEquals(0,current.products().get(f.ids.get(0)).features().path("tasteTags").size());
+                var pending=executor.submit(()->snapshots.read(f.user,epoch,f.ids,List.of()));assertTrue(gate.entered.await(3,TimeUnit.SECONDS));var body=new HashMap<String,Object>(product(ownName(),3000));body.put("type","맥주");body.put("abv",0);assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+f.ids.get(0),body).status());assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+f.ids.get(0)+"/features",Map.of("volumeMl",750,"tasteTags",List.of(),"sourceName","New authored tags")).status());gate.release.countDown();var old=pending.get(5,TimeUnit.SECONDS);assertEquals(1000,old.products().get(f.ids.get(0)).product().path("price").intValue());assertEquals(2,old.products().get(f.ids.get(0)).features().path("tasteTags").size());var current=snapshots.read(f.user,epoch,f.ids,List.of());assertEquals(3000,current.products().get(f.ids.get(0)).product().path("price").intValue());assertEquals(0,current.products().get(f.ids.get(0)).features().path("tasteTags").size());
             }finally{gate.armed.set(false);gate.release.countDown();executor.shutdownNow();assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));}
         }
     }
@@ -126,7 +264,7 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         root.put("eligible_count",maxZero?0:request.path("catalog").size());root.put("supported_profile_tokens",0);root.put("unknown_profile_tokens",0);root.putArray("active_numeric_preferences");if(numeric)root.withArray("active_numeric_preferences").add("abv_percent");root.put("fallback_reason",maxZero?"no_eligible_products":"no_supported_preferences");var items=root.putArray("items");if(!maxZero)for(var row:request.path("catalog")){var item=items.addObject();item.set("product_id",row.get("product_id"));item.put("score",0);item.putArray("reasons").add("available").add("deterministic_baseline");item.putArray("contributions");var e=item.putObject("explanation");e.put("version","r04-facts-v1");e.put("basis","deterministic_baseline");e.putObject("comparison").put("kind","profile");e.putArray("score_evidence");e.put("total_positive_contributions",0);e.put("score_evidence_truncated",false);e.putArray("filter_evidence").addObject().put("kind","availability_filter").put("label","입력 가용 조건 충족").put("actual_value",true);e.put("fallback_reason","no_supported_preferences");}return root;
     }
     static class Source implements ContentCatalogSource {final AtomicReference<Optional<Catalog>> value=new AtomicReference<>(Optional.empty());@Override public Optional<Catalog> current(){return value.get();}}
-    static class Observed implements ContentGateway {final ContentGateway delegate;final AtomicReference<Boolean> inside=new AtomicReference<>();Observed(ContentGateway delegate){this.delegate=delegate;}@Override public Optional<JsonNode> recommend(JsonNode c,UserPreferencesResponse p,int l){inside.set(TransactionSynchronizationManager.isActualTransactionActive());return delegate.recommend(c,p,l);}}
+    static class Observed implements ContentGateway {final ContentGateway delegate;final AtomicReference<Boolean> inside=new AtomicReference<>();Observed(ContentGateway delegate){this.delegate=delegate;}@Override public Optional<JsonNode> recommend(JsonNode c,UserPreferencesResponse p,int l,ActivityEvidence activity){inside.set(TransactionSynchronizationManager.isActualTransactionActive());return delegate.recommend(c,p,l,activity);}}
     static class Gate implements StatementInspector {final AtomicBoolean armed=new AtomicBoolean();volatile CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);@Override public String inspect(String sql){if(sql.contains("left join") && sql.contains("t_product_feature") && armed.compareAndSet(true,false)){entered.countDown();try{if(!release.await(4,TimeUnit.SECONDS))throw new IllegalStateException("Owned RR test gate deadline");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}}return sql;}}
     @TestConfiguration(proxyBeanMethods=false) static class Probes {@Bean @Primary Source source(){return new Source();}@Bean @Primary Observed observed(@Qualifier("contentGateway")ContentGateway gateway){return new Observed(gateway);}@Bean Gate gate(){return new Gate();}@Bean HibernatePropertiesCustomizer gates(Gate gate){return properties->properties.put("hibernate.session_factory.statement_inspector",gate);}}
     @FunctionalInterface interface Handler {void handle(HttpExchange exchange,JsonNode body)throws Exception;}

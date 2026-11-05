@@ -11,6 +11,8 @@ public interface FavoriteDao {
 			@Param("productId") int productId);
 	List<Product> selectOwnedPage(@Param("userId") String userId, @Param("authEpoch") String authEpoch,
 			@Param("limit") int limit, @Param("offset") int offset);
+	List<Integer> selectOwnedProductIds(@Param("userId") String userId, @Param("authEpoch") String authEpoch,
+			@Param("productIds") List<Integer> productIds);
 	int countOwned(@Param("userId") String userId, @Param("authEpoch") String authEpoch);
 	int ensurePresent(@Param("userId") String userId, @Param("productId") int productId);
 	int deleteOwned(@Param("userId") String userId, @Param("productId") int productId);

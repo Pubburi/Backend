@@ -133,6 +133,9 @@ class FavoriteServiceTests {
 		@Override public List<Product> selectOwnedPage(String id, String epoch, int limit, int offset) {
 			events.add("page:" + id + ":" + epoch + ":" + limit + ":" + offset); return List.of();
 		}
+		@Override public List<Integer> selectOwnedProductIds(String id, String epoch, List<Integer> productIds) {
+			throw new AssertionError("Favorite page should not query recommendation activity");
+		}
 		@Override public int countOwned(String id, String epoch) { events.add("count:" + id + ":" + epoch); return ids.size(); }
 		@Override public int ensurePresent(String id, int productId) {
 			events.add("ensure:" + id + ":" + productId);

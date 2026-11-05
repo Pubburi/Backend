@@ -98,6 +98,8 @@ chunked/redirect·partial receipt, 정상/오류/SIGTERM/timeout의 소유 자�
 알려진 용량/설명/태그 거절·핀/만료·기존 container 호환을 확인한다. Spring 설정과 실제 loader를
 연결하고, 실제 JPA는 현재 unknown 필드·기존4필드/새 scope·원격 뒤 변경409를 기존 수명 회귀에 더한다.
 공식 fresh bundle/실제 Recommendation·웹 인수는 이 consumer fixture와 구분한다.
+본인 활동 opt-in은 현재 epoch·승인 available·최신 후기만 사용하고, null/[]과 hard 조건·
+고정 배치 문장 수·원격 뒤 활동 변경409 및 실제 반환 주종만 노출하는 경계를 검사한다.
 
 ## 결과물과 개인정보
 

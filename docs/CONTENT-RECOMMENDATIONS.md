@@ -2,14 +2,17 @@
 
 `POST /api/users/me/recommendations/content`는 로그인한 **현재 본인**의 canonical 저장 취향을
 기존 [B1 content](https://github.com/Pubburi/Recommendation/blob/main/docs/CONTENT-API.md)에 연결한다.
-요청 JSON은 `{"limit":4}`이며 생략 기본4·정수1–12다. 다른 필드와 모든 query를400으로 거절한다.
+요청 JSON은 `{"limit":4,"includeActivity":false}`다. 생략 시 limit은4, includeActivity는 false다.
+limit은 정수1–12, includeActivity는 JSON boolean이며 null·문자열·다른 필드·모든 query를400으로 거절한다.
 계정/역할/epoch·profile/preferences·catalog/제외/host는 요청에서 선택하지 않는다.
 
 성공 ApiResponse data에는 source(PROVIDER/UNAVAILABLE), catalogScope(REVIEWED_DEMO / REVIEWED_FAMILY_BROWSE_DEMO),
-result, products 네 필드가 있다. PROVIDER의 result는 검증한 기존 B1/R04 typed 응답이며
+result, products 네 필드가 기본이다. PROVIDER의 result는 검증한 기존 B1/R04 typed 응답이며
 products는 result.items와 같은 ID순의 **현재 Product7**이다. UNAVAILABLE은 result=null과
 products=[]이며 기존 REVIEWED_DEMO를 유지한다. 새 family scope는 승인된 family PROVIDER에만 표시한다.
-제공자의 정상 빈 items/fallback은 PROVIDER로 보존하며 장애와 구분한다.
+제공자의 정상 빈 items/fallback은 PROVIDER로 보존하며 장애와 구분한다. 선택한 활동 주종이 실제
+반환 상품의 양수 `text` 주종 기여에 쓰인 경우에만 `activityEvidence`에 `favoriteCategories`,
+`highlyRatedCategories` 배열을 제공한다. 근거가 없거나 UNAVAILABLE이면 이 필드를 생략한다.
 모든 응답은 private, no-store·Vary Cookie다. 점수는 만족 확률/품질 성과가 아니며 결과를 저장하지 않는다.
 
 ## 검수 catalog와 현재 업무 값
@@ -54,10 +57,17 @@ binding과 다르면409이고 제공자에 보내지 않는다. 원격 대기 �
 
 ## 모델·설명과 실패 경계
 
-원래 catalog와 현재 전체 preferences, constraints={}, limit, include_explanations=true만
-고정 upstream `/v1/recommendations/content`에 보낸다. 계정 ID·해시/epoch·cookie·인증 헤더·
-주문/찜/행동 기록은 보내지 않는다. soft 취향은 hard 조건으로 승격하지 않고 모든 저장 hard를
-유지한다. Backend는 모델/랭킹/대체 문구를 만들지 않는다.
+원래 catalog와 현재 전체 preferences, constraints={}, limit, include_explanations=true를
+고정 upstream `/v1/recommendations/content`에 보낸다. `includeActivity=true`이고 저장 주종이
+null일 때만 같은 RR에서 현재 계정·epoch의 찜과 상품별 최신 후기(id 내림차순) 중 4–5점에
+해당하는 상품을 두 배치 조회로 읽는다. 승인 목록의 available 상품에 한해 정확한 표준 주종을
+출처별로 중복 제거·정렬한다. 명시한 주종 배열과 빈 배열[]은 그대로 사용한다.
+
+주종 근거가 있으면 `activity_categories`에 `favorite_categories`, `highly_rated_categories`만
+추가한다. 저장 preferences·태그·도수·hard 조건은 그대로 전송하며, 계정 ID·해시/epoch·cookie·
+인증 헤더·활동 상품 ID·후기 원문·점수는 보내지 않는다. 제공자는 두 배열의 합집합을 soft 주종에
+적용하며 Backend는 같은 합집합으로 응답 근거를 검사한다. 원격 대기 뒤 출처별 주종 집합을 다시
+비교하며 달라졌으면409다.
 
 응답의 후보 ID/중복/수·현재 필수조건/available와 고정 제외 없음·진단/기여 합·R04 profile 출처·
 실제 명시 사실/단위/상위3/생략 수/fallback을 확인한다. 가격/임의 이름을 점수 근거로 받거나

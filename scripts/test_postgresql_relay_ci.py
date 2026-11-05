@@ -24,9 +24,11 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentInput"}}}},
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentEnvelope"}}}}}}}
         return {"paths": paths, "components": {"schemas": {
-            "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}}},
+            "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}, "includeActivity": {"type": "boolean", "default": False}}},
             "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
-            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]}, "result": {}, "products": {}}},
+            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]}, "result": {}, "products": {}, "activityEvidence": {"$ref": "#/components/schemas/ActivityEvidence"}}},
+            "ActivityEvidence": {"properties": {key: {"type": "array", "items": {"type": "string"}}
+                for key in ("favoriteCategories", "highlyRatedCategories")}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
             "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
