@@ -138,6 +138,8 @@ DB02의 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md)�
 7개 고수위·UUID/epoch·원문 JSON/receipt를 검수한다. DB03의 [명시 JPA 제공자](JPA-REHEARSAL.md)는
 37경로/44작업과 거래/계정 수명·취향/찜·기존 추천 caller를 제공한다. [로컬 실행](LOCAL-DEVELOPMENT.md)은
 완료 release를 준비된 소유 copied PG에 연결하며 schema/역할을 만들거나 DB를 초기화하지 않는다.
+명시 `activate-pg`는 검증한 복사본을 로컬 명령의 기본 대상으로 고정한다. 이는 root POM/전체
+DB 전환 인수와 별개이며 선택/입력/기동 실패에 MySQL로 자동 복귀하지 않는다.
 
 DB05의 [Psycopg3 relay](SEARCH-RELAY.md)와 [공개 검색/필수조건 대체](PRODUCT-SEARCH.md)는
 같은 source/target binding·기존 ACK·현재 DB 사실을 보존한다. JPA 공개 앱은 엔진/ACK를 쓰지 않는다.

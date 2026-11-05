@@ -82,7 +82,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
                 environment.assert_not_called();doctor.assert_not_called()
 
     def test_existing_mysql_dispatch_still_requires_its_environment(self):
-        with patch('sys.argv',['local_stack.py','doctor']), patch.object(local,'environment',return_value={'legacy':'yes'}) as env, patch.object(local,'doctor') as doctor:
+        with tempfile.TemporaryDirectory() as temporary, patch.object(local,'STATE',Path(temporary)), patch('sys.argv',['local_stack.py','doctor']), patch.object(local,'environment',return_value={'legacy':'yes'}) as env, patch.object(local,'doctor') as doctor:
             local.main()
             env.assert_called_once();doctor.assert_called_once_with({'legacy':'yes'})
 
@@ -90,6 +90,100 @@ class PostgreSQLLocalTests(unittest.TestCase):
         with patch('sys.argv',['local_stack.py','doctor','--provider','postgresql','--pg-config','x','--release-dir','y']), patch.object(local,'environment') as env, patch.object(pg,'dispatch') as dispatch:
             local.main()
             env.assert_not_called();self.assertEqual(dispatch.call_args.args[1].provider,'postgresql')
+
+    def selection_fixture(self, root):
+        config=self.config(root);directory=root/'release';directory.mkdir(mode=0o700)
+        for name in ('manifest.json','runtime.jar'):
+            (directory/name).write_bytes(b'private-fixture');(directory/name).chmod(0o600)
+        return config,directory
+
+    def test_selected_default_never_loads_mysql_and_explicit_baseline_remains_available(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);scope=types.SimpleNamespace(STATE=root)
+            config,directory=self.selection_fixture(root)
+            pg.publish_selection(scope,config,directory,pg.selection_pins(config,directory))
+            selector=root/pg.DEFAULT_SELECTION
+            self.assertEqual(selector.stat().st_mode&0o777,0o600)
+            self.assertNotIn('runtime-secret',selector.read_text())
+            with patch.object(local,'STATE',root), patch.object(local,'environment') as environment, patch.object(pg,'dispatch') as dispatch:
+                with patch('sys.argv',['local_stack.py','doctor']):local.main()
+                environment.assert_not_called()
+                args=dispatch.call_args.args[1]
+                self.assertEqual((args.provider,args.pg_config,args.release_dir),('postgresql',str(config),str(directory)))
+            for name in ('init','install','down','reset-db'):
+                with self.subTest(command=name), patch.object(local,'STATE',root), patch.object(local,'environment') as environment, patch.object(local,'compose') as compose, patch('sys.argv',['local_stack.py',name]):
+                    with self.assertRaises(RuntimeError):local.main()
+                    environment.assert_not_called();compose.assert_not_called()
+            with patch.object(local,'STATE',root), patch.object(local,'environment',return_value={}) as environment, patch.object(local,'doctor') as doctor, patch('sys.argv',['local_stack.py','doctor','--provider','mysql']):
+                local.main();environment.assert_called_once();doctor.assert_called_once()
+
+    def test_changed_missing_or_unsafe_selection_never_falls_back(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);scope=types.SimpleNamespace(STATE=root)
+            config,directory=self.selection_fixture(root);pins=pg.selection_pins(config,directory)
+            pg.publish_selection(scope,config,directory,pins);path=root/pg.DEFAULT_SELECTION;original=path.read_bytes()
+            for target in (config,directory/'manifest.json',directory/'runtime.jar'):
+                before=target.read_bytes();target.write_bytes(before+b'changed')
+                with self.subTest(target=target.name), patch.object(local,'STATE',root), patch.object(local,'environment') as environment, patch.object(local,'compose') as compose, patch('sys.argv',['local_stack.py','doctor']):
+                    with self.assertRaises(RuntimeError):local.main()
+                    environment.assert_not_called();compose.assert_not_called()
+                target.write_bytes(before)
+            for body in (b'{}',b'{"schema_version":1,"schema_version":1}',b'NaN'):
+                path.write_bytes(body)
+                with self.assertRaises(RuntimeError):pg.selected(scope,argparse.Namespace(pg_config=None,release_dir=None))
+            path.write_bytes(original);path.chmod(0o644)
+            with self.assertRaises(RuntimeError):pg.selected(scope,argparse.Namespace(pg_config=None,release_dir=None))
+            path.chmod(0o600);path.unlink();path.symlink_to(root/'missing')
+            with self.assertRaises(OSError):pg.selected(scope,argparse.Namespace(pg_config=None,release_dir=None))
+            path.unlink();path.write_bytes(original);path.chmod(0o600)
+            with self.assertRaises(RuntimeError):pg.selected(scope,argparse.Namespace(pg_config=str(config),release_dir=None))
+            with patch.object(pg.os,'replace',side_effect=OSError('publish interrupted')):
+                with self.assertRaises(OSError):pg.publish_selection(scope,config,directory,pins)
+            self.assertEqual(path.read_bytes(),original)
+            self.assertEqual(list(root.glob('.local-provider-*.tmp')),[])
+
+    def test_concurrent_selection_or_input_change_rejects_under_the_start_lock(self):
+        for during_doctor in (False,True):
+            with self.subTest(during_doctor=during_doctor), tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);scope=types.SimpleNamespace(STATE=root)
+                config,directory=self.selection_fixture(root)
+                pg.publish_selection(scope,config,directory,pg.selection_pins(config,directory))
+                args=argparse.Namespace(pg_config=None,release_dir=None,command='smoke',backend_only=True)
+                self.assertTrue(pg.selected(scope,args))
+                def doctor(*a):
+                    self.assertTrue((root/'local-stack-lock').is_dir())
+                    config.write_bytes(config.read_bytes()+b' ')
+                    return self.env(),directory,{}
+                if not during_doctor:
+                    config.write_bytes(config.read_bytes()+b' ')
+                    pg.publish_selection(scope,config,directory,pg.selection_pins(config,directory))
+                with patch.object(local,'STATE',root), patch.object(pg,'doctor',side_effect=doctor) as checked, patch.object(pg.subprocess,'Popen') as spawn:
+                    with self.assertRaises(RuntimeError):pg.start(local,args)
+                    self.assertEqual(checked.call_count,int(during_doctor));spawn.assert_not_called()
+                self.assertFalse((root/'local-stack-lock').exists())
+
+    def test_activation_publishes_only_after_readiness_and_owned_cleanup_under_the_lock(self):
+        for cleanup_fails in (False,True):
+            with self.subTest(cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);config,directory=self.selection_fixture(root)
+                env=self.env()
+                with socket.socket() as server:
+                    server.bind(('127.0.0.1',0));env['PUBBURI_SERVER_PORT']=str(server.getsockname()[1])
+                args=argparse.Namespace(pg_config=config,release_dir=directory,backend_only=True,command='activate-pg')
+                child=MagicMock();child.poll.return_value=None
+                def spawn(*a,**kw):
+                    kw['stdout'].write('Tomcat started on port '+env['PUBBURI_SERVER_PORT']+' ');kw['stdout'].flush();return child
+                def stop(process):
+                    self.assertTrue((root/'local-stack-lock').is_dir())
+                    self.assertFalse((root/pg.DEFAULT_SELECTION).exists())
+                    if cleanup_fails:raise local.ProcessCleanupError('owned child remains')
+                with patch.object(local,'STATE',root), patch.object(pg,'doctor',return_value=(env,directory,{'jar_sha256':pg.sha(directory/'runtime.jar')})), patch.object(pg.subprocess,'Popen',side_effect=spawn), patch.object(pg,'api_ready') as ready, patch.object(local,'stop',side_effect=stop):
+                    if cleanup_fails:
+                        with self.assertRaises(local.ProcessCleanupError):pg.start(local,args)
+                    else:pg.start(local,args)
+                    ready.assert_called_once()
+                self.assertEqual((root/pg.DEFAULT_SELECTION).exists(),not cleanup_fails)
+                self.assertEqual((root/'local-stack-lock').exists(),cleanup_fails)
 
     def test_private_directory_refuses_reuse_external_and_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -167,14 +261,27 @@ class PostgreSQLLocalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             state=Path(temporary)/'.pubburi';state.mkdir(mode=0o700)
             env=dict(self.env(),PUBBURI_JPA_CI='1',PUBBURI_JPA_CONTROL_PASSWORD='never-child',PUBBURI_PG_MUTATING='1')
-            with patch.object(local,'STATE',state), patch.object(pg,'package') as package, patch.object(pg,'start') as start:
-                ci.local_release(env)
-            package.assert_called_once();start.assert_called_once()
-            config=pg.configuration(start.call_args.args[1].pg_config)
-            self.assertEqual(set(config),pg.REQUIRED)
-            self.assertNotIn('PUBBURI_JPA_CONTROL_PASSWORD',config)
-            self.assertNotIn('PUBBURI_PG_MUTATING',config)
-            self.assertTrue(start.call_args.args[1].backend_only)
+            def stop_before_cli(scope,args):
+                self.assertNotEqual(scope.STATE,state);self.assertEqual(scope.STATE.parent,state)
+                config=pg.configuration(args.pg_config)
+                self.assertEqual(set(config),pg.REQUIRED)
+                self.assertNotIn('PUBBURI_JPA_CONTROL_PASSWORD',config)
+                self.assertNotIn('PUBBURI_PG_MUTATING',config)
+                self.assertTrue(args.backend_only);self.assertEqual(args.command,'activate-pg')
+                raise RuntimeError('projection verified')
+            with patch.object(local,'STATE',state), patch.object(pg,'package') as package, patch.object(pg,'start',side_effect=stop_before_cli):
+                with self.assertRaisesRegex(RuntimeError,'projection verified'):ci.local_release(env)
+            package.assert_called_once()
+
+    def test_doctor_and_status_observe_while_up_holds_the_lifecycle_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            args=argparse.Namespace(command='status',pg_config='fixture',release_dir='fixture',output_dir=None,backend_only=True,confirm_delete_local_data=False)
+            with patch.object(local,'STATE',root), patch.object(pg,'doctor',return_value=(self.env(),root,{})) as doctor, patch.object(pg,'api_ready') as ready, local.operation_lock():
+                pg.dispatch(local,args)
+                args.command='doctor';pg.dispatch(local,args)
+                self.assertEqual(doctor.call_count,2);ready.assert_called_once()
+                self.assertTrue((root/'local-stack-lock').is_dir())
 
     def test_readiness_rejects_missing_error_and_wrong_registered_scope(self):
         response=MagicMock();response.__enter__.return_value=response
