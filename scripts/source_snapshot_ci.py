@@ -17,6 +17,13 @@ def run(environ):
     label = environ.get("PUBBURI_SOURCE_CI_RUN", "")
     if not re.fullmatch(r"[a-z0-9-]{5,100}", label):
         raise ValueError("source_ci_explicit_run_required")
+    recovery_control = None
+    if environ.get("PUBBURI_JPA_CI") == "1":
+        if not environ.get("PUBBURI_PG_ADMIN_USER") or not environ.get("PUBBURI_PG_ADMIN_PASSWORD"):
+            raise ValueError("source_ci_recovery_control_required")
+        recovery_control = {"user": environ["PUBBURI_PG_ADMIN_USER"], "password": environ["PUBBURI_PG_ADMIN_PASSWORD"]}
+    runtime_environ = {key: value for key, value in environ.items()
+                       if key not in ("PUBBURI_PG_ADMIN_USER", "PUBBURI_PG_ADMIN_PASSWORD")}
     parent = ROOT / ".pubburi"
     parent.mkdir(mode=0o700, exist_ok=True)
     directory = parent / ("worker-source-ci-" + str(uuid.uuid4()))
@@ -67,7 +74,7 @@ def run(environ):
         ports = info["NetworkSettings"]["Ports"]["3306/tcp"]
         if info["Id"] != cid or info["Config"]["Labels"].get("pubburi.validation") != label or len(ports) != 1 or ports[0]["HostIp"] != "127.0.0.1":
             raise ValueError("source_ci_publication_rejected")
-        source = dict(environ, PUBBURI_SOURCE_URL="jdbc:mysql://127.0.0.1:" + ports[0]["HostPort"] + "/" + database,
+        source = dict(runtime_environ, PUBBURI_SOURCE_URL="jdbc:mysql://127.0.0.1:" + ports[0]["HostPort"] + "/" + database,
             PUBBURI_SOURCE_DB_NAME=database, PUBBURI_SOURCE_CONTAINER_ID=cid, PUBBURI_SOURCE_VALIDATION_LABEL=label,
             PUBBURI_SOURCE_USER=reader, PUBBURI_SOURCE_PASSWORD=password, PUBBURI_SOURCE_TRUSTSTORE=str(directory / "truststore.p12"),
             PUBBURI_SOURCE_TRUSTSTORE_PASSWORD=store_password, PUBBURI_SOURCE_CA=str(directory / "ca.pem"),
@@ -146,7 +153,7 @@ def run(environ):
         jpa = False
         if environ.get("PUBBURI_JPA_CI") == "1":
             from jpa_rehearsal_ci import run as run_jpa
-            jpa = run_jpa(source, directory / "accepted", directory)
+            jpa = run_jpa(source, directory / "accepted", directory, recovery_control=recovery_control)
         return {"status": "passed", "jpa_rehearsal_verified": jpa, "postgresql_import_verified": imported, "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
                 "typed_source_version": 2 if imported else None, "typed_source_tables": 17 if imported else None,
                 "api_jpa_cutover": False, "source_original_touched": False}

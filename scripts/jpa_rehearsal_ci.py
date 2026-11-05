@@ -93,7 +93,32 @@ def local_release(environ):
 
 
 
-def run(environ,snapshot,directory):
+def runtime_grants(runtime):
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,50}",runtime):
+        raise ValueError("jpa_ci_runtime_role_rejected")
+    return ("GRANT USAGE ON SCHEMA pubburi TO "+runtime+"; GRANT SELECT,INSERT,UPDATE,DELETE ON pubburi.t_user,pubburi.t_market TO "+runtime+"; "
+            "GRANT SELECT,INSERT,UPDATE,DELETE ON pubburi.t_product,pubburi.t_product_feature TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_product_feature_tag TO "+runtime+"; "
+            "GRANT UPDATE(tag) ON pubburi.t_product_feature_tag TO "+runtime+"; "
+            "GRANT SELECT,INSERT,UPDATE ON pubburi.t_product_search_version TO "+runtime+"; "
+            "GRANT SELECT,INSERT ON pubburi.t_product_search_outbox,pubburi.t_product_search_delivery TO "+runtime+"; "
+            "GRANT USAGE ON SEQUENCE pubburi.t_product_id_seq,pubburi.t_product_search_outbox_event_id_seq TO "+runtime+"; "
+            "GRANT USAGE ON SEQUENCE pubburi.t_market_id_seq TO "+runtime+"; GRANT SELECT ON pubburi.flyway_schema_history,pubburi.migration_source_receipt,pubburi.t_product_search_relay_target TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_order,pubburi.t_order_detail TO "+runtime+"; "
+            "GRANT UPDATE(completed,total_price,order_table) ON pubburi.t_order TO "+runtime+"; "
+            "GRANT SELECT,INSERT ON pubburi.t_stamp TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment TO "+runtime+"; "
+            "GRANT UPDATE(rating,comment) ON pubburi.t_comment TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment_taste_tag TO "+runtime+"; "
+            "GRANT USAGE ON SEQUENCE pubburi.t_comment_id_seq TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_favorite TO "+runtime+"; "
+            "GRANT SELECT,INSERT ON pubburi.t_user_preference TO "+runtime+"; "
+            "GRANT UPDATE(survey_status,categories_known,taste_known,aroma_known,target_abv_percent,min_price_krw,max_price_krw,min_abv_percent,max_abv_percent) ON pubburi.t_user_preference TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_preference_value TO "+runtime+"; "
+            "GRANT USAGE ON SEQUENCE pubburi.t_order_o_id_seq,pubburi.t_order_detail_d_id_seq,pubburi.t_stamp_id_seq TO "+runtime+";")
+
+
+def run(environ,snapshot,directory,*,recovery_control=None):
     if environ.get("PUBBURI_JPA_CI")!="1":raise ValueError("jpa_ci_explicit_rehearsal_required")
     verify_owned_postgres(environ)
     metadata=json.loads((snapshot/"snapshot.json").read_text());receipt=json.loads((snapshot/"receipt.json").read_text())
@@ -114,26 +139,7 @@ def run(environ,snapshot,directory):
         command(["python3","scripts/postgresql_import.py","import-source"],env,directory/(purpose+"-import.log"))
         runtime=environ["PUBBURI_PG_JPA_RUNTIME_USER"]
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,50}",runtime) or runtime==env["PUBBURI_PG_USER"]:raise ValueError("jpa_ci_runtime_role_rejected")
-        grants=("GRANT USAGE ON SCHEMA pubburi TO "+runtime+"; GRANT SELECT,INSERT,UPDATE,DELETE ON pubburi.t_user,pubburi.t_market TO "+runtime+"; "
-                "GRANT SELECT,INSERT,UPDATE,DELETE ON pubburi.t_product,pubburi.t_product_feature TO "+runtime+"; "
-                "GRANT SELECT,INSERT,DELETE ON pubburi.t_product_feature_tag TO "+runtime+"; "
-                "GRANT UPDATE(tag) ON pubburi.t_product_feature_tag TO "+runtime+"; "
-                "GRANT SELECT,INSERT,UPDATE ON pubburi.t_product_search_version TO "+runtime+"; "
-                "GRANT SELECT,INSERT ON pubburi.t_product_search_outbox,pubburi.t_product_search_delivery TO "+runtime+"; "
-                "GRANT USAGE ON SEQUENCE pubburi.t_product_id_seq,pubburi.t_product_search_outbox_event_id_seq TO "+runtime+"; "
-                "GRANT USAGE ON SEQUENCE pubburi.t_market_id_seq TO "+runtime+"; GRANT SELECT ON pubburi.flyway_schema_history,pubburi.migration_source_receipt,pubburi.t_product_search_relay_target TO "+runtime+"; "
-                "GRANT SELECT,INSERT,DELETE ON pubburi.t_order,pubburi.t_order_detail TO "+runtime+"; "
-                "GRANT UPDATE(completed,total_price,order_table) ON pubburi.t_order TO "+runtime+"; "
-                "GRANT SELECT,INSERT ON pubburi.t_stamp TO "+runtime+"; "
-                "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment TO "+runtime+"; "
-                "GRANT UPDATE(rating,comment) ON pubburi.t_comment TO "+runtime+"; "
-                "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment_taste_tag TO "+runtime+"; "
-                "GRANT USAGE ON SEQUENCE pubburi.t_comment_id_seq TO "+runtime+"; "
-                "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_favorite TO "+runtime+"; "
-                "GRANT SELECT,INSERT ON pubburi.t_user_preference TO "+runtime+"; "
-                "GRANT UPDATE(survey_status,categories_known,taste_known,aroma_known,target_abv_percent,min_price_krw,max_price_krw,min_abv_percent,max_abv_percent) ON pubburi.t_user_preference TO "+runtime+"; "
-                "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_preference_value TO "+runtime+"; "
-                "GRANT USAGE ON SEQUENCE pubburi.t_order_o_id_seq,pubburi.t_order_detail_d_id_seq,pubburi.t_stamp_id_seq TO "+runtime+";")
+        grants=runtime_grants(runtime)
         control=dict(env,PGPASSWORD=env["PUBBURI_PG_PASSWORD"],PGSSLMODE="verify-full",PGSSLROOTCERT="/tmp/pubburi-pg-ci-tls/ca.pem")
         result=subprocess.run(["docker","exec","-i","-e","PGPASSWORD","-e","PGSSLMODE","-e","PGSSLROOTCERT",environ["PUBBURI_PG_CONTAINER_ID"],
             "psql","--no-psqlrc","--no-password","-h","127.0.0.1","-U",env["PUBBURI_PG_USER"],"-d",database,"-v","ON_ERROR_STOP=1","-At"],
@@ -156,6 +162,8 @@ def run(environ,snapshot,directory):
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
     local_release(normal)
+    from postgresql_recovery_ci import run as run_recovery
+    run_recovery(environ,normal,recovery_control)
     if environ.get("PUBBURI_PG_RELAY_CI")=="1":
         from prepare_postgresql_relay_ci import prepare
         prepare(environ,relay_business,directory)

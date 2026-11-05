@@ -192,48 +192,45 @@ synchronized (session) {
 
 [현재 계정 확인·조건부 세션 갱신](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java) · [잠금 안의 버전 캡처](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [ID·epoch 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml) · [계약·전환](docs/SESSION-AUTHORITY.md)
 
-### 3. 저장소 전환에서 업무 값·ID 수명과 복사 결과를 함께 확정하기
+### 3. 전환 뒤 생긴 업무 쓰기와 소비된 ID까지 보존하는 복구
 
 #### 문제
 
-PostgreSQL 전환을 준비하며 ID·계정 수명·과거 금액·검색 전달 상태를 유지하는 복사 경로가 필요했습니다. 중간 실패를 부분 복사와 구분하고, 결과를 모르는 실행을 다시 덮어쓰지 않는 기준도 필요했습니다. 과거 운영 유실 사고를 수정한 사례가 아니라 실제 이관 도구의 설계·구현입니다.
+이관 당시의 snapshot을 다시 넣는 것만으로는 전환 뒤 생성한 주문·후기·계정 변경을 복구할 수 없습니다. 기존 복사 도구에서 나아가, 현재 업무 상태를 새 PostgreSQL에 복구하고 실제 API로 다시 읽는 경로를 구현했습니다. 로컬 전환·복구 실험이며 과거 운영 유실 사고를 수정한 사례는 아닙니다.
 
 #### 원인
 
-남아 있는 행의 최댓값과 원본 ID의 다음 값은 다릅니다. JSON 재직렬화·실수의 소수 변환·서로 다른 collation의 정렬 순서도 원래 값을 바꿀 수 있습니다. sequence의 nextval은 행 rollback과 다르게 움직이고 COMMIT 응답/연결 종료 실패만으로 결과를 단정할 수도 없습니다.
+행의 최댓값과 rollback에서 이미 소비한 sequence 값은 다릅니다. NOLOGIN도 기존 연결을 종료하지 않으며, 최소 권한 control에서는 다른 역할의 세션 종류가 가려질 수 있습니다. dump 복구의 COMMIT 성공과 그 뒤 값 검수의 성공도 별개여서, 프로세스 종료만으로 완료를 판단할 수 없습니다.
 
 #### 해결
 
-승인 파일의 바이트·타입·source/window를 한 번 검수하고 빈 대상만 허용합니다. 실제 catalog와 PK tuple별 전체 값을 대조하며, 업무 행·transactional sequence 예약·영구 수령증을 같은 트랜잭션에 둡니다. sequence 자체의 잠금도 먼저 얻고 commit 시도·확인과 연결 종료를 분리합니다.
+공개되는 DB·PID로 다른 연결을 거절하고 쓰기 역할의 중단을 확인합니다. 같은 읽기 snapshot에서 업무·제어 표를 잠그고 archive와 전체 값·원문·sequence 상태를 고정합니다. 승인한 V1–V3 구조와 정확한 archive 객체만 새 소유 대상에 복구하고, 후행 검수가 끝나야 완료 파일을 남깁니다. 결과 불확실·검수 실패 대상은 덮어쓰거나 자동 삭제하지 않습니다.
 
 #### 결과
 
-승인된 snapshot의 명시 ID·epoch·주문 금액·원문 JSON·전달 상태를 유지한 복사와 읽기 전용 대조를 제공합니다. 기존 데이터를 병합하거나 충돌을 정규화하지 않으며, 결과 미확인/연결 종료 실패도 성공·rollback과 구분합니다. 실제 확인 범위와 한계는 [작업 기록](https://github.com/Pubburi/Backend/blob/3748f25718e13a2e76012d1a86c5a9fd36b75fe6/docs/plans/2026-11-02-postgresql-source-import.md)에 남겼습니다.
+소유한 PG18.6 검증 환경에서 **19표·7sequence**의 값·원문 JSON·PK·epoch·source UUID·claim/ACK를 독립 SQL로 대조했습니다. 복구 후 JPA 로그인·주문·원문 태그·찜, 새 상품의 API 쓰기와 실제 세 서버·production 웹의 조건 조회를 확인했습니다. rollback에서 소비한 ID는 재사용하지 않았습니다. [구현·실제 검증과 한계](https://github.com/Pubburi/Backend/pull/55)에 근거를 남겼으며 서비스 성능이나 전체 DB 전환 완료로 해석하지 않습니다.
 
 #### 대체안/회고
 
-표별 복사나 충돌 시 건너뛰기는 운영 복구를 단순하게 보이게 하지만 부분 상태를 성공으로 오인할 수 있어 빈 대상의 단일 트랜잭션을 선택했습니다. 대신 작업 중단·테이블 잠금과 제한된 파일 규모가 필요합니다. 파일은 원본 수준의 비공개 자료이며 hash는 암호화가 아닙니다. JPA API·relay 전환과 서비스 cutover는 별도 단계입니다.
+기존 이관 파일로 되돌리는 방식은 전환 뒤 쓰기를 담지 못하므로, 명시적으로 쓰기를 멈추고 새 대상에 복구하는 방식을 선택했습니다. 대신 중단 시간이 필요하고 다른 backend는 보수적으로 거절합니다. 신뢰한 source/control·고정 버전·소규모 로컬 복사본이 전제이며 hash·객체 목록은 서명이나 SQL sandbox가 아닙니다. 연속 백업·PITR·기본 스택 cutover는 별도 미완료 범위입니다.
 
 #### 코드
 
-```java
-boolean attempted=false,confirmed=false;
-try(connection) {
-    connection.setAutoCommit(false);
-    try {
-        T value=work.execute(connection);attempted=true;connection.commit();confirmed=true;return value;
-    } catch(Exception error) {
-        try{connection.rollback();}catch(SQLException ignored){ }
-        throw error;
-    }
-} catch(Exception error) {
-    if(confirmed)throw new OutcomeException("postgresql_import_committed_close_failed",error);
-    if(attempted)throw new OutcomeException("postgresql_import_commit_status_unknown",error);
-    throw error;
-}
+```python
+with connect(env) as connection:
+    guard(connection, env)
+    stopped_roles(connection)
+    connection.execute('BEGIN ISOLATION LEVEL REPEATABLE READ')
+    actual = state(connection)
+    if json.loads(json.dumps(actual)) != manifest['state']:
+        reject('restored_state_mismatch')
+    connection.rollback()
+private.write_json(directory / 'completed.json', {'status': 'verified', 'manifest_sha256': expected,
+    'source_id': actual['source_id'], 'tables': len(actual['tables']), 'sequences': len(actual['sequences'])})
 ```
 
-[복사·PK tuple 대조·sequence 잠금](tools/postgresql-migration/src/main/java/com/pubburi/migration/SourceImportTool.java) · [commit/자원 종료 분류](tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java) · [typed bind](tools/postgresql-migration/src/main/java/com/pubburi/migration/TargetValues.java) · [복사 계약](docs/SOURCE-IMPORT.md)
+[쓰기 정지·snapshot·값/sequence 대조·완료 경계](scripts/postgresql_recovery.py) · [실제 업무 쓰기와 복구 후 JPA 인수](scripts/postgresql_recovery_ci.py) · [명시 백업·복구 실행](docs/LOCAL-DEVELOPMENT.md)
+
 
 ### 4. 가격 변경·참조 삭제에서 주문 이력을 분리하기
 

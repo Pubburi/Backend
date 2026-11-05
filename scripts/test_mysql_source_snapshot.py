@@ -69,5 +69,11 @@ class MySqlSourceGuardTests(unittest.TestCase):
                     run({"PUBBURI_SOURCE_CI_RUN":"authored-bootstrap"})
             self.assertEqual(list((root/".pubburi").iterdir()),[])
 
+    def test_recovery_control_missing_fails_before_creating_any_source_resource(self):
+        with patch('source_snapshot_ci.subprocess.run') as command:
+            with self.assertRaisesRegex(ValueError,'recovery_control_required'):
+                run({'PUBBURI_SOURCE_CI_RUN':'authored-recovery','PUBBURI_JPA_CI':'1'})
+            command.assert_not_called()
+
 
 if __name__=="__main__":unittest.main()
