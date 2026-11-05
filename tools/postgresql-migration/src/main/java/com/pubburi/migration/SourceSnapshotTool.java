@@ -12,7 +12,7 @@ public final class SourceSnapshotTool {
             if(args[0].equals("validate-source")) report=SourceArtifact.validate(path);
             else if(args[0].equals("export-source")) {
                 SourceArtifact.path(path,false);
-                try(SourceSession source=new SourceSession(SourceSettings.from(env))) {report=SourceArtifact.export(source,path);}
+                try(SourceSession source=new SourceSession(SourceSettings.from(env),SourceContract.version(env.getOrDefault("PUBBURI_SOURCE_FORMAT_VERSION","1")))) {report=SourceArtifact.export(source,path);}
             } else throw new IllegalArgumentException();
             System.out.println("{\"status\":\"passed\",\"tables\":"+report.tables()+",\"rows\":"+report.rows()+"}");return 0;
         } catch(Exception error) {

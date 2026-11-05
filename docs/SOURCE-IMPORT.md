@@ -2,7 +2,7 @@
 
 DB02의 독립 이관 도구다. [읽기 전용 export](SOURCE-SNAPSHOT.md)로 만든 승인 파일을 **빈
 PostgreSQL 검증 DB**에 복사하고 같은 TX에서 전체 값/ID 예약/수령증을 검수한다. 현재 API의
-MySQL/MyBatis·기존001–008과 Flyway V1은 보존한다. JPA API(DB03), Psycopg3 relay(DB05),
+MySQL/MyBatis·기존001–009와 Flyway V1–V3는 보존한다. JPA API(DB03), Psycopg3 relay(DB05),
 서비스 cutover/역이관(DB06)까지 완료한 것은 아니다.
 
 ## 실행 조건
@@ -41,7 +41,7 @@ python3 scripts/postgresql_import.py verify-import
    충돌을 숨기거나 기존 표/row를 지우지 않는다. 별도 Flyway V2는 import metadata만 추가한다.
 5. 모든 컬럼과 명시 ID를 parameter로 INSERT한다. 정수/금액·UUID/epoch·삭제 참조 NULL·known
    flags/취향 숫자·FLOAT/DOUBLE raw bits·UTC 시각·JSON DB 반환 원문을 정확한 타입으로 바인딩한다.
-6. 16표의 **전체 행을 target에서 다시 읽어 canonical PK tuple별로 모든 셀을 대조**한다. source
+6. 선택한16/17표의 **전체 행을 target에서 다시 읽어 canonical PK tuple별로 모든 셀을 대조**한다. source
    PK 정렬과 target ICU 정렬의 결과 순서가 같다고 가정하지 않는다. 중복/누락/정규화된 값은 실패다.
 7. 7개 sequence는 고정 allowlist/소유 identity·증가1/범위/cache1/nocycle을 검수한다. 값 변경 없는
    CACHE1 ALTER로 TX 잠금을 잡은 뒤 실제 next를 읽는다. bare nextval은 업무표 잠금만 따르지
@@ -76,6 +76,13 @@ COMMIT 요청이 서버에 도달한 뒤 응답이 사라지면 rollback 호출�
 [연결 결과 분류](../tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java)는
 commit 시도/확인을 자원 종료 바깥에서도 구분한다. 실제 네트워크 ACK 유실을 실험했다고
 표현하지 않으며 연결 단위 주입으로 분류 경계를 확인한다.
+
+승인 v1은 기존16표/receipt/모델·index hash를 유지하고 비어 있지 않은 후기 태그를 거절한다.
+명시 export된 v2는17표의 원문 태그까지 INSERT/PK/FK/전체 셀 비교·row count에 포함한다.
+importer는 검수한 파일의 version/format/hash로 표와 lock을 선택하며 V3가 미적용됐으면 쓰기 전에
+멈춘다. 기존 V2 DB 수령증의 artifact SHA와 행수에 버전·태그 내용도 결합되므로 수령증 컬럼이나
+과거 migration을 바꾸지 않는다. 저장 태그의 API 정규화·질의 collation 동등성은 추정하지 않으며
+변경/누락된 태그는 verify-import가 실패한다. 이 증분은 DB06 기본 스택/복구·cutover 인수와 별개다.
 
 verify-import는 쓰기가 중단된 같은 target/source 승인 조건에서 READ ONLY RR·ACCESS SHARE로
 현재 수령증/전행/sequence 속성과 예약 상태를 대조한다. DB 데이터를 지우거나 새 commit으로

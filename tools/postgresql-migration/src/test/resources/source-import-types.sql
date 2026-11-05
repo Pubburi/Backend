@@ -23,3 +23,27 @@ WHERE event_id=(SELECT MIN(event_id) FROM t_product_search_outbox WHERE event_id
 UPDATE t_product_search_relay_target SET fingerprint=REPEAT('a',64),
 identity_json=JSON_OBJECT('source_id',source_id,'cluster_uuid','authored-cluster','index_uuid','authored-index','index_name','pubburi-products-v1-authored','schema','products-v1','data_kind','backend_product_events'),
 bound_at='2026-11-01 18:00:00.123456' WHERE singleton_id=1;
+
+-- v2 copies stored member opinions verbatim, not current API-normalized product attributes.
+SET @fixture_comment=(SELECT MIN(id) FROM t_comment);
+INSERT INTO t_comment_taste_tag(comment_id,tag) VALUES
+(@fixture_comment,'  SWEET  '),(@fixture_comment,'Dry,Fruit'),
+(@fixture_comment,CONCAT('Line',CHAR(10),'Break')),(@fixture_comment,'🌾'),
+(@fixture_comment,REPEAT('🌾',40));
+INSERT INTO t_comment_taste_tag(comment_id,tag) VALUES
+(@fixture_comment,'stored-00'),
+(@fixture_comment,'stored-01'),
+(@fixture_comment,'stored-02'),
+(@fixture_comment,'stored-03'),
+(@fixture_comment,'stored-04'),
+(@fixture_comment,'stored-05'),
+(@fixture_comment,'stored-06'),
+(@fixture_comment,'stored-07'),
+(@fixture_comment,'stored-08'),
+(@fixture_comment,'stored-09'),
+(@fixture_comment,'stored-10'),
+(@fixture_comment,'stored-11'),
+(@fixture_comment,'stored-12'),
+(@fixture_comment,'stored-13'),
+(@fixture_comment,'stored-14'),
+(@fixture_comment,'stored-15');

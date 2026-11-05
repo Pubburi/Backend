@@ -7,21 +7,23 @@ import java.util.*;
 /** Verify the locked target catalog, not merely Flyway's historical SQL checksums. */
 final class TargetSchemaContract {
     private TargetSchemaContract(){ }
-    static void verify(Connection connection) throws Exception {
+    static void verify(Connection connection,int version) throws Exception {
+        var contract=SourceContract.tables(version);
         Set<String> actual=new HashSet<>();
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT table_name FROM information_schema.tables WHERE table_schema='pubburi' AND table_type='BASE TABLE'")) {while(r.next())actual.add(r.getString(1));}
-        Set<String> expected=new HashSet<>(SourceContract.TABLES.stream().map(SourceContract.Table::name).toList());expected.add("flyway_schema_history");expected.add("migration_source_receipt");
+        Set<String> expected=new HashSet<>(contract.stream().map(SourceContract.Table::name).toList());expected.add("flyway_schema_history");expected.add("migration_source_receipt");
         boolean reviewTags;
         // pg_class is not filtered by table SELECT grants; a hidden extension is never treated as absent.
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relname='t_comment_taste_tag')")) {r.next();reviewTags=r.getBoolean(1);}
         if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
-        if(reviewTags) {expected.add("t_comment_taste_tag");emptyTasteTags(connection);}
+        if(version==2 && !reviewTags) throw new IllegalArgumentException("postgresql_v2_review_tags_required");
+        if(reviewTags) {expected.add("t_comment_taste_tag");reviewTags(connection,version==1);}
         if(!actual.equals(expected)) throw new IllegalArgumentException("postgresql_import_schema_set_changed");
         if(!SchemaIndexContract.actual(connection).containsAll(SchemaIndexContract.expected())) throw new IllegalArgumentException("postgresql_import_indexes_changed");
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT c.collprovider,c.collisdeterministic,c.colllocale FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace WHERE n.nspname='pubburi' AND c.collname='pubburi_ci'")) {
             if(!r.next() || !r.getString(1).equals("i") || r.getBoolean(2) || !"und-u-ks-level1".equals(r.getString(3))) throw new IllegalArgumentException("postgresql_import_icu_changed");
         }
-        for(var table:SourceContract.TABLES) {
+        for(var table:contract) {
             try(var s=connection.prepareStatement("SELECT column_name,data_type,is_nullable,character_maximum_length,numeric_precision,numeric_scale,datetime_precision,is_identity,identity_generation,collation_schema,collation_name FROM information_schema.columns WHERE table_schema='pubburi' AND table_name=? ORDER BY ordinal_position")) {
                 s.setString(1,table.name());try(var r=s.executeQuery()) {
                     for(var column:table.columns()) {
@@ -61,21 +63,21 @@ final class TargetSchemaContract {
                 }
             }
         }
-        for(var table:SourceContract.TABLES) if(!String.join(",",table.primary()).equals(primary.get(table.name()))) throw new IllegalArgumentException("postgresql_import_primary_changed");
+        for(var table:contract) if(!String.join(",",table.primary()).equals(primary.get(table.name()))) throw new IllegalArgumentException("postgresql_import_primary_changed");
         for(var identity:IdentityReservations.IDENTITIES)sequence(connection,identity);
         var expectedForeign=new HashSet<>(new String(SourceContract.resource("source-foreign-contract.tsv"),StandardCharsets.UTF_8).lines().toList());
         if(reviewTags) {
             if(!"comment_id,tag".equals(primary.get("t_comment_taste_tag"))) throw new IllegalArgumentException("postgresql_review_tag_shape_changed");
-            expectedForeign.add("t_comment_taste_tag\tcomment_id\tt_comment\tid\tCASCADE");
+            expectedForeign.add(SourceContract.REVIEW_FOREIGN);
         }
         if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("postgresql_import_foreign_changed");
     }
-    static void emptyTasteTags(Connection connection) throws SQLException {
+    static void reviewTags(Connection connection,boolean empty) throws SQLException {
         try(var s=connection.createStatement()) {
             // Base-table import locks prevent parent/child writes; verification retains its read-only RR snapshot.
             s.execute("LOCK TABLE pubburi.t_comment_taste_tag IN ACCESS SHARE MODE");
             try(var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.t_comment_taste_tag)")) {
-                if(!r.next() || r.getBoolean(1)) throw new IllegalArgumentException("postgresql_v1_review_tags_unsupported");
+                if(!r.next() || (empty && r.getBoolean(1))) throw new IllegalArgumentException("postgresql_v1_review_tags_unsupported");
             }
             try(var r=s.executeQuery("SELECT column_name,data_type,is_nullable,character_maximum_length,collation_name,collation_schema FROM information_schema.columns WHERE table_schema='pubburi' AND table_name='t_comment_taste_tag' ORDER BY ordinal_position")) {
                 if(!r.next() || !"comment_id".equals(r.getString(1)) || !"integer".equals(r.getString(2)) || !"NO".equals(r.getString(3))
@@ -96,7 +98,7 @@ final class TargetSchemaContract {
         String key=table+"."+column;
         if(Set.of("t_user.id","t_user.name","t_product.name","t_product.type","t_order.user_id","t_order_detail.product_name","t_order_detail.product_type",
                   "t_comment.user_id","t_stamp.user_id","t_market.name","t_user_preference.user_id","t_user_preference_value.user_id","t_user_favorite.user_id").contains(key)) return "pubburi.pubburi_ci";
-        if(Set.of("t_product_feature_tag.tag","t_user_preference.survey_status","t_user_preference_value.kind","t_user_preference_value.value_text","t_product_search_relay_target.fingerprint").contains(key)) return "pg_catalog.C";
+        if(Set.of("t_comment_taste_tag.tag","t_product_feature_tag.tag","t_user_preference.survey_status","t_user_preference_value.kind","t_user_preference_value.value_text","t_product_search_relay_target.fingerprint").contains(key)) return "pg_catalog.C";
         return "default";
     }
     static String dataType(SourceContract.Table table,SourceContract.Column c) {

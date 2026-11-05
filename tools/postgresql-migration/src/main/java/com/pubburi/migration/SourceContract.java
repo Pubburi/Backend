@@ -30,7 +30,33 @@ final class SourceContract {
     record Column(String name,String kind,boolean nullable,String sqlType,String limit) { }
     record Table(String name,List<Column> columns,List<String> primary) { }
     static final List<Table> TABLES=load();
+    static final Table REVIEW_TAGS=new Table("t_comment_taste_tag",List.of(
+            new Column("comment_id","I32",false,"int","-"),new Column("tag","TEXT",false,"varchar","40")),List.of("comment_id","tag"));
+    static final String REVIEW_FOREIGN="t_comment_taste_tag\tcomment_id\tt_comment\tid\tCASCADE";
+    static final String REVIEW_INDEX="t_comment_taste_tag\tU\tcomment_id:A:-,tag:A:-\n";
     private SourceContract() { }
+    static int version(String value) {
+        return switch(value) {case "1"->1;case "2"->2;default->throw new IllegalArgumentException("source_format_version_unsupported");};
+    }
+    static List<Table> tables(int version) {
+        if(version==1)return TABLES;
+        if(version!=2)throw new IllegalArgumentException("source_format_version_unsupported");
+        var tables=new ArrayList<>(TABLES);tables.add(REVIEW_TAGS);return List.copyOf(tables);
+    }
+    static String indexHash(int version) {
+        var bytes=new java.io.ByteArrayOutputStream();bytes.writeBytes(resource("source-index-contract.tsv"));
+        if(version==2)bytes.writeBytes(REVIEW_INDEX.getBytes(StandardCharsets.UTF_8));else tables(version);
+        return hash(bytes.toByteArray());
+    }
+    static String modelHash(int version) {
+        if(version==1)return modelHash();
+        tables(version);
+        // Bind actual v2 fields/limits/PK plus its FK to the immutable v1 model.
+        var extension=JSON.createObjectNode();extension.put("baseModelSha256",modelHash());
+        extension.set("reviewTags",JSON.valueToTree(REVIEW_TAGS));extension.put("foreign",REVIEW_FOREIGN);
+        try{return hash(JSON.writeValueAsBytes(extension));}
+        catch(com.fasterxml.jackson.core.JsonProcessingException error){throw new IllegalStateException("source_contract_unreadable");}
+    }
 
     static byte[] resource(String name) {
         try(var input=SourceContract.class.getResourceAsStream('/'+name)) {

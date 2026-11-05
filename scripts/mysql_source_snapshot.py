@@ -52,7 +52,7 @@ def child_environment(environ, exporting):
     allowed = {"PATH", "JAVA_HOME", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "PUBBURI_SOURCE_SNAPSHOT_DIR"}
     if exporting:
         allowed.update("PUBBURI_SOURCE_" + name for name in ("URL", "DB_NAME", "USER", "PASSWORD", "TRUSTSTORE", "TRUSTSTORE_PASSWORD",
-                       "RUN_TOKEN", "WINDOW_UUID", "WRITES_STOPPED", "DATETIME_ZONE"))
+                       "RUN_TOKEN", "WINDOW_UUID", "WRITES_STOPPED", "DATETIME_ZONE", "FORMAT_VERSION"))
     return {key: value for key, value in environ.items() if key in allowed}
 
 

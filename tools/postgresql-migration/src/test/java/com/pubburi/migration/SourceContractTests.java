@@ -81,4 +81,46 @@ class SourceContractTests {
         Path dir=save(fixture(),"permissions");dir.resolve("snapshot.json").toFile().setReadable(true,false);assertThrows(IllegalArgumentException.class,()->SourceArtifact.validate(dir));
     }
     static class OutputStreamNull extends java.io.OutputStream{static final OutputStreamNull INSTANCE=new OutputStreamNull();public void write(int b){}}
+    ObjectNode v2Fixture() throws Exception {
+        var root=fixture();root.put("format","pubburi-mysql-source-v2");root.put("schemaVersion",2);
+        root.put("modelSha256",SourceContract.modelHash(2));root.put("indexSha256",SourceContract.indexHash(2));
+        ((ObjectNode)root.path("textCollations")).put("t_comment_taste_tag.tag","utf8mb4:utf8mb4_bin");
+        var table=((ArrayNode)root.path("tables")).addObject();table.put("name","t_comment_taste_tag");
+        var columns=table.putArray("columns");for(var c:SourceContract.REVIEW_TAGS.columns()){var column=columns.addObject();column.put("name",c.name());column.put("kind",c.kind());}
+        table.putArray("rows");table.put("count",0);table.put("sha256",SourceContract.hash(new byte[0]));return root;
+    }
+    Path saveVersioned(ObjectNode root,String name) throws Exception {
+        Path path=save(root,name);byte[] bytes=Files.readAllBytes(path.resolve("snapshot.json"));
+        SourceArtifact.receipt(path,Map.of("schemaVersion",root.path("schemaVersion").intValue(),"accepted",true,"bytes",bytes.length,"sha256",SourceContract.hash(bytes),"tables",root.path("tables").size(),"rows",root.path("count").intValue()));return path;
+    }
+    static void rows(ObjectNode root,List<List<String>> values) throws Exception {
+        var table=(ObjectNode)root.path("tables").get(16);var rows=table.putArray("rows");var encoded=new java.io.ByteArrayOutputStream();
+        for(var value:values){var row=SourceContract.JSON.valueToTree(value);rows.add(row);encoded.writeBytes(SourceContract.JSON.writeValueAsBytes(row));encoded.write('\n');}
+        table.put("count",rows.size());table.put("sha256",SourceContract.hash(encoded.toByteArray()));root.put("count",1+rows.size());
+    }
+    @Test void version2BindsAllSeventeenTablesAndRawOpinionsWithoutChangingVersion1() throws Exception {
+        assertEquals("05ebe3b8dec521be8be6017a5072dc0d0cc7a445ec38d527a090d2011604ff47",SourceContract.modelHash(1));
+        assertEquals("5dfcac2cc69c4edc2089acce9e9fa96762dfbe1ad56eb738bb12615d5bcffbfe",SourceContract.indexHash(1));
+        assertEquals(16,SourceContract.tables(1).size());assertEquals(17,SourceContract.tables(2).size());
+        assertEquals(SourceContract.modelHash(),SourceContract.modelHash(1));assertEquals(SourceContract.hash(SourceContract.resource("source-index-contract.tsv")),SourceContract.indexHash(1));
+        assertNotEquals(SourceContract.modelHash(1),SourceContract.modelHash(2));assertNotEquals(SourceContract.indexHash(1),SourceContract.indexHash(2));
+        for(String value:List.of("0","3","02","", " 2"))assertThrows(IllegalArgumentException.class,()->SourceContract.version(value));
+        var raw=List.of(List.of("1","  SWEET  "),List.of("1","Line\nBreak"),List.of("1","Dry,Fruit"),List.of("1","🌾".repeat(40)));
+        var root=v2Fixture();rows(root,raw);var artifact=SourceArtifact.load(saveVersioned(root,"v2-raw"));
+        assertEquals(2,artifact.version());assertEquals(new SourceArtifact.Report(17,5),artifact.report());
+        assertEquals(SourceContract.JSON.valueToTree(raw),artifact.data().path("tables").get(16).path("rows"));
+        Path old=save(fixture(),"still-v1");byte[] before=Files.readAllBytes(old.resolve("receipt.json"));assertEquals(1,SourceArtifact.load(old).version());assertArrayEquals(before,Files.readAllBytes(old.resolve("receipt.json")));
+    }
+    @Test void version2RejectsDowngradeExtraOrMissingTagsTypesDuplicatesAndUnrepresentableText() throws Exception {
+        var mismatch=v2Fixture();mismatch.put("format","pubburi-mysql-source-v1");assertThrows(IllegalArgumentException.class,()->SourceArtifact.load(saveVersioned(mismatch,"v2-format")));
+        var oldHash=v2Fixture();oldHash.put("modelSha256",SourceContract.modelHash());assertThrows(IllegalArgumentException.class,()->SourceArtifact.load(saveVersioned(oldHash,"v2-hash")));
+        var missing=v2Fixture();((ArrayNode)missing.path("tables")).remove(16);assertThrows(IllegalArgumentException.class,()->SourceArtifact.load(saveVersioned(missing,"v2-missing")));
+        var duplicate=v2Fixture();rows(duplicate,List.of(List.of("1","raw"),List.of("1","raw")));assertThrows(IllegalArgumentException.class,()->SourceArtifact.load(saveVersioned(duplicate,"v2-duplicate")));
+        for(String value:List.of("raw\u0000tag","\ud800","x".repeat(41))) {
+            var invalid=v2Fixture();rows(invalid,List.of(List.of("1",value)));assertThrows(IllegalArgumentException.class,()->SourceArtifact.load(saveVersioned(invalid,"v2-value-"+Math.abs(value.hashCode()))));
+        }
+        var limit=v2Fixture();var many=new ArrayList<List<String>>();for(int i=0;i<10000;i++)many.add(List.of("1","raw"+i));rows(limit,many);
+        assertThrows(IllegalArgumentException.class,()->SourceArtifact.load(saveVersioned(limit,"v2-row-limit")));
+    }
+
 }
