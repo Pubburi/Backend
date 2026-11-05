@@ -20,17 +20,17 @@ class ContentHttpClientTests {
         }catch(java.io.IOException cancelled){/* Bounded rejection may close the peer. */}catch(Throwable error){failure.set(error);}finally{exchange.close();}});server.start();
         try{
             var client=new ContentHttpClient(URI.create("http://127.0.0.1:"+server.getAddress().getPort()),Duration.ofMillis(200),Duration.ofSeconds(1),ContentFixtures.JSON);
-            assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4)).isPresent();
+            assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4,null)).isPresent();
             assertThat(sent.get().size()).isEqualTo(5);assertThat(sent.get().path("include_explanations").booleanValue()).isTrue();assertThat(sent.get().path("constraints").size()).isZero();assertThat(sent.get().has("profile")).isFalse();assertThat(sent.get().has("userId")).isFalse();
-            for(String value:new String[]{"duplicate","trailing","oversized","media","redirect","status"}){mode.set(value);int before=calls.get();assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4)).isEmpty();assertThat(calls.get()).isEqualTo(before+1);}
-            mode.set("boundary");assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4)).isPresent();
-            int before=calls.get();assertThat(client.recommend(ContentFixtures.JSON.getNodeFactory().textNode("x".repeat(ContentHttpClient.MAX_REQUEST_BYTES)),ContentFixtures.preferences(),4)).isEmpty();assertThat(calls.get()).isEqualTo(before);assertThat(failure.get()).isNull();
+            for(String value:new String[]{"duplicate","trailing","oversized","media","redirect","status"}){mode.set(value);int before=calls.get();assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4,null)).isEmpty();assertThat(calls.get()).isEqualTo(before+1);}
+            mode.set("boundary");assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4,null)).isPresent();
+            int before=calls.get();assertThat(client.recommend(ContentFixtures.JSON.getNodeFactory().textNode("x".repeat(ContentHttpClient.MAX_REQUEST_BYTES)),ContentFixtures.preferences(),4,null)).isEmpty();assertThat(calls.get()).isEqualTo(before);assertThat(failure.get()).isNull();
         }finally{server.stop(0);}
     }
     @Test void unfinishedBodyUsesOneAbsoluteDeadlineAndInvalidOperatorOriginsAreRejected()throws Exception{
         var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);var release=new CountDownLatch(1);var executor=Executors.newSingleThreadExecutor();server.setExecutor(executor);
         server.createContext("/",exchange->{try{exchange.getRequestBody().readAllBytes();exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,0);exchange.getResponseBody().write("{}".getBytes(StandardCharsets.UTF_8));exchange.getResponseBody().flush();release.await(2,TimeUnit.SECONDS);}catch(Exception closed){}finally{exchange.close();}});server.start();
-        try{var client=new ContentHttpClient(URI.create("http://127.0.0.1:"+server.getAddress().getPort()),Duration.ofMillis(100),Duration.ofMillis(100),ContentFixtures.JSON);assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4)).isEmpty();}
+        try{var client=new ContentHttpClient(URI.create("http://127.0.0.1:"+server.getAddress().getPort()),Duration.ofMillis(100),Duration.ofMillis(100),ContentFixtures.JSON);assertThat(client.recommend(ContentFixtures.catalog().catalog(),ContentFixtures.preferences(),4,null)).isEmpty();}
         finally{release.countDown();server.stop(0);executor.shutdownNow();assertThat(executor.awaitTermination(3,TimeUnit.SECONDS)).isTrue();}
         for(String invalid:new String[]{"ftp://127.0.0.1:1","http://user:pass@127.0.0.1:1","http://127.0.0.1:1/route","http://127.0.0.1:1?key=x"})assertThatThrownBy(()->new ContentHttpClient(URI.create(invalid),Duration.ofMillis(1),Duration.ofMillis(1),ContentFixtures.JSON)).isInstanceOf(IllegalArgumentException.class);
     }

@@ -331,13 +331,20 @@ def verify_content_recommendation_openapi(document):
     operation = path["post"]; schemas = document["components"]["schemas"]
     request = operation["requestBody"]["content"]["application/json"]["schema"]
     request = schemas[request["$ref"].split("/")[-1]]
-    assert request["additionalProperties"] is False and set(request["properties"]) == {"limit"}
+    assert request["additionalProperties"] is False and set(request["properties"]) == {"limit", "includeActivity"}
     assert request["properties"]["limit"]["minimum"] == 1 and request["properties"]["limit"]["maximum"] == 12
+    activity = request["properties"]["includeActivity"]
+    assert activity["type"] == "boolean" and activity["default"] is False
+    assert "includeActivity" not in request.get("required", [])
     assert not operation.get("parameters"), "Owned content cannot accept owner or catalog selectors"
     response = operation["responses"]["200"]["content"]["application/json"]["schema"]
     envelope = schemas[response["$ref"].split("/")[-1]]
     data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    assert set(data["properties"]) == {"source", "catalogScope", "result", "products"}
+    assert set(data["properties"]) == {"source", "catalogScope", "result", "products", "activityEvidence"}
+    assert "activityEvidence" not in data.get("required", [])
+    evidence = schemas[data["properties"]["activityEvidence"]["$ref"].split("/")[-1]]
+    assert set(evidence["properties"]) == {"favoriteCategories", "highlyRatedCategories"}
+    assert all(value["type"] == "array" and value["items"]["type"] == "string" for value in evidence["properties"].values())
     assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
     assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]
 

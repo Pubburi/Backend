@@ -24,6 +24,11 @@ public class JpaFavoriteDao implements FavoriteDao {
         return entityManager.createQuery("select new com.pubburi.pub.model.dto.Product(p.id,p.name,p.type,p.price,p.img,p.abv,p.orderCount)" + OWNED + " order by f.createdAt desc,f.productId desc", Product.class)
             .setParameter("userId", userId).setParameter("epoch", epoch).setFirstResult(offset).setMaxResults(limit).getResultList();
     }
+    @Override public List<Integer> selectOwnedProductIds(String userId, String authEpoch, List<Integer> productIds) {
+        return entityManager.createQuery("select f.productId" + OWNED + " and f.productId in :ids", Integer.class)
+            .setParameter("userId", userId).setParameter("epoch", UUID.fromString(authEpoch))
+            .setParameter("ids", productIds).getResultList();
+    }
     @Override public int countOwned(String userId, String authEpoch) {
         UUID epoch = epoch(authEpoch); if (epoch == null) return 0;
         return Math.toIntExact(entityManager.createQuery("select count(f)" + OWNED, Long.class).setParameter("userId", userId).setParameter("epoch", epoch).getSingleResult());

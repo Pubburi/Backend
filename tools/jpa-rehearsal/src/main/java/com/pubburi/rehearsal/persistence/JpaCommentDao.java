@@ -5,6 +5,7 @@ import com.pubburi.pub.model.dto.Comment;
 import com.pubburi.pub.controller.api.CommentSort;
 import jakarta.persistence.*;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,17 @@ public class JpaCommentDao implements CommentDao {
     @Override @Transactional public int insertTasteTags(int id, List<String> values) {
         tags.saveAllAndFlush(values.stream().map(value -> JpaCommentTag.from(id, value)).toList());
         return values.size();
+    }
+    @Override public List<Integer> selectOwnedHighlyRatedProductIds(String userId, String authEpoch, List<Integer> productIds) {
+        return entityManager.createQuery("""
+            select c.productId from RehearsalComment c
+            join RehearsalUser u on u.id=c.userId join RehearsalProduct p on p.id=c.productId
+            where u.id=:userId and u.authEpoch=:epoch and c.productId in :ids
+              and c.id=(select max(newer.id) from RehearsalComment newer
+                        where newer.userId=c.userId and newer.productId=c.productId)
+              and c.rating between 4 and 5
+            """, Integer.class).setParameter("userId", userId).setParameter("epoch", UUID.fromString(authEpoch))
+            .setParameter("ids", productIds).getResultList();
     }
     @Override public int countByProductId(int productId) {
         return Math.toIntExact(entityManager.createQuery("select count(c) from RehearsalComment c where c.productId=:id", Long.class).setParameter("id", productId).getSingleResult());

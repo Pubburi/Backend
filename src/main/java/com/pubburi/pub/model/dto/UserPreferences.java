@@ -2,9 +2,11 @@ package com.pubburi.pub.model.dto;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 /** Private explicit input, scoped internally by the current account incarnation. */
 public class UserPreferences {
+	public static final Set<String> CATEGORIES = Set.of("탁주", "약 · 청주", "과실주", "증류주", "위스키", "양주", "맥주", "사케");
 	private String userId;
 	private String surveyStatus;
 	private boolean categoriesKnown;

@@ -20,7 +20,6 @@ import com.pubburi.pub.model.dto.UserPreferenceValue;
 
 @Service
 public class UserPreferenceServiceImpl implements UserPreferenceService {
-	private static final Set<String> CATEGORIES = Set.of("탁주", "약 · 청주", "과실주", "증류주", "위스키", "양주", "맥주", "사케");
 	private static final Set<String> STATUSES = Set.of("NOT_STARTED", "SKIPPED", "COMPLETED");
 	private final UserDao userDao;
 	private final UserPreferenceDao preferenceDao;
@@ -107,7 +106,7 @@ public class UserPreferenceServiceImpl implements UserPreferenceService {
 		for (String raw : values) {
 			if (raw == null || raw.isBlank()) throw new IllegalArgumentException("Preference values must be nonblank strings");
 			String normalized = categories ? raw.strip() : raw.strip().toLowerCase(Locale.ROOT);
-			if (normalized.length() > (categories ? 20 : 40) || categories && !CATEGORIES.contains(normalized)
+			if (normalized.length() > (categories ? 20 : 40) || categories && !UserPreferences.CATEGORIES.contains(normalized)
 					|| !result.add(normalized)) throw new IllegalArgumentException("Unknown category or duplicate preference value");
 		}
 		return List.copyOf(result);

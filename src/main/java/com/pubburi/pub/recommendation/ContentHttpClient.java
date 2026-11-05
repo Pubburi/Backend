@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.*;
 import com.fasterxml.jackson.core.*;
 import com.fasterxml.jackson.databind.*;
 import com.pubburi.pub.controller.response.UserPreferencesResponse;
+import com.pubburi.pub.controller.response.ContentRecommendationResponse.ActivityEvidence;
 
 /** Fixed B1 route and bounded transport. Does not fit, score, retry or forward credentials. */
 public final class ContentHttpClient implements ContentGateway {
@@ -20,10 +21,18 @@ public final class ContentHttpClient implements ContentGateway {
         this.mapper=mapper.copy().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.mapper.getFactory().setStreamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(20).maxStringLength(5000).maxNameLength(128).maxDocumentLength(MAX_RESPONSE_BYTES).build());
     }
-    @Override public Optional<JsonNode> recommend(JsonNode catalog,UserPreferencesResponse preferences,int limit){
+    @Override public Optional<JsonNode> recommend(JsonNode catalog,UserPreferencesResponse preferences,int limit,ActivityEvidence activity){
         CompletableFuture<HttpResponse<byte[]>> future=null;var active=new AtomicReference<BaselineHttpClient.LimitedBody>();var cancelled=new AtomicBoolean();
         try{
-            long end=System.nanoTime()+deadline.toNanos();byte[] payload=mapper.writeValueAsBytes(Map.of("catalog",catalog,"preferences",preferences,"constraints",Map.of(),"limit",limit,"include_explanations",true));
+            long end=System.nanoTime()+deadline.toNanos();
+            Map<String, Object> fields = Map.of("catalog", catalog, "preferences", preferences,
+                "constraints", Map.of(), "limit", limit, "include_explanations", true);
+            if (activity != null) {
+                fields = new LinkedHashMap<>(fields);
+                fields.put("activity_categories", Map.of("favorite_categories", activity.favoriteCategories(),
+                    "highly_rated_categories", activity.highlyRatedCategories()));
+            }
+            byte[] payload = mapper.writeValueAsBytes(fields);
             if(payload.length>MAX_REQUEST_BYTES)return Optional.empty();long remaining=end-System.nanoTime();if(remaining<=0)return Optional.empty();
             var request=HttpRequest.newBuilder(endpoint).timeout(Duration.ofNanos(remaining)).header("Accept","application/json").header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build();
             future=client.sendAsync(request,info->{var body=new BaselineHttpClient.LimitedBody(MAX_RESPONSE_BYTES);active.set(body);

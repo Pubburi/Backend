@@ -23,6 +23,9 @@ public interface CommentDao {
     int deleteTasteTags(int commentId);
     int insertTasteTags(@Param("commentId") int commentId, @Param("tags") List<String> tags);
 
+	List<Integer> selectOwnedHighlyRatedProductIds(@Param("userId") String userId, @Param("authEpoch") String authEpoch,
+			@Param("productIds") List<Integer> productIds);
+
 	int countByProductId(int productId);
 
 	Double averageRatingByProductId(int productId);
