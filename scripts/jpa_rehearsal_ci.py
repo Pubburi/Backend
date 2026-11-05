@@ -93,6 +93,25 @@ def local_release(environ):
         pg.package(local, release)
         pg.start(local, SimpleNamespace(pg_config=config, release_dir=release,
             backend_only=True, command='activate-pg'))
+        # A valid sibling copy shares the source UUID but has its own marker.
+        selector = directory / pg.DEFAULT_SELECTION
+        selected_bytes = selector.read_bytes()
+        sibling_name = environ['PUBBURI_JPA_FAILURE_DB_NAME']
+        sibling = dict(env, PUBBURI_PG_DB_NAME=sibling_name,
+            PUBBURI_PG_URL=env['PUBBURI_PG_URL'].rsplit('/', 1)[0] + '/' + sibling_name,
+            PUBBURI_PG_RUN_TOKEN=environ['PUBBURI_JPA_FAILURE_RUN_TOKEN'])
+        sibling_config = directory / 'sibling.json'
+        pg.write_json(sibling_config, {'schema_version': 1, 'environment': sibling})
+        try:
+            pg.start(local, SimpleNamespace(pg_config=sibling_config, release_dir=release,
+                backend_only=True, command='activate-pg'))
+        except RuntimeError as rejected:
+            if 'cannot replace the selected PostgreSQL database' not in str(rejected):
+                raise
+        else:
+            raise ValueError('jpa_ci_sibling_activation_accepted')
+        if selector.read_bytes() != selected_bytes:
+            raise ValueError('jpa_ci_existing_selection_changed')
         # Exercise the actual option-free CLI in a separate owner process. Its
         # TERM handler unwinds the launcher's child sessions before it exits.
         cli = """import signal,sys

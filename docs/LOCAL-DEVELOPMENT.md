@@ -173,6 +173,11 @@ DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/res
 복귀하지 않는다. `doctor`는 파일/소유 container 검사이고 실제 DB/marker/권한 검사는 앱 기동 때
 실행한다. `--backend-only` 검증은 기존과 같이 전체 웹 인수를 대신하지 않는다.
 
+다시 `activate-pg`를 실행할 때는 선택한 DB의 CID·label·DB명·marker·source UUID가 같아야 한다.
+같은 source UUID의 다른 복구본도 활성화 전에 거절한다. 같은 대상의 새 release, 자격, 포트는
+새 비공개 설정으로 검증할 수 있다. 기존 선택에 결속된 설정은 갱신을 마칠 때까지 그대로 둔다.
+복구본은 명시 `--provider postgresql`로 별도 검증하며 기본 대상 승계는 별도 전환 인수가 필요하다.
+
 활성 상태의 `init/install/down/reset-db`도 기존 PG 거절을 유지한다. `--provider mysql`은
 이관 전 기준을 의도적으로 별도 실행하는 명시 옵션이며 전환 후 쓰기를 MySQL로 되돌리는
 복구가 아니다. 원본 MySQL·스키마·역할·receipt·UUID/ACK를 선택 명령으로 바꾸지 않는다.
