@@ -1,13 +1,13 @@
 # 로컬 통합 실행
 
-확정 목표 DB/영속 계층은 PostgreSQL18.6·JPA(Hibernate)·Flyway다. 옵션을 생략한 통합 기동은 이관 전
-MySQL 기준이며 기존 볼륨을 보존한다. 준비된 소유 PostgreSQL 복사본은 아래 명시 경로로 실행한다. PostgreSQL schema installer는 별도 폐기 검증 DB에서
+확정 목표 DB/영속 계층은 PostgreSQL18.6·JPA(Hibernate)·Flyway다. 명시 PG 활성화 전 옵션을 생략한 통합 기동은 이관 전
+MySQL 기준이며 기존 볼륨을 보존한다. 아래 `activate-pg` 후에는 같은 명령이 선택한 PG를 사용한다. 준비된 소유 PostgreSQL 복사본은 아래 명시 경로로 실행한다. PostgreSQL schema installer는 별도 폐기 검증 DB에서
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
 완료로 간주하지 않는다. 기본 스택 전환과 복구 인수는 별도 게이트다.
 
 현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의37경로/44작업은
 별도 [명시 JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
-copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 아래 기본 스택은 바꾸지 않는다.
+copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 원본 MySQL을 바꾸지 않는다.
 검증한 범위의 웹 연결은 가능하지만 기본 MySQL runtime/전체 cutover·복구 인수 완료와 구분한다.
 
 본인 B1은 [공급 계약](CONTENT-RECOMMENDATIONS.md)의 공식 fresh container-DEMO bundle을
@@ -156,6 +156,28 @@ DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/res
 불확실한 프로세스 정리에는 기존 잠금을 남긴다. 강제 종료 뒤 잠금/프로세스를 확인하지 않고
 지우거나 다른 실행을 인계받지 않는다. 이전 검증/제약은
 [DB06 증가분 기록](https://github.com/Pubburi/Backend/blob/89adaa8e9a93cf2628703744f7febcb13dae38d8/docs/plans/2026-11-04-postgresql-local-release.md)으로 구분한다.
+
+준비한 복사본을 이 checkout의 기본 로컬 실행 대상으로 명시 선택하려면 다음을 실행한다.
+
+```bash
+./scripts/local-stack.sh activate-pg --pg-config <비공개 JSON> --release-dir <release 폴더>
+./scripts/local-stack.sh smoke
+./scripts/local-stack.sh up
+```
+
+`activate-pg`는 같은 작업 잠금에서 기존 실제 JPA/API·세 서버 smoke를 실행하고 자신이 만든
+프로세스를 모두 종료한 뒤에만 `.pubburi/local-provider.json` 하나를 원자적으로 발행한다.
+설정·release manifest·JAR SHA와 경로를 고정하며 자격 원문을 선택 파일에 복제하지 않는다.
+검증/정리/발행 실패는 기존 선택을 보존한다. 이후 provider를 생략한 명령은 같은 PG 경로를
+사용한다. 선택/입력 변경·CID/marker 부적합·포트 점유·기동 실패는 거절하며 MySQL로 자동
+복귀하지 않는다. `doctor`는 파일/소유 container 검사이고 실제 DB/marker/권한 검사는 앱 기동 때
+실행한다. `--backend-only` 검증은 기존과 같이 전체 웹 인수를 대신하지 않는다.
+
+활성 상태의 `init/install/down/reset-db`도 기존 PG 거절을 유지한다. `--provider mysql`은
+이관 전 기준을 의도적으로 별도 실행하는 명시 옵션이며 전환 후 쓰기를 MySQL로 되돌리는
+복구가 아니다. 원본 MySQL·스키마·역할·receipt·UUID/ACK를 선택 명령으로 바꾸지 않는다.
+이 선택은 로컬 launcher의 기본 대상만 바꾸며 root POM/전체 DB06·최종 cutover 완료가 아니다.
+CI는 별도 private STATE/선택 파일을 사용하여 실제 사용자 선택을 덮어쓰지 않는다.
 
 ## 쓰기 정지 PostgreSQL 복사본의 백업·새 대상 복구
 

@@ -180,9 +180,10 @@ def stop(child, grace=15):
 
 
 @contextmanager
-def operation_lock():
-    STATE.mkdir(mode=0o700, exist_ok=True)
-    lock = STATE / "local-stack-lock"
+def operation_lock(state=None):
+    state = STATE if state is None else state
+    state.mkdir(mode=0o700, exist_ok=True)
+    lock = state / "local-stack-lock"
     try:
         lock.mkdir(mode=0o700)
     except FileExistsError:
@@ -249,17 +250,24 @@ def start(env, smoke):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "doctor", "install", "up", "smoke", "status", "down", "reset-db", "package-pg"])
+    parser.add_argument("command", choices=["init", "doctor", "install", "up", "smoke", "status", "down", "reset-db", "package-pg", "activate-pg"])
     parser.add_argument("--confirm-delete-local-data", action="store_true")
-    parser.add_argument("--provider", choices=("mysql", "postgresql"), default="mysql")
+    parser.add_argument("--provider", choices=("mysql", "postgresql"))
     parser.add_argument("--pg-config")
     parser.add_argument("--release-dir")
     parser.add_argument("--output-dir")
     parser.add_argument("--backend-only", action="store_true")
     args = parser.parse_args()
-    if args.provider == "postgresql" or args.command == "package-pg":
-        import postgresql_local
-        return postgresql_local.dispatch(types.SimpleNamespace(**globals()), args)
+    import postgresql_local
+    local = types.SimpleNamespace(**globals())
+    if args.command in ("package-pg", "activate-pg"):
+        if args.provider == "mysql":
+            postgresql_local.reject()
+        return postgresql_local.dispatch(local, args)
+    if args.provider is None:
+        args.provider = "postgresql" if postgresql_local.selected(local, args) else "mysql"
+    if args.provider == "postgresql":
+        return postgresql_local.dispatch(local, args)
     if args.pg_config or args.release_dir or args.output_dir or args.backend_only:
         raise RuntimeError("PostgreSQL options require the explicit PostgreSQL provider.")
     if args.command == "init":

@@ -104,6 +104,69 @@ def configuration(path):
     return dict(env)
 
 
+DEFAULT_SELECTION = 'local-provider.json'
+
+
+def selection_pins(config, directory):
+    return {'config_sha256': hashlib.sha256(private_file(config, 65536)).hexdigest(),
+            'manifest_sha256': hashlib.sha256(private_file(directory / 'manifest.json', 2 * 1024 * 1024)).hexdigest(),
+            'jar_sha256': hashlib.sha256(private_file(directory / 'runtime.jar', 150 * 1024 * 1024)).hexdigest()}
+
+
+def selection(local):
+    path = local.STATE / DEFAULT_SELECTION
+    # A dangling symlink or invalid selector must never silently select MySQL.
+    if not os.path.lexists(path):
+        return None
+    value = strict_json(private_file(path, 16384))
+    keys = {'schema_version', 'provider', 'pg_config', 'release_dir',
+            'config_sha256', 'manifest_sha256', 'jar_sha256'}
+    if (not isinstance(value, dict) or set(value) != keys
+            or type(value['schema_version']) is not int or value['schema_version'] != 1
+            or value['provider'] != 'postgresql'
+            or any(not isinstance(value[k], str) or not value[k] or '\x00' in value[k] for k in keys - {'schema_version'})
+            or not Path(value['pg_config']).is_absolute() or not Path(value['release_dir']).is_absolute()
+            or any(not re.fullmatch(r'[0-9a-f]{64}', value[k]) for k in keys if k.endswith('_sha256'))):
+        reject()
+    pins = selection_pins(Path(value['pg_config']), Path(value['release_dir']))
+    if any(value[k] != v for k, v in pins.items()):
+        reject()
+    return value
+
+
+def selected(local, args):
+    value = selection(local)
+    if value is None:
+        return False
+    if args.pg_config or args.release_dir:
+        reject()
+    args.pg_config, args.release_dir = value['pg_config'], value['release_dir']
+    args.selected_default = value
+    return True
+
+
+def guard_selection(local, args):
+    expected = getattr(args, 'selected_default', None)
+    if expected is not None and selection(local) != expected:
+        reject()
+
+
+def publish_selection(local, config, directory, pins):
+    if selection_pins(config, directory) != pins:
+        reject()
+    path = local.STATE / DEFAULT_SELECTION
+    if os.path.lexists(path):
+        private_file(path, 16384)  # Do not replace another owner's/shared/symlink selection.
+    temporary = local.STATE / ('.local-provider-' + uuid.uuid4().hex + '.tmp')
+    try:
+        write_json(temporary, dict(schema_version=1, provider='postgresql',
+            pg_config=str(Path(config).absolute()), release_dir=str(directory.absolute()), **pins))
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print('Owned PostgreSQL selected for option-free local commands; MySQL data was not changed.', flush=True)
+
+
 def source_files(local):
     command = ['git', 'ls-files', '-z', '--', *INPUTS]
     tracked = subprocess.check_output(command, cwd=local.BACKEND).decode().split('\x00')
@@ -249,67 +312,75 @@ def child_environments(env):
 
 
 def start(local, args):
-    env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only)
-    with local.operation_lock(), ExitStack() as stack:
-        ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT']
-        for key in ports:
-            with socket.socket() as candidate:
-                # Match Tomcat's restart semantics without accepting a LISTEN socket.
-                candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                candidate.bind(('127.0.0.1', int(env[key])))
-        run_dir = private_directory(local.STATE / ('pg-run-' + uuid.uuid4().hex), local, create=True)
-        shutil.copyfile(directory / 'runtime.jar', run_dir / 'runtime.jar')
-        os.chmod(run_dir / 'runtime.jar', 0o600)
-        if sha(run_dir / 'runtime.jar') != manifest['jar_sha256']:
+    with local.operation_lock():
+        guard_selection(local, args)
+        pins = selection_pins(Path(args.pg_config), Path(args.release_dir)) if args.command == 'activate-pg' else None
+        env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only)
+        guard_selection(local, args)
+        if pins is not None and selection_pins(Path(args.pg_config), directory) != pins:
             reject()
-        backend_env, frontend_env, recommendation_env = child_environments(env)
-        children = []
-        def spawn(name, cwd, command, child_env):
-            log = stack.enter_context((run_dir / (name + '.log')).open('x'))
-            os.chmod(run_dir / (name + '.log'), 0o600)
-            with defer_termination():
-                child = subprocess.Popen(command, cwd=cwd, env=child_env, stdout=log,
-                    stderr=subprocess.STDOUT, start_new_session=True)
-                children.append(child)
-                stack.callback(local.stop, child)
-            return child
-        backend = spawn('backend', local.BACKEND, ['java', '-Dserver.address=127.0.0.1', '-jar', str(run_dir / 'runtime.jar')], backend_env)
-        base_url = 'http://127.0.0.1:' + env['PUBBURI_SERVER_PORT']
-        deadline = time.monotonic() + 180
-        while True:
-            if backend.poll() is not None:
+        with ExitStack() as stack:
+            ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT']
+            for key in ports:
+                with socket.socket() as candidate:
+                    # Match Tomcat's restart semantics without accepting a LISTEN socket.
+                    candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    candidate.bind(('127.0.0.1', int(env[key])))
+            run_dir = private_directory(local.STATE / ('pg-run-' + uuid.uuid4().hex), local, create=True)
+            shutil.copyfile(directory / 'runtime.jar', run_dir / 'runtime.jar')
+            os.chmod(run_dir / 'runtime.jar', 0o600)
+            if sha(run_dir / 'runtime.jar') != manifest['jar_sha256']:
                 reject()
-            try:
-                # Readiness must belong to our JVM, never an unrelated listener.
-                if 'Tomcat started on port ' + env['PUBBURI_SERVER_PORT'] + ' ' in (run_dir / 'backend.log').read_text():
-                    api_ready(base_url)
-                    break
-            except (urllib.error.URLError, TimeoutError, OSError):
-                pass
-            if time.monotonic() >= deadline:
-                reject()
-            time.sleep(0.25)
-        if not args.backend_only:
-            spawn('frontend', local.FRONTEND, ['./scripts/dev.sh'], frontend_env)
-            spawn('recommendation', local.RECOMMENDATION, ['./scripts/dev.sh'], recommendation_env)
-            pending = {k: v for k, v in local.endpoints(env).items() if k != 'backend'}
-            while pending:
-                if any(c.poll() is not None for c in children) or time.monotonic() >= deadline:
+            backend_env, frontend_env, recommendation_env = child_environments(env)
+            children = []
+            def spawn(name, cwd, command, child_env):
+                log = stack.enter_context((run_dir / (name + '.log')).open('x'))
+                os.chmod(run_dir / (name + '.log'), 0o600)
+                with defer_termination():
+                    child = subprocess.Popen(command, cwd=cwd, env=child_env, stdout=log,
+                        stderr=subprocess.STDOUT, start_new_session=True)
+                    children.append(child)
+                    stack.callback(local.stop, child)
+                return child
+            backend = spawn('backend', local.BACKEND, ['java', '-Dserver.address=127.0.0.1', '-jar', str(run_dir / 'runtime.jar')], backend_env)
+            base_url = 'http://127.0.0.1:' + env['PUBBURI_SERVER_PORT']
+            deadline = time.monotonic() + 180
+            while True:
+                if backend.poll() is not None:
                     reject()
-                for name, url in list(pending.items()):
-                    try:
-                        local.probe(name, url)
-                        del pending[name]
-                    except (urllib.error.URLError, TimeoutError, OSError):
-                        pass
-                if pending:
-                    time.sleep(0.25)
-            local.probe('backend', 'http://127.0.0.1:' + env['PUBBURI_FRONTEND_PORT'] + '/api/products?page=1&size=1')
-        print('PostgreSQL applications ready (37 paths / 44 operations); database retained on every exit.', flush=True)
-        if args.command == 'up':
-            while all(child.poll() is None for child in children):
-                time.sleep(0.5)
-            reject()
+                try:
+                    # Readiness must belong to our JVM, never an unrelated listener.
+                    if 'Tomcat started on port ' + env['PUBBURI_SERVER_PORT'] + ' ' in (run_dir / 'backend.log').read_text():
+                        api_ready(base_url)
+                        break
+                except (urllib.error.URLError, TimeoutError, OSError):
+                    pass
+                if time.monotonic() >= deadline:
+                    reject()
+                time.sleep(0.25)
+            if not args.backend_only:
+                spawn('frontend', local.FRONTEND, ['./scripts/dev.sh'], frontend_env)
+                spawn('recommendation', local.RECOMMENDATION, ['./scripts/dev.sh'], recommendation_env)
+                pending = {k: v for k, v in local.endpoints(env).items() if k != 'backend'}
+                while pending:
+                    if any(c.poll() is not None for c in children) or time.monotonic() >= deadline:
+                        reject()
+                    for name, url in list(pending.items()):
+                        try:
+                            local.probe(name, url)
+                            del pending[name]
+                        except (urllib.error.URLError, TimeoutError, OSError):
+                            pass
+                    if pending:
+                        time.sleep(0.25)
+                local.probe('backend', 'http://127.0.0.1:' + env['PUBBURI_FRONTEND_PORT'] + '/api/products?page=1&size=1')
+            print('PostgreSQL applications ready (37 paths / 44 operations); database retained on every exit.', flush=True)
+            if args.command == 'up':
+                while all(child.poll() is None for child in children):
+                    time.sleep(0.5)
+                reject()
+        if args.command == 'activate-pg':
+            publish_selection(local, args.pg_config, directory, pins)
 
 
 def dispatch(local, args):
@@ -317,12 +388,16 @@ def dispatch(local, args):
         if not args.output_dir or args.pg_config or args.release_dir or args.backend_only or args.confirm_delete_local_data:
             reject()
         return package(local, args.output_dir)
-    if args.command not in ('doctor', 'up', 'smoke', 'status') or not args.pg_config or not args.release_dir or args.output_dir or args.confirm_delete_local_data:
+    if args.command not in ('doctor', 'up', 'smoke', 'status', 'activate-pg') or not args.pg_config or not args.release_dir or args.output_dir or args.confirm_delete_local_data:
         reject()
-    if args.command in ('up', 'smoke'):
+    if args.command in ('up', 'smoke', 'activate-pg'):
         return start(local, args)
+    # Observers must remain usable while up owns the lifecycle lock.
+    guard_selection(local, args)
     env, _, _ = doctor(local, args.pg_config, args.release_dir, args.backend_only)
+    guard_selection(local, args)
     if args.command == 'status':
         # Endpoint observation only; status never adopts or signals another process.
         api_ready('http://127.0.0.1:' + env['PUBBURI_SERVER_PORT'])
+        guard_selection(local, args)
         print('PostgreSQL API observed ready; endpoint observation does not prove process ownership.')

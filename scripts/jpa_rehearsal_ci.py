@@ -74,8 +74,12 @@ def local_release(environ):
         pg.reject()
     name = 'pg-local-ci-' + secrets.token_hex(16)
     directory = local_stack.STATE / name
-    release = local_stack.STATE / (name + '-release')
     directory.mkdir(mode=0o700)
+    # This validation must never publish over the user's real local default.
+    local = SimpleNamespace(**vars(local_stack))
+    local.STATE = directory
+    local.operation_lock = lambda: local_stack.operation_lock(directory)
+    release = directory / 'release'
     env = {key: environ[key] for key in pg.REQUIRED if not key.endswith('_PORT')}
     with socket.socket() as one, socket.socket() as two, socket.socket() as three:
         for listener, key in zip((one,two,three), ('PUBBURI_SERVER_PORT','PUBBURI_FRONTEND_PORT','PUBBURI_RECOMMENDATION_PORT')):
@@ -86,10 +90,46 @@ def local_release(environ):
     # Run in this process so TERM/KeyboardInterrupt unwinds the launcher's
     # owned process-group cleanup, rather than killing a nested CLI on timeout.
     with cleanup_on_termination():
-        pg.package(local_stack, release)
-        pg.start(local_stack, SimpleNamespace(pg_config=config, release_dir=release,
-            backend_only=True, command='smoke'))
-    print('Owned PostgreSQL packaged local launcher passed; database retained.')
+        pg.package(local, release)
+        pg.start(local, SimpleNamespace(pg_config=config, release_dir=release,
+            backend_only=True, command='activate-pg'))
+        # Exercise the actual option-free CLI in a separate owner process. Its
+        # TERM handler unwinds the launcher's child sessions before it exits.
+        cli = """import signal,sys
+from pathlib import Path
+sys.path.insert(0,'scripts')
+import local_stack as local
+local.STATE=Path(sys.argv[1])
+signal.signal(signal.SIGTERM,local.interrupted)
+sys.argv=['local_stack.py',sys.argv[2],'--backend-only']
+try:local.main()
+except KeyboardInterrupt:pass
+"""
+        child_env = pg.base_environment()
+        args = [sys.executable,'-B','-c',cli,str(directory)]
+        log_path = directory/'selected-up.log'
+        with log_path.open('x') as log:
+            log_path.chmod(0o600)
+            with defer_termination():
+                up = subprocess.Popen([*args,'up'],cwd=ROOT,env=child_env,stdout=log,
+                    stderr=subprocess.STDOUT,start_new_session=True)
+            try:
+                deadline=time.monotonic()+90
+                while 'PostgreSQL applications ready' not in log_path.read_text():
+                    if up.poll() is not None or time.monotonic()>=deadline:
+                        raise ValueError('jpa_ci_selected_up_failed')
+                    time.sleep(.1)
+                # A live up holds the exclusive lock; status must still observe it.
+                command([*args,'status'],child_env,directory/'selected-status.log',budget=30)
+            finally:
+                local_stack.stop(up)
+        if up.returncode!=0 or (directory/'local-stack-lock').exists():
+            raise ValueError('jpa_ci_selected_cleanup_failed')
+        with socket.socket() as probe:
+            probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            probe.bind(('127.0.0.1',int(env['PUBBURI_SERVER_PORT'])))
+    print('Owned PostgreSQL activation and selected-default restart passed; database retained.')
+    return {'state':str(directory), 'config':str(config), 'release':str(release), 'environment':env}
 
 
 
