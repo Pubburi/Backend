@@ -57,10 +57,15 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 | 분류 | 기술 스택 |
 |---|---|
 | 언어 | Java · Python |
-| 애플리케이션 | Spring Boot · Tomcat · Bean Validation · Jackson · springdoc · OpenAPI · Swagger UI |
-| 데이터·영속성 | MyBatis · MySQL · PostgreSQL · Spring Data JPA · Hibernate · Flyway · OpenSearch · analysis-nori · PyMySQL · Psycopg |
-| 빌드·실행 | Maven Wrapper |
-| 테스트·품질 | JUnit |
+| 프레임워크·라이브러리 | Spring Boot · Bean Validation · Jackson |
+| 서버 | Tomcat |
+| 데이터베이스 | MySQL · PostgreSQL |
+| 데이터 접근 | MyBatis · Spring Data JPA · Hibernate · PyMySQL · Psycopg |
+| DB 마이그레이션 | Flyway |
+| 검색 | OpenSearch · analysis-nori |
+| API 문서 | springdoc · OpenAPI · Swagger UI |
+| 빌드 | Maven Wrapper |
+| 테스트 | JUnit |
 | CI | GitHub Actions |
 
 <a id="architecture"></a>
