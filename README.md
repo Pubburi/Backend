@@ -117,7 +117,7 @@ PostgreSQL의 독립 Flyway 스키마·[읽기 전용 원본 추출](docs/SOURCE
 
 #### 결과
 
-상품 변경과 전송 예약은 함께 commit·rollback되고, 명시 실행한 relay는 중단 뒤 남은 미전달 작업을 다시 처리합니다. 중복·순서 역전은 상품별 버전과 엔진 정본으로 판정하며, source·target 식별이 달라지면 ACK하지 않습니다. 이 동작을 공개 검색 전환이나 색인 유실의 자동 복구로 확대하지 않습니다. [생산 근거](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-product-search-outbox.md)와 [relay의 상세 근거·한계](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)는 별도 기록에 보존했습니다.
+상품 변경과 전송 예약은 함께 commit·rollback되고, 명시 실행한 relay는 중단 뒤 남은 미전달 작업을 다시 처리합니다. 중복·순서 역전은 상품별 버전과 엔진 정본으로 판정하며, source·target 식별이 달라지면 ACK하지 않습니다. 이 동작을 공개 검색 전환이나 색인 유실의 자동 복구로 확대하지 않습니다. 생산 근거와 relay의 상세 근거·한계는 별도 기록에 보존했습니다.
 
 #### 대체안/회고
 
@@ -143,7 +143,6 @@ def ack(self, claim):
         return cursor.rowcount == 1
 ```
 
-[업무 쓰기와 트랜잭션](src/main/java/com/pubburi/pub/model/service/ProductServiceImpl.java) · [현재 투영·필수 트랜잭션·버전 기록](src/main/java/com/pubburi/pub/model/service/ProductSearchOutbox.java) · [버전과 outbox SQL](src/main/resources/mappers/productSearchOutbox.xml) · [claim·target 확인·조건부 ACK](scripts/search_relay.py) · [전송·운영 경계](docs/SEARCH-RELAY.md)
 
 ### 2. 같은 ID 재가입과 권한 변경에서 기존 세션을 구분하기
 
@@ -161,7 +160,7 @@ Guard가 로그인 때의 역할·이름·스탬프를 신뢰했습니다. ID만
 
 #### 결과
 
-동일 조건의 로컬 MySQL 8.4·실제 HTTP에서 권한 강등 후 관리자 API 허용, 삭제 후 인증, 같은 ID 재가입 후 구쿠키 접근, 비밀번호 변경 후 구세션 인증이 **각각 1/1→0/1**로 바뀌었습니다. 강등은 403, 나머지는 401이며 새 계정 로그인은 유지합니다. 별도 이름/스탬프 시나리오의 오래된 표시도 1/1→0/1입니다. 서로 다른 각 1회 시나리오의 정확성 결과로, 실사용자 오류율·성능 수치는 아닙니다. [원값·조건·전환 근거](docs/measurements/2026-11-01-session-authority.md)를 분리해 기록했습니다.
+동일 조건의 로컬 MySQL 8.4·실제 HTTP에서 권한 강등 후 관리자 API 허용, 삭제 후 인증, 같은 ID 재가입 후 구쿠키 접근, 비밀번호 변경 후 구세션 인증이 **각각 1/1→0/1**로 바뀌었습니다. 강등은 403, 나머지는 401이며 새 계정 로그인은 유지합니다. 별도 이름/스탬프 시나리오의 오래된 표시도 1/1→0/1입니다. 서로 다른 각 1회 시나리오의 정확성 결과로, 실사용자 오류율·성능 수치는 아닙니다. 원값·조건·전환 근거를 분리해 기록했습니다.
 
 #### 대체안/회고
 
@@ -190,7 +189,6 @@ synchronized (session) {
 }
 ```
 
-[현재 계정 확인·조건부 세션 갱신](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/controller/auth/AccessGuard.java) · [잠금 안의 버전 캡처](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [ID·epoch 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/user.xml) · [계약·전환](docs/SESSION-AUTHORITY.md)
 
 ### 3. 전환 뒤 생긴 업무 쓰기와 소비된 ID까지 보존하는 복구
 
@@ -208,7 +206,7 @@ synchronized (session) {
 
 #### 결과
 
-소유한 PG18.6 검증 환경에서 **19표·7sequence**의 값·원문 JSON·PK·epoch·source UUID·claim/ACK를 독립 SQL로 대조했습니다. 복구 후 JPA 로그인·주문·원문 태그·찜, 새 상품의 API 쓰기와 실제 세 서버·production 웹의 조건 조회를 확인했습니다. rollback에서 소비한 ID는 재사용하지 않았습니다. [구현·실제 검증과 한계](https://github.com/Pubburi/Backend/pull/55)에 근거를 남겼으며 서비스 성능이나 전체 DB 전환 완료로 해석하지 않습니다.
+소유한 PG18.6 검증 환경에서 **19표·7sequence**의 값·원문 JSON·PK·epoch·source UUID·claim/ACK를 독립 SQL로 대조했습니다. 복구 후 JPA 로그인·주문·원문 태그·찜, 새 상품의 API 쓰기와 실제 세 서버·production 웹의 조건 조회를 확인했습니다. rollback에서 소비한 ID는 재사용하지 않았습니다. 구현·실제 검증과 한계를 기록했으며 서비스 성능이나 전체 DB 전환 완료로 해석하지 않습니다.
 
 #### 대체안/회고
 
@@ -229,8 +227,6 @@ private.write_json(directory / 'completed.json', {'status': 'verified', 'manifes
     'source_id': actual['source_id'], 'tables': len(actual['tables']), 'sequences': len(actual['sequences'])})
 ```
 
-[쓰기 정지·snapshot·값/sequence 대조·완료 경계](scripts/postgresql_recovery.py) · [실제 업무 쓰기와 복구 후 JPA 인수](scripts/postgresql_recovery_ci.py) · [명시 백업·복구 실행](docs/LOCAL-DEVELOPMENT.md)
-
 
 ### 4. 가격 변경·참조 삭제에서 주문 이력을 분리하기
 
@@ -248,7 +244,7 @@ private.write_json(directory / 'completed.json', {'status': 'verified', 'manifes
 
 #### 결과
 
-가격 변경 실험의 금액 불변 위반은 **3/3 → 0/3**이었습니다. 별도로 같은 초기 데이터의 세 주문에 상품 삭제→회원 삭제를 적용하자 상세 보존 위반은 **2/3 → 0/3**, 회원 삭제 뒤 주문 유실은 **3/3 → 0/3**으로 바뀌었습니다. 삭제 후에도 66,000/217,800/178,200원의 금액과 상세가 남고 참조는 null이 됩니다. 이는 로컬 데모의 정확성 결과이며 실사용자 장애율·응답 성능 수치가 아닙니다. [가격 원값](docs/measurements/2026-10-31-order-price-invariance.md) · [삭제 흐름의 분모·원값·재현](docs/measurements/2026-10-31-order-history-preservation.md)을 구분해 기록했습니다.
+가격 변경 실험의 금액 불변 위반은 **3/3 → 0/3**이었습니다. 별도로 같은 초기 데이터의 세 주문에 상품 삭제→회원 삭제를 적용하자 상세 보존 위반은 **2/3 → 0/3**, 회원 삭제 뒤 주문 유실은 **3/3 → 0/3**으로 바뀌었습니다. 삭제 후에도 66,000/217,800/178,200원의 금액과 상세가 남고 참조는 null이 됩니다. 이는 로컬 데모의 정확성 결과이며 실사용자 장애율·응답 성능 수치가 아닙니다. 가격 원값과 삭제 흐름의 분모·원값·재현을 구분해 기록했습니다.
 
 #### 대체안/회고
 
@@ -278,7 +274,6 @@ ALTER TABLE t_order_detail
         REFERENCES t_product(id) ON DELETE SET NULL;
 ```
 
-[가격 캡처·저장 경계](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/OrderServiceImpl.java) · [상품 잠금 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/product.xml) · [저장된 가격 조회](https://github.com/Pubburi/Backend/blob/main/src/main/resources/mappers/order.xml) · [회원 삭제 트랜잭션](https://github.com/Pubburi/Backend/blob/main/src/main/java/com/pubburi/pub/model/service/UserServiceImpl.java) · [FK 전환 SQL](docs/migrations/002-order-history-preservation.sql) · [삭제 정책](docs/ORDER-HISTORY-PRESERVATION.md)
 
 <a id="development"></a>
 
