@@ -144,7 +144,7 @@ jobs:
           PUBBURI_PG_IMPORT_INTEGRATION: '1'
           PUBBURI_JPA_CI: '1'
           PUBBURI_PG_RELAY_CI: '1'
-        run: python3 scripts/source_snapshot_ci.py
+        run: .venv-relay/bin/python scripts/source_snapshot_ci.py
       - name: Initialize disposable database
         env:
           MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
