@@ -66,6 +66,7 @@ class RehearsalDataSource {
                 OR has_sequence_privilege('pubburi.t_order_o_id_seq','SELECT,UPDATE')
                 OR has_sequence_privilege('pubburi.t_order_detail_d_id_seq','SELECT,UPDATE')
                 OR has_sequence_privilege('pubburi.t_stamp_id_seq','SELECT,UPDATE')
+                OR has_table_privilege('pubburi.t_comment_taste_tag','UPDATE,TRIGGER,TRUNCATE')
                 OR has_table_privilege('pubburi.t_comment','UPDATE,TRIGGER,TRUNCATE')
                 OR has_column_privilege('pubburi.t_comment','id','UPDATE')
                 OR has_column_privilege('pubburi.t_comment','user_id','UPDATE')

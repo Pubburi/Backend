@@ -318,7 +318,7 @@ def run(environ):
             if present["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_favorite_put_changed")
         status,admin_favorite=request(admin,base,"GET",favorite_path);expect(status,200)
         if admin_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_owner_leaked")
-        authored_comment={"productId":product_id,"rating":3.7,"comment":"Authored packaged review"}
+        authored_comment={"productId":product_id,"rating":3.7,"comment":"Authored packaged review","tasteTags":[" SWEET ","dry,fruit\none"]}
         expect(request(anonymous,base,"POST","/api/comments",authored_comment)[0],401)
         status,created_comment=request(ordinary,base,"POST","/api/comments",authored_comment);expect(status,201);comment_id=created_comment["data"]["id"]
         if comment_id<int(environ["PUBBURI_JPA_EXPECTED_COMMENT_NEXT"]) or set(created_comment["data"])!={"id","userId","productId","rating","comment"} or created_comment["data"]["rating"]!=3.7 or created_comment["data"]["userId"]!=environ["PUBBURI_JPA_USER_ID"]:raise ValueError("jpa_runtime_comment_identity_or_shape_changed")
@@ -326,6 +326,9 @@ def run(environ):
         comment_data=edited_comment["data"]
         status,public_comments=request(anonymous,base,"GET","/api/products/"+str(product_id)+"/comments");expect(status,200)
         if public_comments["data"]["items"]!=[comment_data]:raise ValueError("jpa_runtime_comment_edit_not_public")
+        tagged_comment=dict(comment_data,tasteTags=["dry,fruit\none","sweet"])
+        status,tagged_page=request(anonymous,base,"GET","/api/products/"+str(product_id)+"/comments?includeTasteTags=true");expect(status,200)
+        if tagged_page["data"]["items"]!=[tagged_comment]:raise ValueError("jpa_runtime_comment_tags_lost_on_omitted_update")
         expect(request(ordinary,base,"GET","/api/admin/comments")[0],403)
         expect(request(admin,base,"GET","/api/admin/comments")[0],200)
         authored_order={"details":[{"productId":product_id,"quantity":1},{"productId":product_id,"quantity":2}]}
@@ -345,6 +348,8 @@ def run(environ):
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
         default_selection(base)
+        status,restarted_tags=request(client(),base,"GET","/api/products/"+str(product_id)+"/comments?includeTasteTags=true");expect(status,200)
+        if restarted_tags["data"]["items"]!=[tagged_comment]:raise ValueError("jpa_runtime_restart_lost_comment_tags")
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
         expect(request(admin,base,"GET","/api/auth/me")[0],401)  # In-memory sessions are not persisted across restart.
         login(admin,base,"ADMIN");expect(request(admin,base,"DELETE","/api/admin/markets/"+str(market_id))[0],200)

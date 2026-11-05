@@ -757,18 +757,53 @@ def comment_rating_contract(environ):
         ids = []
         for rating in (4.25, 1.25, 4.25):
             ids.append(owner.request("POST", "/comments", 201, {"productId": product,
-                "rating": rating, "comment": "Authored review summary"})["data"]["id"])
+                "rating": rating, "comment": "Authored review summary", "tasteTags": [" SWEET ", "과일,향\n산미"] if not ids else []})["data"]["id"])
         original = public.request("GET", path, 200)["data"]
         assert set(original) == page_fields and [x["id"] for x in original["items"]] == ids[::-1]
+        assert all(len(item) == 5 for item in original["items"])
+        tagged = public.request("GET", path + "?includeTasteTags=true&includeSummary=true&sort=rating_desc", 200)["data"]
+        expected_tags = ["sweet", "과일,향\n산미"]
+        assert {item["id"]: item["tasteTags"] for item in tagged["items"]} == {ids[0]: expected_tags, ids[1]: [], ids[2]: []}
+        assert all(len(item) == 5 for item in public.request("GET", path + "?includeTasteTags=false", 200)["data"]["items"])
+        for invalid in (None, "tag", [1], [True], ["SWEET", "sweet"], [" "], ["x" * 41], ["nul\x00tag"], ["x"] * 21):
+            owner.request("PUT", f"/comments/{ids[0]}", 400, {"rating": 1.25, "comment": "must not change", "tasteTags": invalid}, "VALIDATION_FAILED")
+        before = public.request("GET", path + "?includeTasteTags=true", 200)["data"]
+        assert next(item for item in before["items"] if item["id"] == ids[0])["tasteTags"] == expected_tags
+        # Failure after updating the review and deleting its old tags must roll back all three fields.
+        require_disposable_database(environ)
+        if not environ.get("PUBBURI_DB_ROOT_PASSWORD"):
+            raise RuntimeError("Review fault DDL requires the isolated root credential")
+        trigger = "ci_review_opinion_" + uuid.uuid4().hex
+        assert type(ids[0]) is int and ids[0] > 0 and re.fullmatch(r"ci_review_opinion_[a-f0-9]{32}", trigger)
+        def fault_sql(statement):
+            require_disposable_database(environ)
+            return subprocess.run(["docker", "exec", "-e", "MYSQL_PWD", environ["PUBBURI_SMOKE_CONTAINER_ID"],
+                "mysql", "-uroot", "--batch", "--skip-column-names", environ["PUBBURI_DB_NAME"], "--execute", statement],
+                env=dict(environ, MYSQL_PWD=environ["PUBBURI_DB_ROOT_PASSWORD"]), capture_output=True, text=True, check=True).stdout
+        fault_body = f"SET NEW.tag = IF(NEW.comment_id={ids[0]}, NULL, NEW.tag)"
+        fault_sql("CREATE TRIGGER " + trigger + " BEFORE INSERT ON t_comment_taste_tag FOR EACH ROW " + fault_body)
+        try:
+            owner.request("PUT", f"/comments/{ids[0]}", 409, {"rating": 1.25, "comment": "must roll back", "tasteTags": ["after"]}, "CONFLICT")
+            assert public.request("GET", path + "?includeTasteTags=true", 200)["data"] == before
+        finally:
+            observed = json.loads(fault_sql("SELECT JSON_OBJECT('table',EVENT_OBJECT_TABLE,'timing',ACTION_TIMING,'event',EVENT_MANIPULATION,'body',ACTION_STATEMENT) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE() AND TRIGGER_NAME='" + trigger + "'").strip())
+            normalized = lambda text: re.sub(r"\s+|`", "", text).rstrip(";").lower()
+            if observed != dict(observed, table="t_comment_taste_tag", timing="BEFORE", event="INSERT") or normalized(observed["body"]) != normalized(fault_body):
+                raise RuntimeError("Refusing to remove an unowned review fixture trigger")
+            fault_sql("DROP TRIGGER " + trigger)
+
         middle = public.request("GET", path + "?includeSummary=true&sort=rating_desc&page=2&size=1", 200)["data"]
         assert [x["id"] for x in middle["items"]] == [ids[0]]
         assert middle["total"] == 3 and middle["ratingSummary"] == {"count": 3, "average": 3.25}
         low = public.request("GET", path + "?includeSummary=false&sort=rating_asc&size=1", 200)["data"]
         assert set(low) == page_fields and low["items"][0]["id"] == ids[1]
-        for query in ("?sort=nope", "?sort=latest&sort=latest", "?includeSummary=TRUE", "?includeSummary=true&includeSummary=true"):
+        for query in ("?sort=nope", "?sort=latest&sort=latest", "?includeSummary=TRUE", "?includeSummary=true&includeSummary=true", "?includeTasteTags=TRUE", "?includeTasteTags=true&includeTasteTags=false"):
             public.request("GET", path + query, 400, error_code="BAD_REQUEST")
         owner.request("PUT", f"/comments/{ids[0]}", 200, {"rating": 3.75, "comment": "Edited summary"})
         assert summary()["ratingSummary"] == {"count": 3, "average": 3.08}
+        assert next(item for item in public.request("GET", path + "?includeTasteTags=true", 200)["data"]["items"] if item["id"] == ids[0])["tasteTags"] == expected_tags
+        owner.request("PUT", f"/comments/{ids[0]}", 200, {"rating": 3.75, "comment": "clear tags", "tasteTags": []})
+        assert next(item for item in public.request("GET", path + "?includeTasteTags=true", 200)["data"]["items"] if item["id"] == ids[0])["tasteTags"] == []
         owner.request("DELETE", f"/comments/{ids[1]}", 200)
         assert summary()["ratingSummary"] == {"count": 2, "average": 4}
         for id_ in (ids[0], ids[2]):

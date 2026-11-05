@@ -50,23 +50,28 @@ public class CommentRestController {
 	@GetMapping("/products/{productId}/comments")
 	@Operation(parameters = {
 		@Parameter(name = "sort", in = ParameterIn.QUERY, schema = @Schema(allowableValues = {"latest", "rating_desc", "rating_asc"}), description = "Default latest; equal ratings use descending ID. Repeated values return 400."),
-		@Parameter(name = "includeSummary", in = ParameterIn.QUERY, schema = @Schema(type = "boolean"), description = "Exact true adds ratingSummary for all reviews, not only this page. Omitted/false keeps the original six fields. Repeated or malformed values return 400.")})
+		@Parameter(name = "includeSummary", in = ParameterIn.QUERY, schema = @Schema(type = "boolean"), description = "Exact true adds ratingSummary for all reviews, not only this page. Omitted/false keeps the original six fields. Repeated or malformed values return 400."),
+        @Parameter(name = "includeTasteTags", in = ParameterIn.QUERY, schema = @Schema(type = "boolean"), description = "Exact true adds member opinion tasteTags to each review; omitted/false preserves five review fields. Repeated or malformed values return 400.")})
 	public ResponseEntity<ApiResponse<CommentPageResponse<CommentResponse>>> comments(@PathVariable int productId,
 			@RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
 			HttpServletRequest request) {
 		var sort = CommentSort.fromQuery(request.getParameterValues("sort"));
-		boolean includeSummary = includeSummary(request.getParameterValues("includeSummary"));
+		boolean includeSummary = includeOption(request.getParameterValues("includeSummary"));
+        boolean includeTasteTags = includeOption(request.getParameterValues("includeTasteTags"));
 		var comments = commentService
-				.getCommentsPage(productId, PageCriteria.of(page, size, 10), sort, includeSummary).map(ResponseMapper::comment);
+				.getCommentsPage(productId, PageCriteria.of(page, size, 10), sort, includeSummary, includeTasteTags)
+                .map(value -> includeTasteTags
+                    ? new CommentResponse(value.getId(), value.getUserId(), value.getProductId(), value.getRating(), value.getComment(), value.getTasteTags())
+                    : ResponseMapper.comment(value));
 		return ResponseEntity.ok(ApiResponse.ok(comments));
 	}
 
-	private static boolean includeSummary(String[] values) {
+	private static boolean includeOption(String[] values) {
 		if (values == null) return false;
 		if (values.length == 1 && (values[0].equals("true") || values[0].equals("false"))) {
 			return values[0].equals("true");
 		}
-		throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid review summary option");
+		throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid review include option");
 	}
 
 	@PostMapping("/comments")
@@ -78,6 +83,7 @@ public class CommentRestController {
 		comment.setProductId(request.productId());
 		comment.setRating(request.rating());
 		comment.setComment(request.comment());
+        comment.setTasteTags(request.tasteTags());
 		if (commentService.addComment(comment) <= 0) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Comment could not be created");
 		}
@@ -92,6 +98,7 @@ public class CommentRestController {
 		accessGuard.requireSelfOrAdmin(session, existing.getUserId());
 		existing.setRating(request.rating());
 		existing.setComment(request.comment());
+        existing.setTasteTags(request.tasteTags());
 		if (commentService.updateComment(existing) <= 0) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Comment not found");
 		}

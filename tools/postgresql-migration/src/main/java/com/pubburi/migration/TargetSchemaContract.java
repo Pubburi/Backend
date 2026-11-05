@@ -11,6 +11,11 @@ final class TargetSchemaContract {
         Set<String> actual=new HashSet<>();
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT table_name FROM information_schema.tables WHERE table_schema='pubburi' AND table_type='BASE TABLE'")) {while(r.next())actual.add(r.getString(1));}
         Set<String> expected=new HashSet<>(SourceContract.TABLES.stream().map(SourceContract.Table::name).toList());expected.add("flyway_schema_history");expected.add("migration_source_receipt");
+        boolean reviewTags;
+        // pg_class is not filtered by table SELECT grants; a hidden extension is never treated as absent.
+        try(var s=connection.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relname='t_comment_taste_tag')")) {r.next();reviewTags=r.getBoolean(1);}
+        if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
+        if(reviewTags) {expected.add("t_comment_taste_tag");emptyTasteTags(connection);}
         if(!actual.equals(expected)) throw new IllegalArgumentException("postgresql_import_schema_set_changed");
         if(!SchemaIndexContract.actual(connection).containsAll(SchemaIndexContract.expected())) throw new IllegalArgumentException("postgresql_import_indexes_changed");
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT c.collprovider,c.collisdeterministic,c.colllocale FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace WHERE n.nspname='pubburi' AND c.collname='pubburi_ci'")) {
@@ -58,7 +63,26 @@ final class TargetSchemaContract {
         }
         for(var table:SourceContract.TABLES) if(!String.join(",",table.primary()).equals(primary.get(table.name()))) throw new IllegalArgumentException("postgresql_import_primary_changed");
         for(var identity:IdentityReservations.IDENTITIES)sequence(connection,identity);
-        if(!foreign.equals(Set.copyOf(new String(SourceContract.resource("source-foreign-contract.tsv"),StandardCharsets.UTF_8).lines().toList()))) throw new IllegalArgumentException("postgresql_import_foreign_changed");
+        var expectedForeign=new HashSet<>(new String(SourceContract.resource("source-foreign-contract.tsv"),StandardCharsets.UTF_8).lines().toList());
+        if(reviewTags) {
+            if(!"comment_id,tag".equals(primary.get("t_comment_taste_tag"))) throw new IllegalArgumentException("postgresql_review_tag_shape_changed");
+            expectedForeign.add("t_comment_taste_tag\tcomment_id\tt_comment\tid\tCASCADE");
+        }
+        if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("postgresql_import_foreign_changed");
+    }
+    static void emptyTasteTags(Connection connection) throws SQLException {
+        try(var s=connection.createStatement()) {
+            // Base-table import locks prevent parent/child writes; verification retains its read-only RR snapshot.
+            s.execute("LOCK TABLE pubburi.t_comment_taste_tag IN ACCESS SHARE MODE");
+            try(var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.t_comment_taste_tag)")) {
+                if(!r.next() || r.getBoolean(1)) throw new IllegalArgumentException("postgresql_v1_review_tags_unsupported");
+            }
+            try(var r=s.executeQuery("SELECT column_name,data_type,is_nullable,character_maximum_length,collation_name,collation_schema FROM information_schema.columns WHERE table_schema='pubburi' AND table_name='t_comment_taste_tag' ORDER BY ordinal_position")) {
+                if(!r.next() || !"comment_id".equals(r.getString(1)) || !"integer".equals(r.getString(2)) || !"NO".equals(r.getString(3))
+                        || !r.next() || !"tag".equals(r.getString(1)) || !"character varying".equals(r.getString(2)) || !"NO".equals(r.getString(3)) || r.getInt(4)!=40 || !"C".equals(r.getString(5)) || !"pg_catalog".equals(r.getString(6)) || r.next())
+                    throw new IllegalArgumentException("postgresql_review_tag_shape_changed");
+            }
+        }
     }
     static void sequence(Connection connection,IdentityReservations.Identity identity) throws SQLException {
         try(var s=connection.prepareStatement("SELECT pg_get_serial_sequence(?,?),seqincrement,seqmin,seqmax,seqcache,seqcycle FROM pg_sequence WHERE seqrelid=?::regclass")) {

@@ -190,11 +190,12 @@ class JpaCommentIntegrationTests extends JpaAccountTestSupport {
         try {
             var owner = login(user, password); int id = request(owner, "POST", "/api/comments", review(product, 2.5f, "before")).body().path("data").path("id").intValue();
             var producer = state(sql, product); var start = new CountDownLatch(1);
-            var first = executor.submit(() -> { start.await(); return request(owner, "PUT", "/api/comments/" + id, Map.of("rating", 1.25, "comment", "first")); });
-            var second = executor.submit(() -> { start.await(); return request(admin, "PUT", "/api/comments/" + id, Map.of("rating", 4.75, "comment", "second")); });
+            var first = executor.submit(() -> { start.await(); return request(owner, "PUT", "/api/comments/" + id, Map.of("rating", 1.25, "comment", "first", "tasteTags", List.of("first"))); });
+            var second = executor.submit(() -> { start.await(); return request(admin, "PUT", "/api/comments/" + id, Map.of("rating", 4.75, "comment", "second", "tasteTags", List.of("second"))); });
             start.countDown(); assertEquals(200, first.get(12, TimeUnit.SECONDS).status()); assertEquals(200, second.get(12, TimeUnit.SECONDS).status());
             var row = comments.select(id); assertTrue(Set.of("1.25|first", "4.75|second").contains(row.getRating() + "|" + row.getComment()));
             assertEquals(user, row.getUserId()); assertEquals(product, row.getProductId());
+            assertEquals(List.of(row.getComment()), comments.selectTasteTags(List.of(id)).stream().map(x -> x.tag()).toList());
             var next = new CountDownLatch(1); var otherAdmin = loggedIn("ADMIN");
             var deleteOne = executor.submit(() -> { next.await(); return request(admin, "DELETE", "/api/comments/" + id, null).status(); });
             var deleteTwo = executor.submit(() -> { next.await(); return request(otherAdmin, "DELETE", "/api/comments/" + id, null).status(); });
@@ -221,9 +222,49 @@ class JpaCommentIntegrationTests extends JpaAccountTestSupport {
                 try { assertEquals("55P03", result.get(3, TimeUnit.SECONDS)); } catch (Exception error) { throw new IllegalStateException("owned comment FK experiment failed", error); }
                 return null;
             });
-            for (String denied : List.of("UPDATE pubburi.t_comment SET id=id WHERE false", "UPDATE pubburi.t_comment SET user_id=user_id WHERE false", "UPDATE pubburi.t_comment SET product_id=product_id WHERE false", "TRUNCATE pubburi.t_comment", "SELECT setval('pubburi.t_comment_id_seq',1)")) {
+            for (String denied : List.of("UPDATE pubburi.t_comment SET id=id WHERE false", "UPDATE pubburi.t_comment SET user_id=user_id WHERE false", "UPDATE pubburi.t_comment SET product_id=product_id WHERE false", "TRUNCATE pubburi.t_comment", "UPDATE pubburi.t_comment_taste_tag SET tag=tag WHERE false", "TRUNCATE pubburi.t_comment_taste_tag", "SELECT setval('pubburi.t_comment_id_seq',1)")) {
                 var error = assertThrows(DataAccessException.class, () -> runtime.execute(denied)); assertEquals("42501", ((SQLException) error.getMostSpecificCause()).getSQLState());
             }
         } finally { executor.shutdownNow(); assertTrue(executor.awaitTermination(3, TimeUnit.SECONDS)); clean(sql, user, product, List.of()); }
     }
+    @Test void memberTasteOpinionsAreOptionalNormalizedAtomicAndOwnerScoped() throws Exception {
+        var sql=control();var admin=loggedIn("ADMIN");String user=join(),other=join();int product=create(admin,ownName());
+        try {
+            var owner=login(user,password);var stranger=login(other,password);
+            var payload=new HashMap<String,Object>(review(product,3.75f,"tagged"));payload.put("tasteTags",List.of(" SWEET ","과일,향\n산미","Ａ","İ"));
+            var created=request(owner,"POST","/api/comments",payload);assertEquals(201,created.status(),created.body().toString());var item=created.body().path("data");int id=item.path("id").intValue();assertEquals(5,item.size());
+            List<String> expected=List.of("i\u0307","sweet","과일,향\n산미","ａ");
+            var page=request(client(),"GET",path(product)+"?includeTasteTags=true&includeSummary=true&size=1&sort=rating_desc",null).body().path("data");
+            assertEquals(7,page.size());assertEquals(expected,new com.fasterxml.jackson.databind.ObjectMapper().convertValue(page.path("items").get(0).path("tasteTags"),List.class));assertEquals(3.75f,page.path("items").get(0).path("rating").floatValue());
+            for(String option:List.of("","?includeTasteTags=false")) assertEquals(5,request(client(),"GET",path(product)+option,null).body().path("data").path("items").get(0).size());
+            assertEquals(5,request(admin,"GET","/api/admin/comments?includeTasteTags=true&size=1",null).body().path("data").path("items").get(0).size());
+            for(Object invalid:Arrays.asList(null,List.of(1),List.of("SWEET","sweet"),List.of(" "),List.of("x".repeat(41)),List.of("nul\u0000tag"),Collections.nCopies(21,"x"))) {
+                var change=new HashMap<String,Object>();change.put("rating",1.25);change.put("comment","must not change");change.put("tasteTags",invalid);
+                assertEquals(400,request(owner,"PUT","/api/comments/"+id,change).status());
+            }
+            assertEquals("tagged",comments.select(id).getComment());assertEquals(expected,comments.selectTasteTags(List.of(id)).stream().map(x->x.tag()).sorted().toList());
+            assertEquals(403,request(stranger,"PUT","/api/comments/"+id,Map.of("rating",1.25,"comment","forbidden","tasteTags",List.of("forbidden"))).status());
+            assertEquals(200,request(owner,"PUT","/api/comments/"+id,Map.of("rating",1.25,"comment","omission preserves")).status());assertEquals(expected,comments.selectTasteTags(List.of(id)).stream().map(x->x.tag()).sorted().toList());
+            assertEquals(200,request(admin,"PUT","/api/comments/"+id,Map.of("rating",2.75,"comment","moderated","tasteTags",List.of(" DRY "))).status());assertEquals(List.of("dry"),comments.selectTasteTags(List.of(id)).stream().map(x->x.tag()).toList());
+            assertEquals(200,request(owner,"PUT","/api/comments/"+id,Map.of("rating",2.75,"comment","clear","tasteTags",List.of())).status());assertTrue(comments.selectTasteTags(List.of(id)).isEmpty());
+            assertEquals(200,request(owner,"PUT","/api/comments/"+id,Map.of("rating",2.75,"comment","cascade","tasteTags",List.of("단맛"))).status());
+            assertEquals(200,request(admin,"DELETE","/api/admin/users/"+user,null).status());assertTrue(comments.selectTasteTags(List.of(id)).isEmpty());
+            var next=request(stranger,"POST","/api/comments",Map.of("productId",product,"rating",1.25,"comment","parent","tasteTags",List.of("산미")));int nextId=next.body().path("data").path("id").intValue();
+            assertEquals(200,request(admin,"DELETE","/api/admin/products/"+product,null).status());assertTrue(comments.selectTasteTags(List.of(nextId)).isEmpty());
+        } finally {clean(sql,user,product,List.of());clean(sql,other,null,List.of());}
+    }
+
+    @Test void committedTagReplacementBetweenPageAndBatchReadKeepsOneSnapshot() throws Exception {
+        var sql=control();var admin=loggedIn("ADMIN");String user=join();int product=create(admin,ownName());
+        var executor=Executors.newSingleThreadExecutor();var read=new CountDownLatch(1);var written=new CountDownLatch(1);
+        try {
+            var owner=login(user,password);int id=request(owner,"POST","/api/comments",Map.of("productId",product,"rating",1.25,"comment","before","tasteTags",List.of("before"))).body().path("data").path("id").intValue();
+            doAnswer(call->{Object rows=call.callRealMethod();read.countDown();assertTrue(written.await(5,TimeUnit.SECONDS));return rows;}).when(comments).selectByProductIdPaged(eq(product),anyInt(),anyInt(),any());
+            var writer=executor.submit(()->{try {assertTrue(read.await(5,TimeUnit.SECONDS));assertEquals(200,request(owner,"PUT","/api/comments/"+id,Map.of("rating",4.75,"comment","after","tasteTags",List.of("after"))).status());}finally{written.countDown();}return true;});
+            var page=service.getCommentsPage(product,PageCriteria.of(1,10,10),CommentSort.LATEST,true,true);assertTrue(writer.get(8,TimeUnit.SECONDS));
+            assertEquals("before",page.items().get(0).getComment());assertEquals(List.of("before"),page.items().get(0).getTasteTags());assertEquals(0,new BigDecimal("1.25").compareTo(page.ratingSummary().average()));
+            assertEquals("after",sql.queryForObject("SELECT tag FROM pubburi.t_comment_taste_tag WHERE comment_id=?",String.class,id));
+        } finally {reset(comments);written.countDown();executor.shutdownNow();assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));clean(sql,user,product,List.of());}
+    }
+
 }

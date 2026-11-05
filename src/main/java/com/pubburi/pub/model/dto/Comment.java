@@ -6,6 +6,7 @@ public class Comment {
     private int productId;
     private float rating;
     private String comment;
+    private java.util.List<String> tasteTags;
 
 	public Comment(int id, String userId, int productId, float rating, String comment) {
 		super();
@@ -57,6 +58,9 @@ public class Comment {
 	public void setComment(String comment) {
 		this.comment = comment;
 	}
+
+	public java.util.List<String> getTasteTags() { return tasteTags; }
+	public void setTasteTags(java.util.List<String> value) { tasteTags = value; }
 
 	@Override
 	public String toString() {

@@ -111,14 +111,28 @@ sourceName은 알려진 값/빈 배열 검수에도 필요하지만 권리 승�
 공개 상품 후기 GET은 `sort=latest|rating_desc|rating_asc`를 받는다. 생략/latest는 기존 ID 내림차순,
 평점순의 동점은 ID 내림차순이다. `includeSummary=true`일 때만 기존 여섯 페이지 필드에
 `ratingSummary:{count,average}`를 더한다. 생략/false는 기존 여섯 필드와 후기 다섯 필드를 그대로
-유지한다. 두 옵션은 한 번만 허용하며 잘못된 값·중복은400이다. 관리자 목록에는 적용하지 않는다.
+유지한다. 각 옵션은 한 번만 허용하며 잘못된 값·중복은400이다. 관리자 목록에는 적용하지 않는다.
 
 count는 해당 상품의 전체 후기 수(total)이며 average도 현재 페이지가 아닌 전체 저장 FLOAT/REAL의
 SQL AVG다. 유한 집계를 BigDecimal로 변환해 소수 둘째자리 HALF_UP으로 표시하고 저장된 후기
 값을 변경·범위 필터·clamp하지 않는다. 부동소수 저장 오차가 반올림 경계에 영향을 줄 수 있다.
 0건일 때만 average=null이고, 비어 있지 않은 집계의 비유한/잘못된 값은500이다. items/total/평균은
 하나의 read-only REPEATABLE READ snapshot에서 읽는다. page/size 정규화·없는 상품의 빈200은
-보존하고 int OFFSET을 넘는 페이지는400으로 거절한다. 맛 태그·구매확인·전체 F04 인수는 후속이다.
+보존하고 int OFFSET을 넘는 페이지는400으로 거절한다. 선택 `includeTasteTags=true`는 각 후기 item에 정규화된 `tasteTags:string[]`만 더하며
+생략/false·관리자·쓰기 응답의 기존 다섯 후기 필드는 유지한다. 잘못된 값·중복 옵션은400이다.
+태그는 현재 페이지 ID들을 한 번에 읽어 같은 RR snapshot에서 조합한다. 태그가 없으면[]이다.
+
+POST/PUT은 선택 `tasteTags` 배열(최대20개, 각 정규화 후40 UTF-16)을 받는다. Java17 strip,
+Locale.ROOT 소문자, 정렬을 적용하고 공백·중복·null·비문자·U+0000·초과 입력은400이다. 쉼표/개행은
+구분자가 아닌 한 태그 원문이다. POST 생략은[], PUT 생략은 기존 태그 보존, 명시[]는 비우기다.
+태그·평점·본문은 한 TX이며 본인/관리자 권한과 상품/회원 삭제 cascade를 유지한다. 회원 의견을
+검수 상품 특성·추천 정답·구매확인으로 사용하지 않는다. 전체 F04 인수는 별도 연동 검증을 따른다.
+
+기존 MySQL은 백업·쓰기 중단 후 [009 additive SQL](migrations/009-comment-taste-tags.sql)을
+한 번 적용한다. 새 폐기 DB bootstrap에는 같은 스키마가 포함된다. PG는 기존 V1/V2를 보존한
+Flyway V3다. v1 이관의16표/과거 receipt는 유지하며 새 태그 테이블의 shape/빈 상태/읽기 권한이
+확인되지 않거나 태그가 있으면 쓰기 전에 거절한다. 태그를 포함하는 v2 snapshot/import는 DB06
+필수 후속이고11/22 목표를 유지한다([결정](https://github.com/Pubburi/Backend/discussions/48)).
 
 ## Orders
 

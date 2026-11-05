@@ -19,6 +19,10 @@ public interface CommentDao {
 	List<Comment> selectByProductIdPaged(@Param("productId") int productId, @Param("limit") int limit,
 			@Param("offset") int offset, @Param("sort") CommentSort sort);
 
+    List<com.pubburi.pub.model.dto.CommentTasteTag> selectTasteTags(@Param("commentIds") List<Integer> commentIds);
+    int deleteTasteTags(int commentId);
+    int insertTasteTags(@Param("commentId") int commentId, @Param("tags") List<String> tags);
+
 	int countByProductId(int productId);
 
 	Double averageRatingByProductId(int productId);

@@ -100,4 +100,21 @@ class CommentPageContractTests {
             mvc.perform(get("/api/products/7/comments?includeSummary=true")).andExpect(status().isInternalServerError());
         }
     }
+    @Test void tasteTagsAreOptInBatchOpinionsAndKeepSummaryAndDefaultWire() throws Exception {
+        page(); when(dao.averageRatingByProductId(7)).thenReturn(3.75);
+        when(dao.selectTasteTags(List.of(12))).thenReturn(List.of(
+            new com.pubburi.pub.model.dto.CommentTasteTag(12, "단맛"),
+            new com.pubburi.pub.model.dto.CommentTasteTag(12, "a,b\nc")));
+        var tagged = data("?includeTasteTags=true&includeSummary=true");
+        assertThat(tagged.size()).isEqualTo(7);
+        assertThat(fields(tagged.path("items").get(0))).containsExactlyInAnyOrder("id", "userId", "productId", "rating", "comment", "tasteTags");
+        assertThat(tagged.path("items").get(0).path("tasteTags").toString()).isEqualTo("[\"a,b\\nc\",\"단맛\"]");
+        verify(dao).selectTasteTags(List.of(12));
+        for (String query : List.of("", "?includeTasteTags=false"))
+            assertThat(fields(data(query).path("items").get(0))).hasSize(5);
+        mvc.perform(get("/api/products/7/comments").param("includeTasteTags", "true", "false")).andExpect(status().isBadRequest());
+        for (String value : List.of("", "TRUE", "1", "null"))
+            mvc.perform(get("/api/products/7/comments").param("includeTasteTags", value)).andExpect(status().isBadRequest());
+    }
+
 }

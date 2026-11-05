@@ -7,5 +7,7 @@ import jakarta.validation.constraints.Size;
 
 public record CommentUpdateRequest(
 		@DecimalMin("0.5") @DecimalMax("5.0") float rating,
-		@NotBlank @Size(max = 200) String comment) {
+		@NotBlank @Size(max = 200) String comment,
+        @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = ReviewTasteTagsDeserializer.class)
+        java.util.List<String> tasteTags) {
 }

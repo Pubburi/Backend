@@ -101,4 +101,25 @@ class SourceIntegrationTests {
         for(int i=0;i<16;i++)assertTrue(baseline.path("tables").get(i).path("sha256").equals(restored.path("tables").get(i).path("sha256")),"business rows must be restored exactly");
         assertFalse(baseline.path("sourceNext").equals(restored.path("sourceNext")),"rolled-back allocation must remain reserved");
     }
+    @Test void v1RefusesOpinionsAndUnknownExtensionShapeWithoutChangingSourceRows() throws Exception {
+        var settings=SourceSettings.from(env);
+        try(Connection c=control();var sql=c.createStatement()) {
+            int id;try(var rows=sql.executeQuery("SELECT id FROM t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
+            sql.executeUpdate("INSERT INTO t_comment_taste_tag VALUES("+id+",'authored source opinion')");
+            try {var error=assertThrows(IllegalArgumentException.class,()->{try(var ignored=new SourceSession(settings)) {}});assertEquals("source_v1_review_tags_unsupported",error.getMessage());}
+            finally {sql.executeUpdate("DELETE FROM t_comment_taste_tag WHERE comment_id="+id+" AND tag='authored source opinion'");}
+            sql.execute("ALTER TABLE t_comment_taste_tag MODIFY tag VARCHAR(41) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL");
+            try {var error=assertThrows(IllegalArgumentException.class,()->{try(var ignored=new SourceSession(settings)) {}});assertEquals("source_review_tag_shape_changed",error.getMessage());}
+            finally {sql.execute("ALTER TABLE t_comment_taste_tag MODIFY tag VARCHAR(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL");}
+            // An opinion committed after the RR snapshot is also not silently dropped by v1.
+            Path output=output("late-opinion");
+            try(SourceSession snapshot=new SourceSession(settings)) {
+                sql.executeUpdate("INSERT INTO t_comment_taste_tag VALUES("+id+",'authored late opinion')");
+                assertThrows(IllegalArgumentException.class,()->SourceArtifact.export(snapshot,output));
+                assertFalse(SourceContract.parse(Files.readAllBytes(output.resolve("receipt.json"))).path("accepted").booleanValue());
+            } finally {sql.executeUpdate("DELETE FROM t_comment_taste_tag WHERE comment_id="+id+" AND tag='authored late opinion'");}
+        }
+        try(SourceSession restored=new SourceSession(settings)){assertEquals(16,restored.counts.size());}
+    }
+
 }
