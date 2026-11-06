@@ -2,6 +2,8 @@ package com.pubburi.rehearsal;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.pubburi.pub.controller.auth.FeedbackOwner;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -39,7 +41,7 @@ class JpaRecommendationFeedbackIntegrationTests extends JpaAccountTestSupport {
             throws Exception {
         var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + PATH + product))
             .timeout(Duration.ofSeconds(8)).header("Accept", "application/json");
-        if (header != null) builder.header(RecommendationFeedbackController.OWNER_HEADER, header);
+        if (header != null) builder.header(FeedbackOwner.HEADER, header);
         if (body != null) builder.header("Content-Type", "application/json");
         builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
         var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());

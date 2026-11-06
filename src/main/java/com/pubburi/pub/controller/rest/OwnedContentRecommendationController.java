@@ -6,11 +6,13 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import com.pubburi.pub.controller.api.ApiResponse;
 import com.pubburi.pub.controller.auth.AccessGuard;
+import com.pubburi.pub.controller.auth.FeedbackOwner;
 import com.pubburi.pub.controller.request.ContentRecommendationRequest;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse;
 import com.pubburi.pub.model.service.OwnedContentRecommendationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import jakarta.servlet.http.*;
 import jakarta.validation.Valid;
 
@@ -21,11 +23,15 @@ public class OwnedContentRecommendationController {
     @ModelAttribute public void privateResponse(HttpServletResponse response){response.setHeader("Cache-Control","private, no-store");response.setHeader("Vary","Cookie");}
     @PostMapping(value="/api/users/me/recommendations/content",consumes=MediaType.APPLICATION_JSON_VALUE,produces=MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary="Use the current account's stored preferences with only an explicitly checked DEMO catalog",
-        description="Optional includeActivity uses current own favorites and newest high-rated reviews only when stored categories are unknown; no owner, profile or catalog override. Current RR preferences and mapped product/features are checked before and after bounded B1 I/O. Changed inputs409, expired sessions401. REVIEWED_DEMO is container DEMO; explicit opt-in REVIEWED_FAMILY_BROWSE_DEMO is browse-only with unknown volume. Neither approves a service SKU or rights. UNAVAILABLE has null result and empty products; no weaker local recommendation. This read performs no business write.")
+        description="Optional includeActivity uses current own favorites and newest high-rated reviews only when stored categories are unknown; no owner, profile or catalog override. Current RR preferences and mapped product/features are checked before and after bounded B1 I/O. Changed inputs409, expired sessions401. REVIEWED_DEMO is container DEMO; explicit opt-in REVIEWED_FAMILY_BROWSE_DEMO is browse-only with unknown volume. Neither approves a service SKU or rights. UNAVAILABLE has null result and empty products; no weaker local recommendation. This read performs no business write. The optional feedback owner header applies stored choices only to the approved PostgreSQL container-DEMO.",
+        parameters = @Parameter(name=FeedbackOwner.HEADER, in=ParameterIn.HEADER, description=FeedbackOwner.DESCRIPTION))
     public ApiResponse<ContentRecommendationResponse> recommend(@Valid @RequestBody ContentRecommendationRequest input,
-            @Parameter(hidden=true) @RequestParam Map<String,String> query,HttpSession session){
+            @Parameter(hidden=true) @RequestParam Map<String,String> query,HttpServletRequest request,HttpSession session){
         var observed=guard.requireLogin(session);if(!query.isEmpty())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Query parameters are not supported");
-        var result=service.recommend(observed.id(),observed.authEpoch(),input.getLimit(),input.getIncludeActivity());var current=guard.requireLogin(session);
+        var result=FeedbackOwner.confirmed(request, observed)
+            ? service.recommend(observed.id(),observed.authEpoch(),input.getLimit(),input.getIncludeActivity(),true)
+            : service.recommend(observed.id(),observed.authEpoch(),input.getLimit(),input.getIncludeActivity());
+        var current=guard.requireLogin(session);
         if(!Objects.equals(observed.id(),current.id()) || !Objects.equals(observed.authEpoch(),current.authEpoch()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Account session is no longer current");
         return ApiResponse.ok(result);
     }

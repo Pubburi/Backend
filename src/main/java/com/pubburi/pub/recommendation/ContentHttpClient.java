@@ -14,22 +14,39 @@ import com.pubburi.pub.controller.response.ContentRecommendationResponse.Activit
 /** Fixed B1 routes and bounded transport. Does not fit, score, retry or forward credentials. */
 public final class ContentHttpClient implements ContentGateway, SimilarProductGateway {
     public static final int MAX_REQUEST_BYTES=524288,MAX_RESPONSE_BYTES=262144;
-    private final HttpClient client;private final URI endpoint, similarEndpoint;private final Duration deadline;private final ObjectMapper mapper;
+    private final HttpClient client;private final URI endpoint, similarEndpoint, feedbackEndpoint;private final Duration deadline;private final ObjectMapper mapper;
     public ContentHttpClient(URI origin,Duration connectTimeout,Duration deadline,ObjectMapper mapper){
         if(!Set.of("http","https").contains(origin.getScheme()) || origin.getHost()==null || origin.getUserInfo()!=null || origin.getQuery()!=null || origin.getFragment()!=null || !(origin.getPath().isEmpty() || origin.getPath().equals("/")) || connectTimeout.isNegative() || connectTimeout.isZero() || deadline.isNegative() || deadline.isZero())throw new IllegalArgumentException("Recommendation origin and positive timeouts are required");
-        client=HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER).build();endpoint=origin.resolve("/v1/recommendations/content");similarEndpoint=origin.resolve("/v1/recommendations/similar");this.deadline=deadline;
+        client=HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER).build();endpoint=origin.resolve("/v1/recommendations/content");similarEndpoint=origin.resolve("/v1/recommendations/similar");feedbackEndpoint=origin.resolve("/v1/recommendations/feedback");this.deadline=deadline;
         this.mapper=mapper.copy().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.mapper.getFactory().setStreamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(20).maxStringLength(5000).maxNameLength(128).maxDocumentLength(MAX_RESPONSE_BYTES).build());
     }
     @Override public Optional<JsonNode> recommend(JsonNode catalog,UserPreferencesResponse preferences,int limit,ActivityEvidence activity){
-        Map<String, Object> fields = Map.of("catalog", catalog, "preferences", preferences,
-            "constraints", Map.of(), "limit", limit, "include_explanations", true);
+        return post(endpoint, recommendationFields(catalog, preferences, limit, activity));
+    }
+
+    @Override public Optional<JsonNode> feedback(JsonNode catalog, UserPreferencesResponse preferences, int limit,
+            ActivityEvidence activity, FeedbackSignals signals) {
+        if (signals.isEmpty() || !signals.withinProviderLimit()) return Optional.empty();
+        var fields = recommendationFields(catalog, preferences, limit, activity);
+        fields.put("feedback", Map.of("positive_product_ids", signals.matched(),
+            "not_interested_product_ids", signals.notInterested()));
+        return post(feedbackEndpoint, fields);
+    }
+
+    private Map<String, Object> recommendationFields(JsonNode catalog, UserPreferencesResponse preferences,
+            int limit, ActivityEvidence activity) {
+        var fields = new LinkedHashMap<String, Object>();
+        fields.put("catalog", catalog);
+        fields.put("preferences", preferences);
+        fields.put("constraints", Map.of());
+        fields.put("limit", limit);
+        fields.put("include_explanations", true);
         if (activity != null) {
-            fields = new LinkedHashMap<>(fields);
             fields.put("activity_categories", Map.of("favorite_categories", activity.favoriteCategories(),
                 "highly_rated_categories", activity.highlyRatedCategories()));
         }
-        return post(endpoint, fields);
+        return fields;
     }
 
     @Override public Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit) {

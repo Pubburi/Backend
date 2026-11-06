@@ -132,6 +132,90 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         }
     }
 
+    @Test void storedNegativeIsOwnedAndScopedAndNeverRetriedWithoutItAfterProviderFailureOrConcurrentClear() throws Exception {
+        try (var f = new Fixture()) {
+            int excluded = f.ids.get(0), retained = f.ids.get(1);
+            String item = "/api/users/me/recommendations/feedback/" + excluded;
+            var owner = Map.of("X-Pubburi-Feedback-Owner", f.user);
+            String other = join();
+            var executor = Executors.newSingleThreadExecutor();
+            try {
+                var otherSession = login(other, password);
+                assertEquals(200, request(f.owner, "PUT", item, Map.of("feedback", "NOT_INTERESTED"), owner).status());
+                assertEquals(401, request(otherSession, "POST", PATH, Map.of(), owner).status());
+                assertEquals(0, remote.calls.get());
+                var legacy = request(f.owner, "POST", PATH, Map.of());
+                assertEquals(2, legacy.body().at("/data/products").size());
+                assertFalse(remote.last.get().has("feedback"));
+                var separate = request(otherSession, "POST", PATH, Map.of(), Map.of("X-Pubburi-Feedback-Owner", other));
+                assertEquals(2, separate.body().at("/data/products").size());
+                assertFalse(remote.last.get().has("feedback"));
+                f.bind(CatalogScope.REVIEWED_FAMILY_BROWSE_DEMO);
+                var family = request(f.owner, "POST", PATH, Map.of(), owner);
+                assertEquals("REVIEWED_FAMILY_BROWSE_DEMO", family.body().at("/data/catalogScope").textValue());
+                assertFalse(remote.last.get().has("feedback"));
+                f.bind(CatalogScope.REVIEWED_DEMO);
+
+                remote.handler.set((exchange, body) -> remote.reply(exchange, 200, excludedResult(body)));
+                var result = request(f.owner, "POST", PATH, Map.of(), owner);
+                assertEquals(200, result.status());
+                assertEquals(List.of(retained), result.body().at("/data/products").findValues("id").stream().map(JsonNode::intValue).toList());
+                assertEquals(json.valueToTree(Map.of("rankingMode", "profile_fallback",
+                    "excludedNotInterestedCount", 1, "positiveReferences", List.of())), result.body().at("/data/feedbackEvidence"));
+                assertEquals(json.valueToTree(Map.of("positive_product_ids", List.of(), "not_interested_product_ids", List.of(excluded))),
+                    remote.last.get().path("feedback"));
+                assertFalse(remote.last.get().toString().contains(f.user));
+                assertEquals(Boolean.FALSE, observed.inside.get());
+
+                int calls = remote.calls.get();
+                remote.handler.set((exchange, body) -> remote.reply(exchange, 503, "{}"));
+                var failed = request(f.owner, "POST", PATH, Map.of(), owner);
+                assertEquals("UNAVAILABLE", failed.body().at("/data/source").textValue());
+                assertEquals(0, failed.body().at("/data/products").size());
+                assertEquals(calls + 1, remote.calls.get());
+
+                var entered = new CountDownLatch(1);
+                var release = new CountDownLatch(1);
+                try {
+                    remote.handler.set((exchange, body) -> {
+                        entered.countDown();
+                        assertTrue(release.await(4, TimeUnit.SECONDS));
+                        remote.reply(exchange, 200, excludedResult(body));
+                    });
+                    var waiting = executor.submit(() -> request(f.owner, "POST", PATH, Map.of(), owner));
+                    assertTrue(entered.await(3, TimeUnit.SECONDS));
+                    assertEquals(200, request(login(f.user, password), "DELETE", item, null, owner).status());
+                    release.countDown();
+                    assertEquals(409, waiting.get(6, TimeUnit.SECONDS).status());
+                } finally {
+                    release.countDown();
+                }
+            } finally {
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(3, TimeUnit.SECONDS));
+                clean(control(), other, null, List.of());
+            }
+        }
+    }
+
+    private static ObjectNode excludedResult(JsonNode request) {
+        var root = zero(request);
+        var catalog = request.path("catalog");
+        root.withArray("items").remove(0);
+        root.put("eligible_count", 1);
+        root.put("feedback_algorithm", "r05-max-explicit-feedback-v1");
+        root.put("feedback_group_policy", "exclude_all_known_feedback_groups");
+        root.put("ranking_mode", "profile_fallback");
+        root.putArray("positive_references");
+        root.putArray("not_interested_references").addObject().put("state", "available")
+            .setAll(Map.of("product_id", catalog.get(0).get("product_id"), "sku_group", catalog.get(0).get("sku_group")));
+        root.put("evaluated_positive_count", 0).put("informative_positive_count", 0)
+            .put("excluded_not_interested_count", 1).put("excluded_positive_group_count", 0);
+        root.putArray("matches").addObject().put("source", "baseline").putNull("positive_product_id")
+            .set("product_id", catalog.get(1).get("product_id"));
+        return root;
+    }
+
     @Test void unavailableCatalogRowsAndLateActivityChangesDoNotReturnStaleEvidence() throws Exception {
         try (var f = new Fixture()) {
             int beer = f.ids.get(0), spirit = f.ids.get(1);
@@ -328,6 +412,11 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             inside.set(TransactionSynchronizationManager.isActualTransactionActive());
             return delegate.recommend(c, p, l, activity);
         }
+        @Override public Optional<JsonNode> feedback(JsonNode c, UserPreferencesResponse p, int l, ActivityEvidence activity,
+                FeedbackSignals signals) {
+            inside.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return delegate.feedback(c, p, l, activity, signals);
+        }
         @Override public Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit) {
             inside.set(TransactionSynchronizationManager.isActualTransactionActive());
             return delegate.similar(catalog, referenceId, limit);
@@ -338,7 +427,7 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
     @FunctionalInterface interface Handler {void handle(HttpExchange exchange,JsonNode body)throws Exception;}
     static class Remote implements AutoCloseable {
         final HttpServer server;final ExecutorService executor=Executors.newCachedThreadPool();final AtomicReference<Handler> handler=new AtomicReference<>();final AtomicInteger calls=new AtomicInteger();final AtomicReference<JsonNode> last=new AtomicReference<>();final AtomicReference<String> cookie=new AtomicReference<>(),authorization=new AtomicReference<>();
-        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_id")?"/v1/recommendations/similar":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
+        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_id")?"/v1/recommendations/similar":body.has("feedback")?"/v1/recommendations/feedback":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
         String origin(){return "http://127.0.0.1:"+server.getAddress().getPort();}void reply(HttpExchange exchange,int status,JsonNode body)throws Exception{reply(exchange,status,new ObjectMapper().writeValueAsString(body));}void reply(HttpExchange exchange,int status,String body)throws Exception{byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(status,bytes.length);try(var output=exchange.getResponseBody()){output.write(bytes);}}@Override public void close(){server.stop(0);executor.shutdownNow();try{assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));}catch(InterruptedException error){Thread.currentThread().interrupt();throw new IllegalStateException(error);}}
     }
 }

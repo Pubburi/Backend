@@ -12,12 +12,18 @@ import com.pubburi.pub.model.dto.UserPreferences;
 import com.pubburi.pub.model.dao.*;
 import com.pubburi.pub.recommendation.ContentCatalogSource.Catalog;
 import com.pubburi.pub.recommendation.ContentWire;
+import com.pubburi.pub.recommendation.FeedbackSignals;
 
 /** One canonical RR snapshot, with fixed-count scalar batch reads for mapped products. */
 @Service
 public class OwnedContentSnapshotService {
     public record Facts(JsonNode product,JsonNode features,ProductResponse currentProduct) { }
-    public record Snapshot(UserPreferencesResponse preferences,Map<Integer,Facts> products, ActivityEvidence activity) { }
+    public record Snapshot(UserPreferencesResponse preferences, Map<Integer, Facts> products,
+            ActivityEvidence activity, FeedbackSignals feedback) {
+        public Snapshot(UserPreferencesResponse preferences, Map<Integer, Facts> products, ActivityEvidence activity) {
+            this(preferences, products, activity, FeedbackSignals.EMPTY);
+        }
+    }
     private record ProductProjection(Map<Integer, ProductResponse> current, Map<Integer, Facts> facts) { }
     private final UserPreferenceService preferences;
     private final ProductDao products;
@@ -25,17 +31,24 @@ public class OwnedContentSnapshotService {
     private final FavoriteDao favorites;
     private final CommentDao comments;
     private final ObjectMapper mapper;
+    private final Optional<FeedbackSignals.Reader> feedback;
     public OwnedContentSnapshotService(UserPreferenceService preferences, ProductDao products, ProductFeatureDao features,
-            FavoriteDao favorites, CommentDao comments, ObjectMapper mapper) {
+            FavoriteDao favorites, CommentDao comments, ObjectMapper mapper, Optional<FeedbackSignals.Reader> feedback) {
         this.preferences = preferences;
         this.products = products;
         this.features = features;
         this.favorites = favorites;
         this.comments = comments;
         this.mapper = mapper;
+        this.feedback = feedback;
     }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Snapshot read(String id,String epoch,List<Integer> ids, List<Integer> activityIds){
+        return read(id, epoch, ids, activityIds, false);
+    }
+
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Snapshot read(String id,String epoch,List<Integer> ids, List<Integer> activityIds, boolean includeFeedback){
         var owned=preferences.getOwned(id,epoch);
         if(owned==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Account session is no longer current");
         var snapshot = productFacts(ids);
@@ -46,7 +59,10 @@ public class OwnedContentSnapshotService {
             activity = ActivityEvidence.of(categories(favoriteIds, snapshot.current()),
                 categories(ratedIds, snapshot.current()));
         }
-        return new Snapshot(UserPreferencesResponse.from(owned), snapshot.facts(), activity);
+        var signals = includeFeedback && !ids.isEmpty()
+            ? feedback.map(reader -> reader.readFeedback(id, ids)).orElse(FeedbackSignals.EMPTY)
+            : FeedbackSignals.EMPTY;
+        return new Snapshot(UserPreferencesResponse.from(owned), snapshot.facts(), activity, signals);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

@@ -21,6 +21,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Input"}}}},
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}}}
         paths["/api/users/me/recommendations/content"] = {"post": {
+            "parameters": [{"name": "X-Pubburi-Feedback-Owner", "in": "header"}],
             "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentInput"}}}},
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentEnvelope"}}}}}}}
         paths["/api/products/{id}/similar"] = {"get": {
@@ -30,7 +31,9 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         return {"paths": paths, "components": {"schemas": {
             "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}, "includeActivity": {"type": "boolean", "default": False}}},
             "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
-            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]}, "result": {}, "products": {}, "activityEvidence": {"$ref": "#/components/schemas/ActivityEvidence"}}},
+            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]}, "result": {}, "products": {}, "activityEvidence": {"$ref": "#/components/schemas/ActivityEvidence"}, "feedbackEvidence": {"$ref": "#/components/schemas/FeedbackEvidence"}}},
+            "FeedbackEvidence": {"properties": {"rankingMode": {}, "excludedNotInterestedCount": {}, "positiveReferences": {"items": {"$ref": "#/components/schemas/PositiveReference"}}}},
+            "PositiveReference": {"properties": {"productId": {}, "name": {}}},
             "ActivityEvidence": {"properties": {key: {"type": "array", "items": {"type": "string"}}
                 for key in ("favoriteCategories", "highlyRatedCategories")}},
             "SimilarEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SimilarProductsResponse"}}},

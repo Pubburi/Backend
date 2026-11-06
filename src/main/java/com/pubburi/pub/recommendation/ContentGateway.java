@@ -7,4 +7,9 @@ import com.pubburi.pub.controller.response.ContentRecommendationResponse.Activit
 
 public interface ContentGateway {
     Optional<JsonNode> recommend(JsonNode catalog,UserPreferencesResponse preferences,int limit, ActivityEvidence activity);
+
+    default Optional<JsonNode> feedback(JsonNode catalog, UserPreferencesResponse preferences, int limit,
+            ActivityEvidence activity, FeedbackSignals signals) {
+        return Optional.empty();
+    }
 }

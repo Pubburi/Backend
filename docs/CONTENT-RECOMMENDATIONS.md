@@ -4,6 +4,20 @@
 기존 [B1 content](https://github.com/Pubburi/Recommendation/blob/main/docs/CONTENT-API.md)에 연결한다.
 요청 JSON은 `{"limit":4,"includeActivity":false}`다. 생략 시 limit은4, includeActivity는 false다.
 limit은 정수1–12, includeActivity는 JSON boolean이며 null·문자열·다른 필드·모든 query를400으로 거절한다.
+
+같은 요청에서 현재 본인 ID를 `encodeURIComponent`한 `X-Pubburi-Feedback-Owner` 헤더를 보내면
+명시 PostgreSQL의 검수 container-DEMO에서 저장한 맞음/관심 없음을 반영한다. 헤더는 계정을
+선택하지 않으며 현재 세션과 다르면401이다. 헤더가 없거나 지원하지 않는 스코프, 매핑된 선택이
+없는 경우에는 기존 취향 추천을 사용한다. 요청 본문에는 선택이나 참조 ID를 받지 않는다.
+
+저장 선택은 검수 매핑에 있는 본인 행만 조회하고 provider 호출 전후 같은 방식으로 비교한다.
+관심 없음은 같은 검수 상품군까지 제외하고, 맞음은 기준 상품군을 제외한 대안의 사실 비교에 쓴다.
+종류별21개 이상 또는 provider 응답 오류/중단에는 UNAVAILABLE이며 제외를 생략해 재시도하지 않는다.
+유효한 응답만 `feedbackEvidence`의 `rankingMode`, `excludedNotInterestedCount`,
+`positiveReferences`를 제공한다. 제외 수는 hard 조건 적용 전 검수 카탈로그의 해당 행 수다.
+`positiveReferences`에는 결과에 실제 사용된 기준 ID와 현재 이름만 포함한다. 기준 상품 설명의
+`comparison`은 `reference_product`와 실제 `product_id`다. 활동 근거는 profile로 선정된 결과에
+기여했을 때만 제공한다. 양수 근거가 부족한 경우 결과를 0점 후보로 채우지 않는다.
 계정/역할/epoch·profile/preferences·catalog/제외/host는 요청에서 선택하지 않는다.
 
 성공 ApiResponse data에는 source(PROVIDER/UNAVAILABLE), catalogScope(REVIEWED_DEMO / REVIEWED_FAMILY_BROWSE_DEMO),
