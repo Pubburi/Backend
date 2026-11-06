@@ -56,10 +56,21 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | PUT | `/api/users/me/password` | 본인 현재 암호 확인·새 hash/epoch·현재 세션 CAS 유지/다른 기존 세션 회수 |
 | POST | `/api/users/me/search-phrases` | 본인 현재 취향·별도 검색 선택만 전달·정확 조건/수명·장애 구분 |
 | POST | `/api/users/me/recommendations/content` | 본인 현재 취향·검수 container-DEMO B1/R04·현재 상품/특성·필수조건/수명 재확인 |
+| GET | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 상품별 추천 피드백 읽기 |
+| PUT | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 선택 저장·교체, 삭제된 상품404 |
+| DELETE | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 선택 해제, 이미 없으면 그대로 성공 |
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른여덟 개/마흔다섯 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른아홉 개/마흔여덟 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+
+추천 피드백은 Flyway V4와 최소 권한을 적용한 명시 PostgreSQL 런타임에서 쓴다. 세 메서드는
+세션에서 본인을 정하고 URL 인코딩한 현재 ID와 `X-Pubburi-Feedback-Owner`를 비교한다. 다른
+계정으로 로그인한 탭의 이전 요청과 만료 epoch는 401이다. 헤더는 계정을 선택하지 않는다.
+PUT은 `{"feedback":"MATCHED"}` 또는 `{"feedback":"NOT_INTERESTED"}`만 받는다. 응답
+`data`는 `{productId,feedback}`이고 미기록/해제 시 `feedback`은 null이다. 상품·계정 삭제 시
+피드백도 정리한다. MySQL 기준 런타임은 이 경로에서 404를 반환한다. 현재 선택은 저장만 하고
+추천 재순위·제외, 취향 설문, 찜과 평점에는 적용하지 않는다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과

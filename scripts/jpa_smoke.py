@@ -49,7 +49,7 @@ def defer_termination():
             elif handler!=signal.SIG_IGN:raise SystemExit(128+kind)
 
 
-def request_json(cookies,base,method,path,body,deadline):
+def request_json(cookies,base,method,path,body,deadline,*,headers=None):
     """Bound connect/write/headers/body by one request-owned absolute IO deadline."""
     origin=urlsplit(base)
     if origin.scheme!="http" or not ipaddress.ip_address(origin.hostname).is_loopback or origin.path or origin.query or origin.fragment or origin.username or origin.password or not origin.port:
@@ -59,7 +59,7 @@ def request_json(cookies,base,method,path,body,deadline):
     connection=_DeadlineConnection(origin.hostname,origin.port,budget)
     try:
         data=None if body is None else json.dumps(body,allow_nan=False).encode()
-        req=urllib.request.Request(base+path,data=data,method=method,headers={"Accept":"application/json",**({"Content-Type":"application/json"} if body is not None else {})})
+        req=urllib.request.Request(base+path,data=data,method=method,headers={"Accept":"application/json",**({"Content-Type":"application/json"} if body is not None else {}),**(headers or {})})
         cookies.add_cookie_header(req)
         connection.request(method,path,data,dict(req.header_items()))
         transport=connection.sock
@@ -112,9 +112,9 @@ def verify_openapi_scope(docs):
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content"}:raise ValueError("jpa_runtime_route_scope_changed")
+            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/feedback/{productId}"}:raise ValueError("jpa_runtime_route_scope_changed")
     operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-    if operations!=45:raise ValueError("jpa_runtime_operation_scope_changed")
+    if operations!=48:raise ValueError("jpa_runtime_operation_scope_changed")
     verify_content_recommendation_openapi(docs)
     verify_similar_products_openapi(docs)
     return operations
@@ -187,8 +187,8 @@ def run(environ):
             time.sleep(.1)
         raise ValueError("jpa_runtime_start_deadline")
     def client():return http.cookiejar.CookieJar()
-    def request(c,base,method,path,body=None):
-        return request_json(c,base,method,path,body,deadline)
+    def request(c,base,method,path,body=None,*,headers=None):
+        return request_json(c,base,method,path,body,deadline,headers=headers)
     def expect(status,expected):
         if status!=expected:raise ValueError("jpa_runtime_http_contract_failed")
     def login(c,base,role):
@@ -322,6 +322,10 @@ def run(environ):
             if present["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_favorite_put_changed")
         status,admin_favorite=request(admin,base,"GET",favorite_path);expect(status,200)
         if admin_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_owner_leaked")
+        feedback_path="/api/users/me/recommendations/feedback/"+str(product_id)
+        feedback_headers={"X-Pubburi-Feedback-Owner":environ["PUBBURI_JPA_USER_ID"]}
+        status,saved_feedback=request(ordinary,base,"PUT",feedback_path,{"feedback":"NOT_INTERESTED"},headers=feedback_headers);expect(status,200)
+        if saved_feedback["data"]!={"productId":product_id,"feedback":"NOT_INTERESTED"}:raise ValueError("jpa_runtime_feedback_write_changed")
         authored_comment={"productId":product_id,"rating":3.7,"comment":"Authored packaged review","tasteTags":[" SWEET ","dry,fruit\none"]}
         expect(request(anonymous,base,"POST","/api/comments",authored_comment)[0],401)
         status,created_comment=request(ordinary,base,"POST","/api/comments",authored_comment);expect(status,201);comment_id=created_comment["data"]["id"]
@@ -375,6 +379,8 @@ def run(environ):
         login(ordinary,base,"USER")
         status,persisted_favorite=request(ordinary,base,"GET",favorite_path);expect(status,200)
         if persisted_favorite["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_restart_lost_favorite")
+        status,persisted_feedback=request(ordinary,base,"GET",feedback_path,headers=feedback_headers);expect(status,200)
+        if persisted_feedback["data"]!=saved_feedback["data"]:raise ValueError("jpa_runtime_restart_lost_feedback")
         status,favorites=request(ordinary,base,"GET","/api/users/me/favorites");expect(status,200)
         if favorites["data"]["items"]!=[persisted_product["data"]] or set(favorites["data"]["items"][0])!=product_fields:raise ValueError("jpa_runtime_favorite_current_product_changed")
         for _ in range(2):expect(request(ordinary,base,"DELETE",favorite_path)[0],200)
@@ -394,6 +400,8 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/products/"+str(product_id))[0],200)
         expect(request(client(),base,"GET","/api/products/"+str(product_id))[0],404)
         expect(request(client(),base,"GET","/api/products/"+str(product_id)+"/features")[0],404)
+        status,deleted_feedback=request(ordinary,base,"GET",feedback_path,headers=feedback_headers);expect(status,200)
+        if deleted_feedback["data"]!={"productId":product_id,"feedback":None}:raise ValueError("jpa_runtime_feedback_parent_cascade_failed")
         status,deleted_favorite=request(ordinary,base,"GET",favorite_path);expect(status,200)
         if deleted_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_parent_cascade_failed")
         status,empty_favorites=request(ordinary,base,"GET","/api/users/me/favorites");expect(status,200)
@@ -418,7 +426,7 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":38,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":39,"registered_api_operations":operations,
             "public_default_current_fallback":True,
             "self_profile_password_and_session_rotation":True,
             "private_preferences_and_lifecycle":True,

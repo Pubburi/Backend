@@ -23,17 +23,19 @@ PRIMARY.update(t_comment_taste_tag='comment_id,tag', migration_source_receipt='s
                flyway_schema_history='installed_rank')
 SEQUENCES = ('t_product_id_seq', 't_order_o_id_seq', 't_order_detail_d_id_seq',
              't_comment_id_seq', 't_stamp_id_seq', 't_market_id_seq', 't_product_search_outbox_event_id_seq')
-# Canonical catalog of the checked-in Flyway V1-V3 on pinned PostgreSQL18.6.
-# A future migration must explicitly re-validate this recovery format, not adopt arbitrary source DDL.
+# Checked-in Flyway catalogs on pinned PostgreSQL18.6. Never adopt arbitrary source DDL.
 KNOWN_SCHEMA_SHA256 = 'a60465c97ad299d75429372f0fd66f4dd7e88a57cbe22f580d1491ca656c1f71'
+FEEDBACK_SCHEMA_SHA256 = '89b8239209751866014dcb687c85664628db1c92e9b36d1638972c8481334fdc'
+FEEDBACK_PRIMARY = dict(PRIMARY, t_user_recommendation_feedback='user_id,product_id')
 
 
 def known_check(row):
-    # PG18 pg_dump/reparse distributes these three V1 varchar[]->text[] casts.
+    # PG18 pg_dump/reparse distributes these versioned varchar[]->text[] casts.
     # Accept only the two exact known representations, not arbitrary SQL rewriting.
     variants=(('t_product_feature_tag','ck_feature_tag_kind','kind',('TASTE','AROMA')),
               ('t_user_preference','ck_preference_status','survey_status',('NOT_STARTED','SKIPPED','COMPLETED')),
-              ('t_user_preference_value','ck_preference_value_kind','kind',('CATEGORY','TASTE','AROMA')))
+              ('t_user_preference_value','ck_preference_value_kind','kind',('CATEGORY','TASTE','AROMA')),
+              ('t_user_recommendation_feedback','ck_recommendation_feedback','feedback',('MATCHED','NOT_INTERESTED')))
     for table,name,column,values in variants:
         prefix='CHECK ('+column+'::text = ANY (ARRAY['
         original=prefix+', '.join("'"+v+"'::character varying" for v in values)+']::text[]))'
@@ -104,15 +106,16 @@ def stopped_roles(connection):
 
 def inventory(connection):
     relations = dict(connection.execute("SELECT c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relkind IN ('r','S','v','m','f','p')").fetchall())
-    if relations != dict({name: 'r' for name in PRIMARY}, **{name: 'S' for name in SEQUENCES}):
+    if relations not in tuple(dict({name: 'r' for name in primary}, **{name: 'S' for name in SEQUENCES})
+                              for primary in (PRIMARY, FEEDBACK_PRIMARY)):
         reject('schema_inventory_rejected')
     reject_unversioned_objects(connection)
     if connection.execute("""SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='pubburi' AND (c.relowner<>(SELECT oid FROM pg_roles WHERE rolname=current_user) OR c.relrowsecurity))
         OR NOT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='pubburi' AND nspowner=(SELECT oid FROM pg_roles WHERE rolname=current_user))""").fetchone()[0]:
         reject('control_owner_required')
-    if schema_fingerprint(schema_state(connection)) != KNOWN_SCHEMA_SHA256:
-        reject('versioned_schema_changed')
+    shape = schema_state(connection)
+    return shape, schema_primary(shape, 'versioned_schema_changed')
 
 
 def reject_unversioned_objects(connection):
@@ -160,10 +163,22 @@ def schema_fingerprint(value):
         sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
+def schema_primary(shape, error):
+    try:
+        fingerprint = schema_fingerprint(shape)
+    except (KeyError, TypeError):
+        reject(error)
+    if fingerprint == KNOWN_SCHEMA_SHA256:
+        return PRIMARY
+    if fingerprint == FEEDBACK_SCHEMA_SHA256:
+        return FEEDBACK_PRIMARY
+    reject(error)
+
+
 def state(connection):
-    inventory(connection)
+    shape, primary_columns = inventory(connection)
     tables = {}
-    for name, primary in sorted(PRIMARY.items()):
+    for name, primary in sorted(primary_columns.items()):
         # Binary COPY preserves float bits, NULL, timestamps, text and json's original bytes.
         # Text C ordering is explicit, independent of the business ICU collation.
         order = ','.join('"' + key + '"::text COLLATE "C"' for key in primary.split(','))
@@ -174,7 +189,6 @@ def state(connection):
         tables[name] = {'rows': connection.execute('SELECT count(*) FROM pubburi."' + name + '"').fetchone()[0],
                         'sha256': digest.hexdigest()}
     sequences = {name: list(connection.execute('SELECT last_value,is_called FROM pubburi."' + name + '"').fetchone()) for name in SEQUENCES}
-    shape = schema_state(connection)
     receipt = connection.execute('SELECT source_id::text FROM pubburi.migration_source_receipt WHERE singleton_id=1').fetchall()
     target = connection.execute('SELECT source_id::text FROM pubburi.t_product_search_relay_target WHERE singleton_id=1').fetchall()
     if len(receipt) != 1 or target != receipt:
@@ -223,7 +237,7 @@ def client(env, binary, arguments, *, input=None, output=None, listing=False, er
 def expected_toc(state):
     expected={'SCHEMA - pubburi','COLLATION pubburi pubburi_ci'}
     for kind in ('TABLE','TABLE DATA'):
-        expected.update(kind+' pubburi '+name for name in PRIMARY)
+        expected.update(kind+' pubburi '+name for name in schema_primary(state, 'archive_schema_changed'))
     for kind in ('SEQUENCE','SEQUENCE SET'):
         expected.update(kind+' pubburi '+name for name in SEQUENCES)
     for table,name,definition,_ in state['constraints']:
@@ -253,8 +267,8 @@ def archive_inventory(env, archive, state):
         reject('archive_incomplete')
 
 
-def lock_business_tables(connection):
-    connection.execute('LOCK TABLE ' + ','.join('pubburi."' + name + '"' for name in sorted(PRIMARY)) + ' IN SHARE MODE')
+def lock_business_tables(connection, primary):
+    connection.execute('LOCK TABLE ' + ','.join('pubburi."' + name + '"' for name in sorted(primary)) + ' IN SHARE MODE')
 
 
 def backup(env, destination):
@@ -263,8 +277,8 @@ def backup(env, destination):
         guard(connection, env)
         stopped_roles(connection)
         connection.execute('BEGIN ISOLATION LEVEL REPEATABLE READ')
-        inventory(connection)
-        lock_business_tables(connection)
+        _, primary = inventory(connection)
+        lock_business_tables(connection, primary)
         before = state(connection)
         snapshot = connection.execute('SELECT pg_export_snapshot()').fetchone()[0]
         if not re.fullmatch(r'[0-9A-F]+-[0-9A-F]+-[0-9]+', snapshot):
@@ -299,8 +313,7 @@ def approved_archive(directory, expected, local=local_stack):
             or manifest['kind'] != 'stopped-pg18.6-v1' or not isinstance(manifest['state'],dict)
             or not isinstance(manifest['archive_sha256'],str) or not re.fullmatch(r'[0-9a-f]{64}',manifest['archive_sha256'])):
         reject('manifest_rejected')
-    if schema_fingerprint(manifest['state']) != KNOWN_SCHEMA_SHA256:
-        reject('manifest_schema_changed')
+    schema_primary(manifest['state'], 'manifest_schema_changed')
     archive = private.private_file(directory / 'database.dump', MAX_ARCHIVE)
     if len(archive) != manifest['archive_bytes'] or hashlib.sha256(archive).hexdigest() != manifest['archive_sha256']:
         reject('archive_changed')
@@ -373,6 +386,7 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
         directory, _ = private.release(directory, local)
         manifest, _ = approved_archive(archive_dir, manifest_pin, local)
         state_at_backup = manifest['state']
+        primary = schema_primary(state_at_backup, 'manifest_schema_changed')
         source_id = state_at_backup['source_id']
         if (database_identity(source) != database_identity(selected)
                 or database_identity(target) != database_identity(runtime)
@@ -391,7 +405,7 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
                 or not isinstance(receipt, dict) or type(receipt.get('schema_version')) is not int
                 or receipt != promotion_receipt(target, manifest_pin, source_id)
                 or completion != {'status': 'verified', 'manifest_sha256': manifest_pin, 'source_id': source_id,
-                    'tables': len(PRIMARY), 'sequences': len(SEQUENCES)}):
+                    'tables': len(primary), 'sequences': len(SEQUENCES)}):
             reject('promotion_completion_mismatch')
         for env in (source, target, runtime):
             verify_owned_postgres(env, child_env=private.base_environment())
@@ -403,7 +417,7 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
                 stack.callback(connection.close)
                 promotion_fence(connection, env, source=is_source)
                 connection.execute('BEGIN ISOLATION LEVEL READ COMMITTED')
-                lock_business_tables(connection)
+                lock_business_tables(connection, primary)
                 if json.loads(json.dumps(state(connection))) != state_at_backup:
                     reject('selected_source_changed' if is_source else 'restored_target_changed')
                 connections.append((connection, env, is_source))

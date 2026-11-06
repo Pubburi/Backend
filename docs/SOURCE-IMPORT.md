@@ -2,7 +2,10 @@
 
 DB02의 독립 이관 도구다. [읽기 전용 export](SOURCE-SNAPSHOT.md)로 만든 승인 파일을 **빈
 PostgreSQL 검증 DB**에 복사하고 같은 TX에서 전체 값/ID 예약/수령증을 검수한다. 현재 API의
-MySQL/MyBatis·기존001–009와 Flyway V1–V3는 보존한다. JPA API(DB03), Psycopg3 relay(DB05),
+MySQL/MyBatis·기존001–009와 Flyway V1–V3는 보존한다. V4의 추천 피드백은 PG에서 새로
+기록하는 데이터다. 승인 MySQL v1/v2 파일에는 이 데이터가 없으므로 import와 원본 일치 검수는
+대상 피드백 표가 비어 있을 때만 허용한다. 기록된 PG 피드백의 보존은 [PG 백업·복구](LOCAL-DEVELOPMENT.md)의
+검증된 스키마·데이터 단위를 사용한다. JPA API(DB03), Psycopg3 relay(DB05),
 서비스 cutover/역이관(DB06)까지 완료한 것은 아니다.
 
 ## 실행 조건

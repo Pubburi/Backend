@@ -73,21 +73,25 @@ class PostgreSQLRecoveryTests(TestCase):
         for entry in ('FUNCTION pubburi unsafe()', 'TRIGGER pubburi t_user evil',
                       'TABLE pubburi unknown', 'EXTENSION - bad', 'RULE pubburi t_user evil'):
             listing='1; 1 1 '+entry+' owner\n'
-            with self.subTest(entry=entry),patch.object(recovery,'client',return_value=listing.encode()):
+            with self.subTest(entry=entry),patch.object(recovery,'client',return_value=listing.encode()), \
+                    patch.object(recovery,'schema_fingerprint',return_value=recovery.KNOWN_SCHEMA_SHA256):
                 with self.assertRaises(ValueError):recovery.archive_inventory(self.env(),b'archive',state)
 
     def test_toc_requires_each_exact_expected_object_once(self):
         shape={'indexes':[['t_user','t_user_pkey','index'],['t_user','authored_index','index']],
                'constraints':[['t_user','t_user_pkey','PRIMARY KEY (id)',True],
                               ['t_user','authored_check','CHECK (true)',True]]}
-        expected=recovery.expected_toc(shape)
-        lines=[str(i)+'; 0 0 '+item+' owner' for i,item in enumerate(sorted(expected),1)]
-        for listing,valid in ((lines,True),(lines[:-1],False),(lines+lines[:1],False),
-                              (lines[:-1]+lines[:1],False)):
-            with patch.object(recovery,'client',return_value=('\n'.join(listing)+'\n').encode()):
-                if valid:recovery.archive_inventory(self.env(),b'archive',shape)
-                else:
-                    with self.assertRaises(ValueError):recovery.archive_inventory(self.env(),b'archive',shape)
+        for fingerprint, feedback in ((recovery.KNOWN_SCHEMA_SHA256, False), (recovery.FEEDBACK_SCHEMA_SHA256, True)):
+            with patch.object(recovery,'schema_fingerprint',return_value=fingerprint):
+                expected=recovery.expected_toc(shape)
+                self.assertEqual(feedback, 'TABLE DATA pubburi t_user_recommendation_feedback' in expected)
+                lines=[str(i)+'; 0 0 '+item+' owner' for i,item in enumerate(sorted(expected),1)]
+                for listing,valid in ((lines,True),(lines[:-1],False),(lines+lines[:1],False),
+                                      (lines[:-1]+lines[:1],False)):
+                    with patch.object(recovery,'client',return_value=('\n'.join(listing)+'\n').encode()):
+                        if valid:recovery.archive_inventory(self.env(),b'archive',shape)
+                        else:
+                            with self.assertRaises(ValueError):recovery.archive_inventory(self.env(),b'archive',shape)
 
     def test_only_exact_known_pg18_check_cast_roundtrip_is_equivalent(self):
         original=('t_product_feature_tag','ck_feature_tag_kind',"CHECK (kind::text = ANY (ARRAY['TASTE'::character varying, 'AROMA'::character varying]::text[]))",True)
