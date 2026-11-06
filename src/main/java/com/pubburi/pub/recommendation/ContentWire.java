@@ -10,6 +10,15 @@ public final class ContentWire {
     public static boolean fields(JsonNode value,String... names){return value!=null && value.isObject() && value.size()==names.length && Arrays.stream(names).allMatch(value::has);}
     public static boolean text(JsonNode node,String value){return node!=null && node.isTextual() && value.equals(node.textValue());}
     public static int integer(JsonNode node,int min,int max){require(node!=null && node.isIntegralNumber() && node.canConvertToInt() && node.intValue()>=min && node.intValue()<=max);return node.intValue();}
+    static Set<String> tokens(JsonNode product) {
+        var values = new HashSet<String>();
+        if (!product.path("category").isNull()) values.add("category:" + product.path("category").textValue());
+        for (String kind : List.of("taste", "aroma")) {
+            var tags = product.path(kind + "_tags");
+            if (tags.isArray()) tags.forEach(value -> values.add(kind + ":" + value.textValue()));
+        }
+        return values;
+    }
     public static boolean equal(JsonNode a,JsonNode b){
         if(a==null || b==null)return a==b;
         if(a.isNumber() && b.isNumber())return a.decimalValue().compareTo(b.decimalValue())==0;

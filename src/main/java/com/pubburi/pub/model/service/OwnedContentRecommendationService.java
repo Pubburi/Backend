@@ -81,11 +81,7 @@ public class OwnedContentRecommendationService {
             activity.highlyRatedCategories().stream().filter(categories::contains).toList());
     }
     private void requireCurrent(ContentCatalogSource.Catalog catalog,OwnedContentSnapshotService.Snapshot current){
-        if(!current.products().keySet().equals(catalog.bindings().keySet()))changed();
-        for(var binding:catalog.bindings().values()){
-            var facts=current.products().get(binding.productId());
-            if(facts==null || !equal(facts.product(),binding.product()) || !equal(facts.features(),binding.features()))changed();
-        }
+        if (!OwnedContentSnapshotService.matches(catalog, current.products())) changed();
     }
     private void changed(){throw new ResponseStatusException(HttpStatus.CONFLICT,"Recommendation inputs changed; request a current reviewed catalog again");}
 }

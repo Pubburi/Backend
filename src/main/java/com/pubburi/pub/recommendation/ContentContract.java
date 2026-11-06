@@ -58,7 +58,6 @@ public final class ContentContract {
     }
     private boolean eligible(JsonNode product,UserPreferencesResponse preferences){var h=preferences.hardConstraints();return range(product.get("price_krw"),h.minPriceKrw()==null?null:BigDecimal.valueOf(h.minPriceKrw()),h.maxPriceKrw()==null?null:BigDecimal.valueOf(h.maxPriceKrw())) && range(product.get("abv_percent"),h.minAbvPercent(),h.maxAbvPercent());}
     private boolean range(JsonNode value,BigDecimal min,BigDecimal max){if(min==null && max==null)return true;return !value.isNull() && (min==null || value.decimalValue().compareTo(min)>=0) && (max==null || value.decimalValue().compareTo(max)<=0);}
-    private Set<String> tokens(JsonNode product){var values=new HashSet<String>();if(!product.path("category").isNull())values.add("category:"+product.path("category").textValue());for(String kind:List.of("taste","aroma"))if(product.path(kind+"_tags").isArray())product.path(kind+"_tags").forEach(value->values.add(kind+":"+value.textValue()));return values;}
     private void add(Set<String> values,String kind,List<String> atoms){if(atoms!=null)atoms.forEach(atom->values.add(kind+":"+atom));}
     private void number(JsonNode node,boolean positive){require(node!=null && node.isNumber() && Double.isFinite(node.doubleValue()) && node.decimalValue().compareTo(BigDecimal.ZERO)>=(positive?1:0) && node.decimalValue().compareTo(BigDecimal.ONE)<=0);}
     private ObjectNode evidence(JsonNode part,JsonNode product,UserPreferencesResponse preferences,boolean numeric){

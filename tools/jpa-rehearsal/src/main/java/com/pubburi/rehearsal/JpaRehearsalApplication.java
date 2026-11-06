@@ -14,6 +14,7 @@ import com.pubburi.pub.controller.rest.UserPreferenceRestController;
 import com.pubburi.pub.controller.rest.DefaultRecommendationController;
 import com.pubburi.pub.controller.rest.SearchPhraseController;
 import com.pubburi.pub.controller.rest.OwnedContentRecommendationController;
+import com.pubburi.pub.controller.rest.SimilarProductController;
 import com.pubburi.pub.config.RecommendationConfig;
 import com.pubburi.pub.config.ProductSearchConfig;
 import com.pubburi.pub.model.service.*;
@@ -29,7 +30,8 @@ import org.springframework.context.annotation.Import;
     FavoriteRestController.class,FavoriteServiceImpl.class,UserPreferenceRestController.class,UserPreferenceServiceImpl.class,
     DefaultRecommendationController.class,DefaultRecommendationService.class,RecommendationConfig.class,
     SearchPhraseController.class,SearchPhraseService.class,PublicProductSearchService.class,ProductSearchConfig.class,
-    OwnedContentRecommendationController.class,OwnedContentRecommendationService.class,OwnedContentSnapshotService.class})
+    OwnedContentRecommendationController.class,OwnedContentRecommendationService.class,OwnedContentSnapshotService.class,
+    SimilarProductController.class,SimilarProductService.class})
 public class JpaRehearsalApplication {
     public static void main(String[] args){SpringApplication.run(JpaRehearsalApplication.class,args);}
 }

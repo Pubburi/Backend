@@ -23,6 +23,7 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | GET | `/api/products/popular` | 기존 주문수 내림차순·ID tie-break·최대12개 |
 | GET | `/api/products/{id}` | 기존 ProductResponse 일곱 필드·없는 ID404 |
 | GET | `/api/products/{id}/features` | 기존 특성 여덟 필드·unknown/검수[]·없는 상품404 |
+| GET | `/api/products/{id}/similar` | 검수 container DEMO 유사 후보와 현재 상품 재검증 |
 | POST | `/api/admin/products` | 현재 관리자만 생성·201·같은 TX의 최초 이벤트 |
 | PUT | `/api/admin/products/{id}` | 현재 관리자만 전체 수정·boolean·후속 버전 |
 | DELETE | `/api/admin/products/{id}` | 현재 관리자만 삭제·이력 FK null·tombstone |
@@ -58,7 +59,7 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른일곱 개/마흔네 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 서른여덟 개/마흔다섯 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 원래 매장 Controller·요청/응답 DTO·ResponseMapper·서비스와 인증 AccessGuard·PasswordHasher·
 UserService를 소스 whitelist로 함께 컴파일한다. 원래 UserRestController·가입/관리 요청과

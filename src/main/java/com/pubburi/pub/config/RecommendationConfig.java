@@ -12,7 +12,6 @@ import com.pubburi.pub.recommendation.BaselineGateway;
 import com.pubburi.pub.recommendation.BaselineHttpClient;
 import com.pubburi.pub.recommendation.SearchPhraseGateway;
 import com.pubburi.pub.recommendation.SearchPhraseHttpClient;
-import com.pubburi.pub.recommendation.ContentGateway;
 import com.pubburi.pub.recommendation.ContentHttpClient;
 import com.pubburi.pub.recommendation.ContentCatalogSource;
 import com.pubburi.pub.recommendation.PinnedContentCatalog;
@@ -24,7 +23,7 @@ public class RecommendationConfig {
 			@Value("${pubburi.recommendation.content-family-browse-demo-enabled:false}") boolean familyBrowseDemoEnabled,ObjectMapper mapper){
 		return new PinnedContentCatalog(path,sha,mapper,java.time.Clock.systemUTC(),familyBrowseDemoEnabled);
 	}
-	@Bean ContentGateway contentGateway(@Value("${pubburi.recommendation.base-url}") String baseUrl,ObjectMapper mapper){
+	@Bean ContentHttpClient contentGateway(@Value("${pubburi.recommendation.base-url}") String baseUrl,ObjectMapper mapper){
 		return new ContentHttpClient(URI.create(baseUrl),Duration.ofMillis(200),Duration.ofSeconds(3),mapper);
 	}
 	@Bean
