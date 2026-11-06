@@ -34,7 +34,7 @@ class SourceImportIntegrationTests {
         for(var t:SourceContract.TABLES)assertEquals(0,number(c,"SELECT count(*) FROM pubburi."+t.name()),"all business rows must roll back");
         assertEquals(0,number(c,"SELECT count(*) FROM pubburi.migration_source_receipt"));
     }
-    static void schema(Map<String,String> env)throws Exception{assertEquals(3,PostgresSchemaTool.run("migrate",env));}
+    static void schema(Map<String,String> env)throws Exception{assertEquals(4,PostgresSchemaTool.run("migrate",env));}
     @Test void realSourceCopiesEveryValueRecordsReceiptAndRejectsReplay() throws Exception {
         var env=env("FRESH");
         var legacy=PostgresSchemaTool.Settings.from(env);PostgresSchemaTool.guard(legacy);
@@ -47,10 +47,18 @@ class SourceImportIntegrationTests {
             assertThrows(org.flywaydb.core.api.exception.FlywayValidateException.class,()->SourceImportTool.run(env));
             empty(c);assertEquals(before,sequences(c));
         }
-        assertEquals(1,PostgresSchemaTool.run("migrate",env));
+        assertEquals(2,PostgresSchemaTool.run("migrate",env));
         assertEquals(source.report(),SourceImportTool.run(env));assertEquals(source.report(),SourceImportTool.verify(env));
         try(Connection c=settings.connect();var sql=c.createStatement()) {
             int id;try(var rows=sql.executeQuery("SELECT id FROM pubburi.t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
+            sql.execute("""
+                INSERT INTO pubburi.t_user_recommendation_feedback(user_id,product_id,feedback)
+                SELECT u.id,p.id,'MATCHED' FROM pubburi.t_user u CROSS JOIN pubburi.t_product p LIMIT 1
+                """);
+            try {
+                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
+                assertEquals("postgresql_import_feedback_not_empty",error.getMessage());
+            } finally {sql.execute("DELETE FROM pubburi.t_user_recommendation_feedback");}
             sql.execute("INSERT INTO pubburi.t_comment_taste_tag VALUES("+id+",'authored target opinion')");
             try {var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_v1_review_tags_unsupported",error.getMessage());}
             finally {sql.execute("DELETE FROM pubburi.t_comment_taste_tag WHERE comment_id="+id);}

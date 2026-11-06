@@ -15,11 +15,17 @@ final class TargetSchemaContract {
         boolean reviewTags;
         // pg_class is not filtered by table SELECT grants; a hidden extension is never treated as absent.
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relname='t_comment_taste_tag')")) {r.next();reviewTags=r.getBoolean(1);}
+        expected.add("t_user_recommendation_feedback");
+        verifyEmptyFeedback(connection);
         if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
         if(version==2 && !reviewTags) throw new IllegalArgumentException("postgresql_v2_review_tags_required");
         if(reviewTags) {expected.add("t_comment_taste_tag");reviewTags(connection,version==1);}
         if(!actual.equals(expected)) throw new IllegalArgumentException("postgresql_import_schema_set_changed");
-        if(!SchemaIndexContract.actual(connection).containsAll(SchemaIndexContract.expected())) throw new IllegalArgumentException("postgresql_import_indexes_changed");
+        var indexes=SchemaIndexContract.actual(connection);
+        if(!indexes.containsAll(SchemaIndexContract.expected())
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_recommendation_feedback",false,"product_id:A:-"))) {
+            throw new IllegalArgumentException("postgresql_import_indexes_changed");
+        }
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT c.collprovider,c.collisdeterministic,c.colllocale FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace WHERE n.nspname='pubburi' AND c.collname='pubburi_ci'")) {
             if(!r.next() || !r.getString(1).equals("i") || r.getBoolean(2) || !"und-u-ks-level1".equals(r.getString(3))) throw new IllegalArgumentException("postgresql_import_icu_changed");
         }
@@ -70,7 +76,36 @@ final class TargetSchemaContract {
             if(!"comment_id,tag".equals(primary.get("t_comment_taste_tag"))) throw new IllegalArgumentException("postgresql_review_tag_shape_changed");
             expectedForeign.add(SourceContract.REVIEW_FOREIGN);
         }
+        if(!"user_id,product_id".equals(primary.get("t_user_recommendation_feedback"))) throw new IllegalArgumentException("postgresql_feedback_primary_changed");
+        expectedForeign.add("t_user_recommendation_feedback\tuser_id\tt_user\tid\tCASCADE");
+        expectedForeign.add("t_user_recommendation_feedback\tproduct_id\tt_product\tid\tCASCADE");
         if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("postgresql_import_foreign_changed");
+    }
+    private static void verifyEmptyFeedback(Connection connection) throws SQLException {
+        // The MySQL artifact has no feedback. Never certify a fresh import over PG-only data.
+        try(var statement=connection.createStatement()) {
+            statement.execute("LOCK TABLE pubburi.t_user_recommendation_feedback IN ACCESS SHARE MODE");
+            try(var rows=statement.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.t_user_recommendation_feedback)")) {
+                if(!rows.next() || rows.getBoolean(1)) throw new IllegalArgumentException("postgresql_import_feedback_not_empty");
+            }
+            try(var rows=statement.executeQuery("""
+                SELECT column_name,data_type,is_nullable,character_maximum_length,collation_schema,collation_name
+                FROM information_schema.columns
+                WHERE table_schema='pubburi' AND table_name='t_user_recommendation_feedback'
+                ORDER BY ordinal_position
+                """)) {
+                if(!rows.next() || !"user_id".equals(rows.getString(1)) || !"character varying".equals(rows.getString(2))
+                        || !"NO".equals(rows.getString(3)) || rows.getInt(4)!=100
+                        || !"pubburi".equals(rows.getString(5)) || !"pubburi_ci".equals(rows.getString(6))
+                        || !rows.next() || !"product_id".equals(rows.getString(1)) || !"integer".equals(rows.getString(2))
+                        || !"NO".equals(rows.getString(3))
+                        || !rows.next() || !"feedback".equals(rows.getString(1)) || !"character varying".equals(rows.getString(2))
+                        || !"NO".equals(rows.getString(3)) || rows.getInt(4)!=14
+                        || !"pg_catalog".equals(rows.getString(5)) || !"C".equals(rows.getString(6)) || rows.next()) {
+                    throw new IllegalArgumentException("postgresql_import_feedback_shape_changed");
+                }
+            }
+        }
     }
     static void reviewTags(Connection connection,boolean empty) throws SQLException {
         try(var s=connection.createStatement()) {

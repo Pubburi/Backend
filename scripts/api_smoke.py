@@ -198,6 +198,7 @@ def documentation_contract(port):
     verify_search_phrase_openapi(document)
     verify_content_recommendation_openapi(document)
     verify_similar_products_openapi(document)
+    assert "/api/users/me/recommendations/feedback/{productId}" not in document["paths"]
     verify_product_filter_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
@@ -1319,6 +1320,9 @@ def main():
         client = ApiClient(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         product = read_only_contract(client)
         report["completed"].append("read-only HTTP envelope, pagination, auth and validation")
+        feedback_path = "/users/me/recommendations/feedback/1"
+        for method in ("GET", "PUT", "DELETE"):
+            client.request(method, feedback_path, 404, {"feedback": "MATCHED"} if method == "PUT" else None, "NOT_FOUND")
         product_page_offset_contract(client)
         report["completed"].append("checked product page offsets and preserved normalization")
         documentation_contract(os.environ.get("PUBBURI_SERVER_PORT", "9987"))

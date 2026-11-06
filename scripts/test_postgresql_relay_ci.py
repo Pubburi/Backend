@@ -26,6 +26,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         paths["/api/products/{id}/similar"] = {"get": {
             "parameters": [{"name": "id", "in": "path"}],
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SimilarEnvelope"}}}}}}}
+        paths["/api/users/me/recommendations/feedback/{productId}"] = {"get": {}, "put": {}, "delete": {}}
         return {"paths": paths, "components": {"schemas": {
             "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}, "includeActivity": {"type": "boolean", "default": False}}},
             "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
@@ -39,7 +40,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
 
     def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
-        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 38, "api_operations": 45})
+        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 39, "api_operations": 48})
         missing = copy.deepcopy(spec)
         missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
         extra_method = copy.deepcopy(spec)

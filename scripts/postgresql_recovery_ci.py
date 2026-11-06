@@ -64,8 +64,8 @@ def run(environ, runtime, recovery_control):
     role=runtime['PUBBURI_PG_USER']
     if not re.fullmatch('[a-z][a-z0-9_]{0,50}',role):raise ValueError('recovery_ci_runtime_role_invalid')
     actor='ci_jpa_recovery_'+secrets.token_hex(8);password=secrets.token_hex(20);new_password=secrets.token_hex(20)
-    def request(c,base,method,path,body=None,expected=200):
-        status,body=request_json(c,base,method,path,body,time.monotonic()+12)
+    def request(c,base,method,path,body=None,expected=200,*,headers=None):
+        status,body=request_json(c,base,method,path,body,time.monotonic()+12,headers=headers)
         if status!=expected:raise ValueError('recovery_ci_http_contract_failed')
         return body['data']
     with server(runtime,directory,'before') as base:
@@ -78,6 +78,10 @@ def run(environ, runtime, recovery_control):
         review=request(user,base,'POST','/api/comments',{'productId':pid,'rating':3.75,'comment':'Recovery 후기\n🌾','tasteTags':['dry,fruit\none','🌾']},201)
         order=request(user,base,'POST','/api/orders',{'details':[{'productId':pid,'quantity':3}]},201)
         request(user,base,'PUT','/api/users/me/favorites/'+str(pid))
+        feedback_path='/api/users/me/recommendations/feedback/'+str(pid)
+        feedback_headers={'X-Pubburi-Feedback-Owner':actor}
+        retained_feedback=request(user,base,'PUT',feedback_path,{'feedback':'MATCHED'},headers=feedback_headers)
+        if retained_feedback!={'productId':pid,'feedback':'MATCHED'}:raise ValueError('recovery_ci_feedback_write_changed')
         request(user,base,'PUT','/api/users/me/password',{'currentPassword':password,'newPassword':new_password})
         changed={key:product[key] for key in ('name','type','price','img','abv','orderCount')}
         changed.update(name='Recovery changed price',price=9999)
@@ -224,11 +228,12 @@ def run(environ, runtime, recovery_control):
         if request(user,base,'GET','/api/orders/'+str(order['oId']))!=retained_order:raise ValueError('recovery_ci_order_not_restored')
         if request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')!=retained_reviews:raise ValueError('recovery_ci_reviews_not_restored')
         if not request(user,base,'GET','/api/users/me/favorites/'+str(pid))['favorited']:raise ValueError('recovery_ci_favorite_not_restored')
+        if request(user,base,'GET',feedback_path,headers=feedback_headers)!=retained_feedback:raise ValueError('recovery_ci_feedback_not_restored')
         created=request(user,base,'POST','/api/comments',{'productId':pid,'rating':2.5,'comment':'After recovery','tasteTags':[]},201)
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
-    report={'status':'passed','business_tables':17,'control_tables':2,'sequences':7,
-        'post_import_order_review_favorite_password_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
+    report={'status':'passed','business_tables':18,'control_tables':2,'sequences':7,
+        'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],
