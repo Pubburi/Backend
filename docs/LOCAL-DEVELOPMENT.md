@@ -176,7 +176,7 @@ DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/res
 다시 `activate-pg`를 실행할 때는 선택한 DB의 CID·label·DB명·marker·source UUID가 같아야 한다.
 같은 source UUID의 다른 복구본도 활성화 전에 거절한다. 같은 대상의 새 release, 자격, 포트는
 새 비공개 설정으로 검증할 수 있다. 기존 선택에 결속된 설정은 갱신을 마칠 때까지 그대로 둔다.
-복구본은 명시 `--provider postgresql`로 별도 검증하며 기본 대상 승계는 별도 전환 인수가 필요하다.
+복구본을 기본 대상으로 승계할 때는 아래의 명시 `promote` 검증을 사용한다.
 
 활성 상태의 `init/install/down/reset-db`도 기존 PG 거절을 유지한다. `--provider mysql`은
 이관 전 기준을 의도적으로 별도 실행하는 명시 옵션이며 전환 후 쓰기를 MySQL로 되돌리는
@@ -229,7 +229,29 @@ archive는 보존한다. 완료 후 기존 최소 runtime GRANT를 별도 적용
 위 JPA release의 doctor/smoke·업무 인수를 수행한다. 새 대상 marker는 유지하며 source UUID·epoch·
 claim/ACK·Flyway/receipt와 소비된 ID를 초기화하지 않는다.
 
+### 검증한 복구본을 기본 로컬 대상으로 승계
+
+`restore`가 남긴 `completed.json`과 `promotion.json`을 사용한다. 후자는 승인 manifest와 복구 대상의
+CID·label·DB명·marker를 결속한다. 운영자가 두 SHA256을 확인하고 별도 승계를 실행한다.
+
+```bash
+.venv-relay/bin/python scripts/postgresql_recovery.py promote \
+  --config <선택된 원본 control JSON> --target-config <복구 대상 control JSON> \
+  --archive-dir <백업 폴더> --expected-sha256 <manifest SHA256> \
+  --restore-dir <복구 시도 폴더> --expected-restore-sha256 <promotion.json SHA256> \
+  --pg-config <복구 대상 runtime JSON> --release-dir <release 폴더>
+```
+
+원본은 control 이외 모든 non-superuser 역할의 유효 `CONNECT`를 제거한다. `NOLOGIN`인 역할도 포함한다.
+대상은 runtime에 최소 권한과 `CONNECT`를 준비한 상태에서 `NOLOGIN`으로 유지한다. 양쪽 기존 세션과
+prepared transaction을 모두 정리한다. launcher 잠금과 두 DB의 업무표 SHARE 잠금 아래, 현재 선택 원본과
+복구 대상의 스키마·원문 binary-cell·receipt/UUID·7개 sequence가 승인 백업과 모두 일치해야 선택을
+발행한다. 백업 뒤 원본에 커밋이 추가되면 새 백업과 새 복구가 필요하다.
+
+발행 뒤 원본의 `CONNECT` 차단을 유지하고 대상 runtime만 열어 `up`과 업무 인수를 진행한다. 이 명령은
+권한이나 DB 데이터를 바꾸지 않는다. control 자격과 superuser를 독점한 운영자가 검증부터 대상 개방까지
+외부 쓰기·권한 변경을 중단한다. 승계 범위는 소유 복사본의 로컬 launcher 선택이다.
+
 이는 정지 시점의 논리 백업/새 PG 복구이며 PITR·지속/증분 백업·장애 직전 RPO0·PG→MySQL
-역이관을 제공하지 않는다. 백업 후 변경은 포함되지 않는다. 기본 PG 전환·전체 DB06 인수는 후속
-게이트이며 원본 source import를 복구 명령으로 재실행하지 않는다. 근거는 PostgreSQL 공식
+역이관을 제공하지 않는다. 기본 업무 runtime 전환·전체 DB06 인수는 후속 게이트다. 근거는 PostgreSQL 공식
 [pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html)·[pg_restore](https://www.postgresql.org/docs/18/app-pgrestore.html)를 따른다.

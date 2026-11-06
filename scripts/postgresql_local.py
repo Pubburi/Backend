@@ -174,7 +174,7 @@ def activation_selection(local, environment):
     return previous
 
 
-def publish_selection(local, config, directory, pins):
+def publish_selection(local, config, directory, pins, *, announce=True):
     if selection_pins(config, directory) != pins:
         reject()
     path = local.STATE / DEFAULT_SELECTION
@@ -187,7 +187,8 @@ def publish_selection(local, config, directory, pins):
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
-    print('Owned PostgreSQL selected for option-free local commands; MySQL data was not changed.', flush=True)
+    if announce:
+        print('Owned PostgreSQL selected for option-free local commands; MySQL data was not changed.', flush=True)
 
 
 def source_files(local):
