@@ -162,6 +162,39 @@ class PostgreSQLLocalTests(unittest.TestCase):
                     self.assertEqual(checked.call_count,int(during_doctor));spawn.assert_not_called()
                 self.assertFalse((root/'local-stack-lock').exists())
 
+    def test_activation_cannot_replace_the_selected_database(self):
+        changes = (
+            {'PUBBURI_PG_DB_NAME': 'older_ci', 'PUBBURI_PG_URL': 'jdbc:postgresql://127.0.0.1:25432/older_ci'},
+            {'PUBBURI_PG_CONTAINER_ID': 'b' * 64},
+            {'PUBBURI_PG_RUN_TOKEN': 'different-owned-marker'},
+            {'PUBBURI_JPA_SOURCE_ID': '87654321-1234-1234-1234-123456789abc'},
+        )
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config, release = self.selection_fixture(root)
+                selector = root / pg.DEFAULT_SELECTION
+                pg.publish_selection(types.SimpleNamespace(STATE=root), config, release,
+                    pg.selection_pins(config, release))
+                before = selector.read_bytes()
+                candidate = root / 'candidate.json'
+                with socket.socket() as port:
+                    port.bind(('127.0.0.1', 0))
+                    env = dict(self.env(), **change, PUBBURI_SERVER_PORT=str(port.getsockname()[1]))
+                pg.write_json(candidate, {'schema_version': 1, 'environment': env})
+                args = argparse.Namespace(command='activate-pg', pg_config=candidate, release_dir=release,
+                    backend_only=True)
+                checked = patch.object(pg, 'doctor',
+                    return_value=(env, release, {'jar_sha256': pg.sha(release / 'runtime.jar')}))
+                launched = patch.object(pg.subprocess, 'Popen',
+                    side_effect=AssertionError('candidate JVM started'))
+                with patch.object(local, 'STATE', root), checked, launched as spawn:
+                    with self.assertRaisesRegex(RuntimeError, 'selected PostgreSQL database'):
+                        pg.start(local, args)
+                    spawn.assert_not_called()
+                self.assertEqual(selector.read_bytes(), before)
+                self.assertEqual(list(root.glob('pg-run-*')), [])
+
     def test_activation_publishes_only_after_readiness_and_owned_cleanup_under_the_lock(self):
         for cleanup_fails in (False,True):
             with self.subTest(cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as temporary:

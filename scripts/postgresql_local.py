@@ -76,8 +76,11 @@ def base_environment():
                        'SYSTEMROOT', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')}
 
 
-def configuration(path):
-    value = strict_json(private_file(path, 65536))
+def configuration(path, expected_sha256=None):
+    raw = private_file(path, 65536)
+    if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+        reject()
+    value = strict_json(raw)
     if not isinstance(value, dict) or set(value) != {'schema_version', 'environment'} or type(value['schema_version']) is not int or value['schema_version'] != 1:
         reject()
     env = value['environment']
@@ -105,6 +108,8 @@ def configuration(path):
 
 
 DEFAULT_SELECTION = 'local-provider.json'
+DATABASE_IDENTITY = ('PUBBURI_PG_CONTAINER_ID', 'PUBBURI_PG_VALIDATION_LABEL', 'PUBBURI_PG_DB_NAME',
+    'PUBBURI_PG_RUN_TOKEN', 'PUBBURI_JPA_SOURCE_ID')
 
 
 def selection_pins(config, directory):
@@ -113,7 +118,7 @@ def selection_pins(config, directory):
             'jar_sha256': hashlib.sha256(private_file(directory / 'runtime.jar', 150 * 1024 * 1024)).hexdigest()}
 
 
-def selection(local):
+def selection_record(local):
     path = local.STATE / DEFAULT_SELECTION
     # A dangling symlink or invalid selector must never silently select MySQL.
     if not os.path.lexists(path):
@@ -128,6 +133,13 @@ def selection(local):
             or not Path(value['pg_config']).is_absolute() or not Path(value['release_dir']).is_absolute()
             or any(not re.fullmatch(r'[0-9a-f]{64}', value[k]) for k in keys if k.endswith('_sha256'))):
         reject()
+    return value
+
+
+def selection(local):
+    value = selection_record(local)
+    if value is None:
+        return None
     pins = selection_pins(Path(value['pg_config']), Path(value['release_dir']))
     if any(value[k] != v for k, v in pins.items()):
         reject()
@@ -149,6 +161,17 @@ def guard_selection(local, args):
     expected = getattr(args, 'selected_default', None)
     if expected is not None and selection(local) != expected:
         reject()
+
+
+def activation_selection(local, environment):
+    previous = selection_record(local)
+    if previous is not None:
+        # Old release files are not needed to refresh the same DB. The pinned
+        # old config is needed to distinguish it from another valid copy.
+        selected_environment = configuration(previous['pg_config'], previous['config_sha256'])
+        if any(environment[key] != selected_environment[key] for key in DATABASE_IDENTITY):
+            raise RuntimeError('activate-pg cannot replace the selected PostgreSQL database.')
+    return previous
 
 
 def publish_selection(local, config, directory, pins):
@@ -317,8 +340,10 @@ def start(local, args):
         pins = selection_pins(Path(args.pg_config), Path(args.release_dir)) if args.command == 'activate-pg' else None
         env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only)
         guard_selection(local, args)
-        if pins is not None and selection_pins(Path(args.pg_config), directory) != pins:
-            reject()
+        if pins is not None:
+            if selection_pins(Path(args.pg_config), directory) != pins:
+                reject()
+            previous = activation_selection(local, env)
         with ExitStack() as stack:
             ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT']
             for key in ports:
@@ -379,7 +404,9 @@ def start(local, args):
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)
                 reject()
-        if args.command == 'activate-pg':
+        if pins is not None:
+            if activation_selection(local, env) != previous:
+                reject()
             publish_selection(local, args.pg_config, directory, pins)
 
 
