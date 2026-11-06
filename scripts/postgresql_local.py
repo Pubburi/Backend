@@ -121,7 +121,9 @@ def selection_pins(config, directory):
 def selection_record(local):
     path = local.STATE / DEFAULT_SELECTION
     # A dangling symlink or invalid selector must never silently select MySQL.
-    if not os.path.lexists(path):
+    try:
+        path.lstat()
+    except FileNotFoundError:
         return None
     value = strict_json(private_file(path, 16384))
     keys = {'schema_version', 'provider', 'pg_config', 'release_dir',

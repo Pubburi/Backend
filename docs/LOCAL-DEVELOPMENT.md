@@ -165,6 +165,11 @@ DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/res
 ./scripts/local-stack.sh up
 ```
 
+Backend만 개발할 때는 `./scripts/dev.sh`를 실행한다. 위 선택이 있으면 같은 검증과 작업 잠금으로
+고정한 JPA release를 기동하고, 선택이 없으면 기존 `.env`·Maven MySQL 개발 실행을 사용한다.
+PostgreSQL 선택이나 기동이 잘못되면 명령이 실패하며 `.env`를 읽지 않는다. 기존 MySQL을
+명시 비교하려면 `./scripts/dev.sh --provider mysql`을 실행한다. 이 명령들은 DB 준비를 대신하지 않는다.
+
 `activate-pg`는 같은 작업 잠금에서 기존 실제 JPA/API·세 서버 smoke를 실행하고 자신이 만든
 프로세스를 모두 종료한 뒤에만 `.pubburi/local-provider.json` 하나를 원자적으로 발행한다.
 설정·release manifest·JAR SHA와 경로를 고정하며 자격 원문을 선택 파일에 복제하지 않는다.
