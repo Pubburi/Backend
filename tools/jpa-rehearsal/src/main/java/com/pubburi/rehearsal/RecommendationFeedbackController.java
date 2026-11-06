@@ -84,7 +84,7 @@ public class RecommendationFeedbackController {
     private SessionUser owner(HttpServletRequest request, HttpSession session) {
         var owner = guard.requireLogin(session);
         var expected = Collections.list(request.getHeaders(OWNER_HEADER));
-        if (expected.size() != 1 || !expected.get(0).matches("(?:[a-zA-Z0-9.!~*'()_-]|%[0-9A-F]{2})+")) {
+        if (expected.size() != 1 || !expected.get(0).matches("(?:[a-zA-Z0-9.!~*'()_-]|%[0-9A-F]{2})++")) {
             throw new IllegalArgumentException("Exactly one canonically encoded feedback owner header is required");
         }
         // Match encodeURIComponent exactly. URLDecoder silently replaces malformed UTF-8.

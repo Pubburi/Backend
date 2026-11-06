@@ -31,10 +31,15 @@ class JpaRecommendationFeedbackIntegrationTests extends JpaAccountTestSupport {
     private static final String NOT_INTERESTED = "{\"feedback\":\"NOT_INTERESTED\"}";
 
     private Reply feedback(HttpClient client, String owner, String method, String product, String body) throws Exception {
+        return feedbackWithHeader(client, owner == null ? null : URLEncoder.encode(owner, StandardCharsets.UTF_8)
+            .replace("+", "%20"), method, product, body);
+    }
+
+    private Reply feedbackWithHeader(HttpClient client, String header, String method, String product, String body)
+            throws Exception {
         var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + PATH + product))
             .timeout(Duration.ofSeconds(8)).header("Accept", "application/json");
-        if (owner != null) builder.header(RecommendationFeedbackController.OWNER_HEADER,
-            URLEncoder.encode(owner, StandardCharsets.UTF_8).replace("+", "%20"));
+        if (header != null) builder.header(RecommendationFeedbackController.OWNER_HEADER, header);
         if (body != null) builder.header("Content-Type", "application/json");
         builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
         var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
@@ -63,6 +68,9 @@ class JpaRecommendationFeedbackIntegrationTests extends JpaAccountTestSupport {
             var before = accountState(sql, user);
             assertEquals(401, feedback(client(), user, "GET", key, null).status());
             assertEquals(400, feedback(owner, null, "GET", key, null).status());
+            assertEquals(401, feedbackWithHeader(owner, "a".repeat(4000), "GET", key, null).status());
+            assertEquals(401, feedbackWithHeader(owner, "%FF", "GET", key, null).status());
+            assertEquals(400, feedbackWithHeader(owner, "%G0", "GET", key, null).status());
             assertEquals(401, feedback(stranger, user, "PUT", key, MATCHED).status());
             assertEquals(400, feedback(owner, user, "GET", key + "?userId=" + other, null).status());
             assertEquals(400, feedback(owner, user, "GET", "01", null).status());
@@ -109,6 +117,16 @@ class JpaRecommendationFeedbackIntegrationTests extends JpaAccountTestSupport {
             var rejoined = login(user, password);
             assertChoice(feedback(rejoined, user, "GET", key, null), product, null);
             assertChoice(feedback(rejoined, user, "PUT", key, MATCHED), product, "MATCHED");
+            String prefix = accountId();
+            String unicodeUser = prefix + " 한!%";
+            try {
+                assertEquals(201, request(client(), "POST", "/api/users", registration(unicodeUser)).status());
+                var unicodeSession = login(unicodeUser, password);
+                assertChoice(feedbackWithHeader(unicodeSession, prefix + "%20%ED%95%9C!%25", "PUT", key, MATCHED),
+                    product, "MATCHED");
+            } finally {
+                sql.update("DELETE FROM pubburi.t_user WHERE id=?", unicodeUser);
+            }
             assertEquals(200, request(admin, "DELETE", "/api/admin/products/" + product, null).status());
             assertChoice(feedback(rejoined, user, "GET", key, null), product, null);
             assertEquals(404, feedback(rejoined, user, "PUT", key, MATCHED).status());
