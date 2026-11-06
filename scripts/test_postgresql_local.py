@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -90,6 +91,54 @@ class PostgreSQLLocalTests(unittest.TestCase):
         with patch('sys.argv',['local_stack.py','doctor','--provider','postgresql','--pg-config','x','--release-dir','y']), patch.object(local,'environment') as env, patch.object(pg,'dispatch') as dispatch:
             local.main()
             env.assert_not_called();self.assertEqual(dispatch.call_args.args[1].provider,'postgresql')
+
+    def test_dev_uses_selected_pg_backend_only_and_rejects_an_unreadable_selector(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, release = self.selection_fixture(root)
+            pg.publish_selection(types.SimpleNamespace(STATE=root), config, release, pg.selection_pins(config, release))
+            with patch.object(local, 'STATE', root), patch('sys.argv', ['local_stack.py', 'dev']), \
+                    patch.object(local.os, 'execv') as legacy, patch.object(pg, 'dispatch') as dispatch:
+                local.main()
+                args = dispatch.call_args.args[1]
+                self.assertEqual((args.command, args.backend_only, args.pg_config, args.release_dir),
+                                 ('up', True, str(config), str(release)))
+                dispatch.reset_mock()
+                with patch.object(Path, 'lstat', side_effect=PermissionError):
+                    with self.assertRaises(PermissionError):
+                        local.main()
+                legacy.assert_not_called()
+                dispatch.assert_not_called()
+
+    def test_dev_shell_reads_legacy_env_only_when_legacy_is_selected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            for name in ('dev.sh', 'local-stack.sh', 'local_stack.py', 'postgresql_local.py',
+                         'postgresql_schema.py', 'jpa_smoke.py', 'search_index.py', 'api_smoke.py'):
+                shutil.copy2(local.BACKEND / 'scripts' / name, scripts / name)
+            wrapper = root / 'mvnw'
+            wrapper.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$1" "$DEV_TEST_VALUE"\n')
+            wrapper.chmod(0o700)
+            (root / '.env').write_text('touch legacy-env-read\nDEV_TEST_VALUE=from-dotenv\n')
+            marker = root / 'legacy-env-read'
+            command = [str(scripts / 'dev.sh')]
+
+            self.assertEqual(subprocess.check_output(command, cwd=root, text=True),
+                             'spring-boot:run from-dotenv\n')
+            self.assertTrue(marker.is_file())
+            marker.unlink()
+            state = root / '.pubburi'
+            state.mkdir()
+            pg.write_json(state / pg.DEFAULT_SELECTION, {})
+            rejected = subprocess.run(command, cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('PostgreSQL local launch rejected', rejected.stderr)
+            self.assertFalse(marker.exists())
+            self.assertEqual(subprocess.check_output([*command, '--provider', 'mysql'], cwd=root, text=True),
+                             'spring-boot:run from-dotenv\n')
+            self.assertTrue(marker.is_file())
 
     def selection_fixture(self, root):
         config=self.config(root);directory=root/'release';directory.mkdir(mode=0o700)

@@ -292,7 +292,8 @@ Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니�
 ./scripts/local-stack.sh up
 ```
 
-백엔드만 개별 실행할 때는 아래 설정을 사용합니다.
+검증한 PostgreSQL을 [로컬 대상으로 선택](docs/LOCAL-DEVELOPMENT.md)했다면 `./scripts/dev.sh`로 Backend만 실행합니다.
+선택 전 기본 개발 실행과 명시 MySQL 비교에는 아래 설정을 사용합니다.
 
 macOS에서 여러 JDK를 사용하는 경우 먼저 export JAVA_HOME=$(/usr/libexec/java_home -v 17)로 Java 17을 선택합니다.
 
@@ -300,7 +301,7 @@ macOS에서 여러 JDK를 사용하는 경우 먼저 export JAVA_HOME=$(/usr/lib
 cp .env.example .env
 # .env의 빈 DB 항목을 본인 로컬 값으로 채웁니다.
 docker compose up -d db
-./scripts/dev.sh
+./scripts/dev.sh --provider mysql
 ```
 
 - 기본 서버: http://localhost:9987

@@ -112,7 +112,7 @@ def local_release(environ):
             raise ValueError('jpa_ci_sibling_activation_accepted')
         if selector.read_bytes() != selected_bytes:
             raise ValueError('jpa_ci_existing_selection_changed')
-        # Exercise the actual option-free CLI in a separate owner process. Its
+        # Exercise the developer launcher route in a separate owner process. Its
         # TERM handler unwinds the launcher's child sessions before it exits.
         cli = """import signal,sys
 from pathlib import Path
@@ -120,7 +120,7 @@ sys.path.insert(0,'scripts')
 import local_stack as local
 local.STATE=Path(sys.argv[1])
 signal.signal(signal.SIGTERM,local.interrupted)
-sys.argv=['local_stack.py',sys.argv[2],'--backend-only']
+sys.argv=['local_stack.py',*sys.argv[2:]]
 try:local.main()
 except KeyboardInterrupt:pass
 """
@@ -130,7 +130,7 @@ except KeyboardInterrupt:pass
         with log_path.open('x') as log:
             log_path.chmod(0o600)
             with defer_termination():
-                up = subprocess.Popen([*args,'up'],cwd=ROOT,env=child_env,stdout=log,
+                up = subprocess.Popen([*args,'dev'],cwd=ROOT,env=child_env,stdout=log,
                     stderr=subprocess.STDOUT,start_new_session=True)
             try:
                 deadline=time.monotonic()+90
@@ -139,7 +139,7 @@ except KeyboardInterrupt:pass
                         raise ValueError('jpa_ci_selected_up_failed')
                     time.sleep(.1)
                 # A live up holds the exclusive lock; status must still observe it.
-                command([*args,'status'],child_env,directory/'selected-status.log',budget=30)
+                command([*args,'status','--backend-only'],child_env,directory/'selected-status.log',budget=30)
             finally:
                 local_stack.stop(up)
         if up.returncode!=0 or (directory/'local-stack-lock').exists():
