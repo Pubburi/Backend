@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit stopped-writer backup and fresh-target recovery of an owned local PostgreSQL copy."""
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
@@ -252,6 +253,10 @@ def archive_inventory(env, archive, state):
         reject('archive_incomplete')
 
 
+def lock_business_tables(connection):
+    connection.execute('LOCK TABLE ' + ','.join('pubburi."' + name + '"' for name in sorted(PRIMARY)) + ' IN SHARE MODE')
+
+
 def backup(env, destination):
     directory = private.private_directory(destination, local_stack, create=True)
     with connect(env) as connection:
@@ -259,7 +264,7 @@ def backup(env, destination):
         stopped_roles(connection)
         connection.execute('BEGIN ISOLATION LEVEL REPEATABLE READ')
         inventory(connection)
-        connection.execute('LOCK TABLE ' + ','.join('pubburi."' + name + '"' for name in sorted(PRIMARY)) + ' IN SHARE MODE')
+        lock_business_tables(connection)
         before = state(connection)
         snapshot = connection.execute('SELECT pg_export_snapshot()').fetchone()[0]
         if not re.fullmatch(r'[0-9A-F]+-[0-9A-F]+-[0-9]+', snapshot):
@@ -283,8 +288,8 @@ def backup(env, destination):
     return private.sha(directory / 'manifest.json')
 
 
-def approved_archive(directory, expected):
-    directory = private.private_directory(directory, local_stack)
+def approved_archive(directory, expected, local=local_stack):
+    directory = private.private_directory(directory, local)
     raw = private.private_file(directory / 'manifest.json', 2 * 1024 * 1024)
     if not re.fullmatch(r'[0-9a-f]{64}', expected or '') or hashlib.sha256(raw).hexdigest() != expected:
         reject('manifest_approval_required')
@@ -329,30 +334,132 @@ def restore(env, archive_directory, expected, destination):
         if json.loads(json.dumps(actual)) != manifest['state']:
             reject('restored_state_mismatch')
         connection.rollback()
+    private.write_json(directory / 'promotion.json', promotion_receipt(env, expected, actual['source_id']))
     private.write_json(directory / 'completed.json', {'status': 'verified', 'manifest_sha256': expected,
         'source_id': actual['source_id'], 'tables': len(actual['tables']), 'sequences': len(actual['sequences'])})
 
 
+def database_identity(env):
+    return {key: env[key] for key in private.DATABASE_IDENTITY if key != 'PUBBURI_JPA_SOURCE_ID'}
+
+
+def promotion_receipt(env, manifest_pin, source_id):
+    target = hashlib.sha256(json.dumps(database_identity(env), sort_keys=True).encode()).hexdigest()
+    return {'schema_version': 1, 'manifest_sha256': manifest_pin, 'source_id': source_id, 'target_sha256': target}
+
+
+def promotion_fence(connection, env, *, source):
+    guard(connection, env)
+    if connection.execute('SELECT EXISTS(SELECT 1 FROM pg_prepared_xacts WHERE database=current_database())').fetchone()[0]:
+        reject('prepared_transactions_present')
+    if not source:
+        stopped_roles(connection)
+    elif connection.execute("""SELECT EXISTS(SELECT 1 FROM pg_roles r
+        WHERE NOT r.rolsuper AND r.rolname<>current_user
+          AND has_database_privilege(r.oid,current_database(),'CONNECT'))""").fetchone()[0]:
+        # Source remains fenced even when a shared runtime role is opened on the target.
+        reject('selected_source_connect_granted')
+
+
+def promote(local, source, target, archive_dir, manifest_pin, restore_dir, completion_pin, pg_config, release_dir):
+    with local.operation_lock():
+        previous = private.selection_record(local)
+        if previous is None:
+            reject('selected_source_required')
+        selected = private.configuration(previous['pg_config'], previous['config_sha256'])
+        directory = Path(release_dir)
+        pins = private.selection_pins(Path(pg_config), directory)
+        runtime = private.configuration(pg_config, pins['config_sha256'])
+        directory, _ = private.release(directory, local)
+        manifest, _ = approved_archive(archive_dir, manifest_pin, local)
+        state_at_backup = manifest['state']
+        source_id = state_at_backup['source_id']
+        if (database_identity(source) != database_identity(selected)
+                or database_identity(target) != database_identity(runtime)
+                or source['PUBBURI_PG_DB_NAME'] != manifest['source_database']
+                or source['PUBBURI_PG_DB_NAME'] == target['PUBBURI_PG_DB_NAME']
+                or source_id != selected['PUBBURI_JPA_SOURCE_ID'] or source_id != runtime['PUBBURI_JPA_SOURCE_ID']
+                or source['PUBBURI_PG_USER'] == selected['PUBBURI_PG_USER']
+                or target['PUBBURI_PG_USER'] == runtime['PUBBURI_PG_USER']):
+            reject('promotion_identity_mismatch')
+        restored = private.private_directory(restore_dir, local)
+        completion = private.strict_json(private.private_file(restored / 'completed.json', 8192))
+        raw = private.private_file(restored / 'promotion.json', 8192)
+        receipt = private.strict_json(raw)
+        if (not re.fullmatch(r'[0-9a-f]{64}', completion_pin or '')
+                or hashlib.sha256(raw).hexdigest() != completion_pin
+                or not isinstance(receipt, dict) or type(receipt.get('schema_version')) is not int
+                or receipt != promotion_receipt(target, manifest_pin, source_id)
+                or completion != {'status': 'verified', 'manifest_sha256': manifest_pin, 'source_id': source_id,
+                    'tables': len(PRIMARY), 'sequences': len(SEQUENCES)}):
+            reject('promotion_completion_mismatch')
+        for env in (source, target, runtime):
+            verify_owned_postgres(env, child_env=private.base_environment())
+
+        with ExitStack() as stack:
+            connections = []
+            for env, is_source in ((source, True), (target, False)):
+                connection = connect(env)
+                stack.callback(connection.close)
+                promotion_fence(connection, env, source=is_source)
+                connection.execute('BEGIN ISOLATION LEVEL READ COMMITTED')
+                lock_business_tables(connection)
+                if json.loads(json.dumps(state(connection))) != state_at_backup:
+                    reject('selected_source_changed' if is_source else 'restored_target_changed')
+                connections.append((connection, env, is_source))
+            target_connection = connections[-1][0]
+            if target_connection.execute("""SELECT NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole
+                OR rolreplication OR rolbypassrls)
+                AND has_database_privilege(oid,current_database(),'CONNECT') FROM pg_roles WHERE rolname=%s
+                """, (runtime['PUBBURI_PG_USER'],)).fetchone() != (True,):
+                reject('promotion_target_runtime_not_stopped_or_missing')
+            if private.selection_record(local) != previous:
+                reject('selected_source_changed')
+            private.configuration(previous['pg_config'], previous['config_sha256'])
+            for connection, env, is_source in connections:
+                promotion_fence(connection, env, source=is_source)
+            # The external CONNECT fence and both table locks cover publication.
+            private.publish_selection(local, pg_config, directory, pins, announce=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('backup','restore'))
+    parser.add_argument('command', choices=('backup','restore','promote'))
     parser.add_argument('--config', required=True)
-    parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--output-dir')
     parser.add_argument('--archive-dir')
     parser.add_argument('--expected-sha256')
+    parser.add_argument('--target-config')
+    parser.add_argument('--restore-dir')
+    parser.add_argument('--expected-restore-sha256')
+    parser.add_argument('--pg-config')
+    parser.add_argument('--release-dir')
     args = parser.parse_args()
     try:
-        with local_stack.operation_lock(), cleanup_on_termination():
-            env = configuration(args.config)
-            if args.command == 'backup':
-                if args.archive_dir or args.expected_sha256:
-                    reject('unexpected_backup_arguments')
-                result = {'status':'verified','manifest_sha256':backup(env,args.output_dir)}
+        promotion_args = (args.target_config, args.restore_dir, args.expected_restore_sha256,
+                          args.pg_config, args.release_dir)
+        with cleanup_on_termination():
+            if args.command == 'promote':
+                if args.output_dir or not all((*promotion_args, args.archive_dir, args.expected_sha256)):
+                    reject('explicit_promotion_arguments_required')
+                promote(local_stack, configuration(args.config), configuration(args.target_config),
+                    args.archive_dir, args.expected_sha256, args.restore_dir,
+                    args.expected_restore_sha256, args.pg_config, args.release_dir)
+                result = {'status': 'selected', 'provider': 'postgresql', 'source_fenced': True, 'target_runtime': 'stopped'}
             else:
-                if not args.archive_dir or not args.expected_sha256:
-                    reject('explicit_archive_required')
-                restore(env,args.archive_dir,args.expected_sha256,args.output_dir)
-                result = {'status':'verified'}
+                if any(promotion_args) or not args.output_dir:
+                    reject('unexpected_recovery_arguments')
+                with local_stack.operation_lock():
+                    env = configuration(args.config)
+                    if args.command == 'backup':
+                        if args.archive_dir or args.expected_sha256:
+                            reject('unexpected_backup_arguments')
+                        result = {'status':'verified','manifest_sha256':backup(env,args.output_dir)}
+                    else:
+                        if not args.archive_dir or not args.expected_sha256:
+                            reject('explicit_archive_required')
+                        restore(env,args.archive_dir,args.expected_sha256,args.output_dir)
+                        result = {'status':'verified'}
         print(json.dumps(result))
         return 0
     except Exception:

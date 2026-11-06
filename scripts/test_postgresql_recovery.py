@@ -115,6 +115,32 @@ class PostgreSQLRecoveryTests(TestCase):
                     recovery.restore(self.env(),'archive','a'*64,target)
                 self.assertTrue((target/'attempt.json').exists())
                 self.assertFalse((target/'completed.json').exists())
+                self.assertFalse((target/'promotion.json').exists())
+
+    def test_promotion_checks_prepared_work_and_rejects_source_connect_even_for_nologin_roles(self):
+        connection = Mock()
+        with patch.object(recovery, 'guard'), patch.object(recovery, 'stopped_roles') as stopped:
+            connection.execute.return_value.fetchone.return_value = (True,)
+            for source in (True, False):
+                with self.assertRaisesRegex(ValueError, 'prepared_transactions_present'):
+                    recovery.promotion_fence(connection, self.env(), source=source)
+            stopped.assert_not_called()
+            prepared, connect = Mock(), Mock()
+            prepared.fetchone.return_value = (False,)
+            connect.fetchone.return_value = (True,)
+            connection.execute.side_effect = [prepared, connect]
+            with self.assertRaisesRegex(ValueError, 'selected_source_connect_granted'):
+                recovery.promotion_fence(connection, self.env(), source=True)
+
+    def test_promotion_receipt_is_bound_to_the_physical_target_and_archive(self):
+        original = self.env()
+        receipt = recovery.promotion_receipt(original, 'a' * 64, 'source-uuid')
+        for change in ({'PUBBURI_PG_DB_NAME': 'other_ci'}, {'PUBBURI_PG_CONTAINER_ID': 'b' * 64},
+                       {'PUBBURI_PG_RUN_TOKEN': 'other-owned-marker'}, {'PUBBURI_PG_VALIDATION_LABEL': 'other-owned'}):
+            self.assertNotEqual(receipt, recovery.promotion_receipt(dict(original, **change), 'a' * 64, 'source-uuid'))
+        self.assertNotEqual(receipt, recovery.promotion_receipt(original, 'b' * 64, 'source-uuid'))
+        self.assertNotIn(original['PUBBURI_PG_RUN_TOKEN'], json.dumps(receipt))
+        self.assertNotIn(original['PUBBURI_PG_PASSWORD'], json.dumps(receipt))
 
     def test_known_table_and_sequence_set_include_all_raw_review_tags_and_control_receipts(self):
         self.assertEqual(len(recovery.PRIMARY),19)
