@@ -6,12 +6,24 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface RecommendationFeedbackRepository
         extends JpaRepository<JpaRecommendationFeedback, JpaRecommendationFeedback.Key> {
     @Query("select f.feedback from JpaRecommendationFeedback f where f.userId=:userId and f.productId=:productId")
     Optional<Choice> choice(@Param("userId") String userId, @Param("productId") int productId);
+
+    interface SavedChoice {
+        int getProductId();
+        Choice getFeedback();
+    }
+
+    @Query("""
+        select f.productId as productId, f.feedback as feedback from JpaRecommendationFeedback f
+        where f.userId=:userId and f.productId in :productIds order by f.productId
+        """)
+    List<SavedChoice> savedChoices(@Param("userId") String userId, @Param("productIds") List<Integer> productIds);
 
     @Modifying
     @Query(value = """

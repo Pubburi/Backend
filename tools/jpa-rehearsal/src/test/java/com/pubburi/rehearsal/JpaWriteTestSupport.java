@@ -35,12 +35,17 @@ abstract class JpaWriteTestSupport {
     }
 
     Reply request(HttpClient client, String method, String path, Object body) throws Exception {
+        return request(client, method, path, body, Map.of());
+    }
+
+    Reply request(HttpClient client, String method, String path, Object body, Map<String, String> headers) throws Exception {
         String text = body instanceof String ? (String) body : body == null ? null : json.writeValueAsString(body);
         var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
             .timeout(Duration.ofSeconds(8)).header("Accept", "application/json");
         builder.method(method, text == null ? HttpRequest.BodyPublishers.noBody()
             : HttpRequest.BodyPublishers.ofString(text, StandardCharsets.UTF_8));
         if (text != null) builder.header("Content-Type", "application/json");
+        headers.forEach(builder::header);
         var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), json.readTree(response.body()));
     }

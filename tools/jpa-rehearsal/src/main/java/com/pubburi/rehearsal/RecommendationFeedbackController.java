@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.pubburi.pub.controller.api.ApiResponse;
 import com.pubburi.pub.controller.auth.AccessGuard;
+import com.pubburi.pub.controller.auth.FeedbackOwner;
 import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.rehearsal.persistence.JpaRecommendationFeedback.Choice;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,15 +25,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 
 @RestController
 @RequestMapping(value = "/api/users/me/recommendations/feedback/{productId}", produces = MediaType.APPLICATION_JSON_VALUE)
 public class RecommendationFeedbackController {
-    static final String OWNER_HEADER = "X-Pubburi-Feedback-Owner";
-    private static final String OWNER_DESCRIPTION = "Percent-encoded expected current account ID. A mismatch is rejected.";
     private final AccessGuard guard;
     private final RecommendationFeedbackService service;
 
@@ -49,7 +45,7 @@ public class RecommendationFeedbackController {
 
     @GetMapping
     @Operation(summary = "Read the current account's stored feedback; null if absent",
-        parameters = @Parameter(name = OWNER_HEADER, in = ParameterIn.HEADER, required = true, description = OWNER_DESCRIPTION))
+        parameters = @Parameter(name = FeedbackOwner.HEADER, in = ParameterIn.HEADER, required = true, description = FeedbackOwner.DESCRIPTION))
     public ApiResponse<FeedbackResponse> get(@PathVariable String productId, HttpServletRequest request, HttpSession session) {
         var owner = owner(request, session);
         int id = productId(productId);
@@ -61,7 +57,7 @@ public class RecommendationFeedbackController {
 
     @PutMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Set the current account's stored feedback for an existing product",
-        parameters = @Parameter(name = OWNER_HEADER, in = ParameterIn.HEADER, required = true, description = OWNER_DESCRIPTION))
+        parameters = @Parameter(name = FeedbackOwner.HEADER, in = ParameterIn.HEADER, required = true, description = FeedbackOwner.DESCRIPTION))
     public ApiResponse<FeedbackResponse> put(@PathVariable String productId,
             @RequestBody FeedbackInput input, HttpServletRequest request, HttpSession session) {
         var owner = owner(request, session);
@@ -73,7 +69,7 @@ public class RecommendationFeedbackController {
 
     @DeleteMapping
     @Operation(summary = "Clear the current account's stored feedback",
-        parameters = @Parameter(name = OWNER_HEADER, in = ParameterIn.HEADER, required = true, description = OWNER_DESCRIPTION))
+        parameters = @Parameter(name = FeedbackOwner.HEADER, in = ParameterIn.HEADER, required = true, description = FeedbackOwner.DESCRIPTION))
     public ApiResponse<FeedbackResponse> delete(@PathVariable String productId, HttpServletRequest request, HttpSession session) {
         var owner = owner(request, session);
         int id = productId(productId);
@@ -83,15 +79,9 @@ public class RecommendationFeedbackController {
 
     private SessionUser owner(HttpServletRequest request, HttpSession session) {
         var owner = guard.requireLogin(session);
-        var expected = Collections.list(request.getHeaders(OWNER_HEADER));
-        if (expected.size() != 1 || !expected.get(0).matches("(?:[a-zA-Z0-9.!~*'()_-]|%[0-9A-F]{2})++")) {
+        if (!FeedbackOwner.confirmed(request, owner)) {
             throw new IllegalArgumentException("Exactly one canonically encoded feedback owner header is required");
         }
-        // Match encodeURIComponent exactly. URLDecoder silently replaces malformed UTF-8.
-        String encoded = URLEncoder.encode(owner.id(), StandardCharsets.UTF_8)
-            .replace("+", "%20").replace("%21", "!").replace("%27", "'")
-            .replace("%28", "(").replace("%29", ")").replace("%7E", "~");
-        if (!encoded.equals(expected.get(0))) throw expired();
         if (request.getQueryString() != null) throw new IllegalArgumentException("Query parameters are not supported");
         return owner;
     }

@@ -4,6 +4,7 @@ import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.model.dao.ProductDao;
 import com.pubburi.pub.model.dao.UserDao;
 import com.pubburi.rehearsal.persistence.JpaRecommendationFeedback.Choice;
+import com.pubburi.pub.recommendation.FeedbackSignals;
 import com.pubburi.rehearsal.persistence.RecommendationFeedbackRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -11,8 +12,11 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Service
-public class RecommendationFeedbackService {
+public class RecommendationFeedbackService implements FeedbackSignals.Reader {
     private final UserDao users;
     private final ProductDao products;
     private final RecommendationFeedbackRepository feedback;
@@ -29,6 +33,16 @@ public class RecommendationFeedbackService {
             throw expired();
         }
         return feedback.choice(session.id(), productId).orElse(null);
+    }
+
+    @Override
+    public FeedbackSignals readFeedback(String userId, List<Integer> productIds) {
+        var matched = new ArrayList<Integer>();
+        var notInterested = new ArrayList<Integer>();
+        for (var row : feedback.savedChoices(userId, productIds)) {
+            (row.getFeedback() == Choice.MATCHED ? matched : notInterested).add(row.getProductId());
+        }
+        return new FeedbackSignals(matched, notInterested);
     }
 
     @Transactional

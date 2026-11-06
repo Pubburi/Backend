@@ -20,35 +20,76 @@ public class OwnedContentRecommendationService {
     private final ContentCatalogSource catalogs;
     private final ContentGateway gateway;
     private final ContentContract contract;
+    private final FeedbackContract feedbackContract;
     private final ObjectMapper mapper;
-    public OwnedContentRecommendationService(OwnedContentSnapshotService snapshots,ContentCatalogSource catalogs,ContentGateway gateway,ObjectMapper mapper){this.snapshots=snapshots;this.catalogs=catalogs;this.gateway=gateway;this.mapper=mapper;contract=new ContentContract(mapper);}
-    // The two snapshot services own short RR transactions; remote fit/I/O is outside both.
-    public ContentRecommendationResponse recommend(String id,String epoch,int limit, boolean includeActivity){
-        if(limit<1 || limit>12)throw new IllegalArgumentException("Recommendation limit must be between 1 and 12");
+    public OwnedContentRecommendationService(OwnedContentSnapshotService snapshots, ContentCatalogSource catalogs,
+            ContentGateway gateway, ObjectMapper mapper) {
+        this.snapshots = snapshots;
+        this.catalogs = catalogs;
+        this.gateway = gateway;
+        this.mapper = mapper;
+        contract = new ContentContract(mapper);
+        feedbackContract = new FeedbackContract(contract);
+    }
+    public ContentRecommendationResponse recommend(String id, String epoch, int limit, boolean includeActivity) {
+        return recommend(id, epoch, limit, includeActivity, false);
+    }
+
+    // The two snapshots own short RR transactions; the provider call stays outside both.
+    public ContentRecommendationResponse recommend(String id, String epoch, int limit, boolean includeActivity,
+            boolean includeFeedback) {
+        if (limit < 1 || limit > 12) throw new IllegalArgumentException("Recommendation limit must be between 1 and 12");
         var approved = catalogs.current();
         var ids = approved.map(ContentCatalogSource.Catalog::ids).orElse(List.of());
         var activityIds = includeActivity && approved.isPresent() ? availableIds(approved.get()) : List.<Integer>of();
-        var before = snapshots.read(id, epoch, ids, activityIds);
-        if(approved.isEmpty())return ContentRecommendationResponse.unavailable();
-        var catalog=approved.get();requireCurrent(catalog,before);
-        var response=gateway.recommend(catalog.catalog(),before.preferences(),limit,before.activity());
-        var current=snapshots.read(id,epoch,ids,activityIds);
-        if(!equal(mapper.valueToTree(before.preferences()),mapper.valueToTree(current.preferences())))changed();
-        if (!Objects.equals(before.activity(), current.activity())) changed();
-        requireCurrent(catalog,current);
-        var after=catalogs.current();
-        if(after.isEmpty())return ContentRecommendationResponse.unavailable();
-        if(!catalog.sha256().equals(after.get().sha256()))changed();
-        if(response.isPresent()){
-            try{
-                var result=contract.validate(response.get(),catalog.catalog(),effectivePreferences(before),limit);
-                return new ContentRecommendationResponse(Source.PROVIDER,catalog.scope(),result,
-                    result.items().stream().map(item->current.products().get(item.productId()).currentProduct()).toList(),
-                    usedEvidence(before.activity(), result));
-            }catch(IllegalArgumentException invalid){/* No local score, replacement catalog or weaker B0 result. */}
+        boolean useFeedback = includeFeedback && approved.map(catalog -> catalog.scope() == CatalogScope.REVIEWED_DEMO).orElse(false);
+        var before = snapshot(id, epoch, ids, activityIds, useFeedback);
+        if (approved.isEmpty()) return ContentRecommendationResponse.unavailable();
+
+        var catalog = approved.get();
+        requireCurrent(catalog, before);
+        var signals = before.feedback();
+        if (!signals.withinProviderLimit()) return ContentRecommendationResponse.unavailable();
+        var response = signals.isEmpty()
+            ? gateway.recommend(catalog.catalog(), before.preferences(), limit, before.activity())
+            : gateway.feedback(catalog.catalog(), before.preferences(), limit, before.activity(), signals);
+
+        var current = snapshot(id, epoch, ids, activityIds, useFeedback);
+        if (!equal(mapper.valueToTree(before.preferences()), mapper.valueToTree(current.preferences()))
+                || !Objects.equals(before.activity(), current.activity()) || !signals.equals(current.feedback())) changed();
+        requireCurrent(catalog, current);
+        var after = catalogs.current();
+        if (after.isEmpty()) return ContentRecommendationResponse.unavailable();
+        if (!catalog.sha256().equals(after.get().sha256())) changed();
+        if (response.isEmpty()) return ContentRecommendationResponse.unavailable();
+
+        try {
+            var preferences = effectivePreferences(before);
+            Result result;
+            FeedbackEvidence feedbackEvidence = null;
+            if (signals.isEmpty()) {
+                result = contract.validate(response.get(), catalog.catalog(), preferences, limit);
+            } else {
+                var checked = feedbackContract.validate(response.get(), catalog.catalog(), preferences, limit, signals);
+                result = checked.result();
+                var refs = checked.winningIds().stream().map(productId ->
+                    new PositiveReference(productId, current.products().get(productId).currentProduct().name())).toList();
+                feedbackEvidence = new FeedbackEvidence(checked.rankingMode(), checked.excludedNotInterestedCount(), refs);
+            }
+            return new ContentRecommendationResponse(Source.PROVIDER, catalog.scope(), result,
+                result.items().stream().map(item -> current.products().get(item.productId()).currentProduct()).toList(),
+                usedEvidence(before.activity(), result), feedbackEvidence);
+        } catch (IllegalArgumentException invalid) {
+            // No unfiltered retry or fabricated fallback after negative feedback.
+            return ContentRecommendationResponse.unavailable();
         }
-        return ContentRecommendationResponse.unavailable();
     }
+
+    private OwnedContentSnapshotService.Snapshot snapshot(String id, String epoch, List<Integer> ids,
+            List<Integer> activityIds, boolean feedback) {
+        return feedback ? snapshots.read(id, epoch, ids, activityIds, true) : snapshots.read(id, epoch, ids, activityIds);
+    }
+
     private List<Integer> availableIds(ContentCatalogSource.Catalog catalog) {
         var available = new ArrayList<Integer>();
         for (JsonNode product : catalog.catalog()) {
@@ -71,6 +112,7 @@ public class OwnedContentRecommendationService {
         if (activity == null) return null;
         var categories = new HashSet<String>();
         for (var item : result.items()) {
+            if (!text(item.explanation().path("comparison").get("kind"), "profile")) continue;
             for (var contribution : item.contributions()) {
                 if (contribution.component().equals("text") && contribution.feature().startsWith("category:")) {
                     categories.add(contribution.feature().substring("category:".length()));

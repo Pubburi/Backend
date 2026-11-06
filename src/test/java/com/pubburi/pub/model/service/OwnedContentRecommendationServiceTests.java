@@ -38,4 +38,26 @@ class OwnedContentRecommendationServiceTests {
         assertThat(unavailable.catalogScope().name()).isEqualTo("REVIEWED_DEMO");assertThat(unavailable.result()).isNull();assertThat(unavailable.products()).isEmpty();
     }
 
+    @Test void feedbackOverflowAndProviderFailureNeverIssueUnfilteredRecommendations() throws Exception {
+        var catalog = ContentFixtures.catalog();
+        var current = snapshot(catalog);
+        var snapshots = mock(OwnedContentSnapshotService.class);
+        var gateway = mock(ContentGateway.class);
+        var service = new OwnedContentRecommendationService(snapshots, () -> Optional.of(catalog), gateway, ContentFixtures.JSON);
+        var overflow = java.util.stream.IntStream.rangeClosed(1, 21).boxed().toList();
+        for (var signals : List.of(new FeedbackSignals(List.of(), overflow), new FeedbackSignals(overflow, List.of()))) {
+            when(snapshots.read("own", "epoch", catalog.ids(), List.of(), true)).thenReturn(
+                new OwnedContentSnapshotService.Snapshot(current.preferences(), current.products(), null, signals));
+            assertThat(service.recommend("own", "epoch", 4, false, true).source().name()).isEqualTo("UNAVAILABLE");
+            verifyNoInteractions(gateway);
+        }
+        var negative = new FeedbackSignals(List.of(), List.of(81));
+        when(snapshots.read("own", "epoch", catalog.ids(), List.of(), true)).thenReturn(
+            new OwnedContentSnapshotService.Snapshot(current.preferences(), current.products(), null, negative));
+        when(gateway.feedback(catalog.catalog(), current.preferences(), 4, null, negative)).thenReturn(Optional.empty());
+        assertThat(service.recommend("own", "epoch", 4, false, true).source().name()).isEqualTo("UNAVAILABLE");
+        verify(gateway).feedback(catalog.catalog(), current.preferences(), 4, null, negative);
+        verifyNoMoreInteractions(gateway);
+    }
+
 }
