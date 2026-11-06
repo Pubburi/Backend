@@ -15,6 +15,18 @@ products=[]이며 기존 REVIEWED_DEMO를 유지한다. 새 family scope는 승�
 `highlyRatedCategories` 배열을 제공한다. 근거가 없거나 UNAVAILABLE이면 이 필드를 생략한다.
 모든 응답은 private, no-store·Vary Cookie다. 점수는 만족 확률/품질 성과가 아니며 결과를 저장하지 않는다.
 
+## 상품 상세의 유사 상품
+
+공개 `GET /api/products/{id}/similar`는 현재 기준 상품에 대해 최대 4개의 `ProductResponse`를
+ApiResponse `data.items`에 반환한다. 존재하지 않는 기준은 404다. 응답 캐시는 `no-store`다.
+호출은 기존 container `REVIEWED_DEMO`의 검수 상품에만 한정한다. family-browse 전용이나 미승인
+상품, 모델 실패, 만료 또는 상품/특성 변경은 200 빈 배열로 처리한다.
+
+Python의 [유사 후보 계약](https://github.com/Pubburi/Recommendation/blob/main/docs/SIMILAR-API.md)에
+고정 catalog·기준 ID·limit만 전송한다. 응답의 양수 기여와 후보·정렬을 검사해 기준/같은 그룹,
+삭제·판매 불가·중복 또는 미검수 ID를 반환하지 않는다. 상품/특성 binding은 원격 호출 앞뒤의
+별도 읽기 트랜잭션에서 현재 DB와 대조한다. 최종 상품 정보는 두 번째 읽기에서 가져온다.
+
 ## 검수 catalog와 현재 업무 값
 
 운영자는 Recommendation의 [공식 checked bundle](https://github.com/Pubburi/Recommendation/blob/main/docs/BACKEND-CATALOG-BUNDLE.md)을

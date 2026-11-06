@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from postgresql_schema import ROOT, verify_owned_postgres
 from search_index import _DeadlineConnection
-from api_smoke import verify_content_recommendation_openapi
+from api_smoke import verify_content_recommendation_openapi, verify_similar_products_openapi
 
 
 @contextmanager
@@ -107,15 +107,16 @@ def verify_jar(path):
 
 def verify_openapi_scope(docs):
     if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-            "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features",
+            "/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
             "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
             "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content"}:raise ValueError("jpa_runtime_route_scope_changed")
     operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-    if operations!=44:raise ValueError("jpa_runtime_operation_scope_changed")
+    if operations!=45:raise ValueError("jpa_runtime_operation_scope_changed")
     verify_content_recommendation_openapi(docs)
+    verify_similar_products_openapi(docs)
     return operations
 
 
@@ -295,8 +296,11 @@ def run(environ):
             status,features=request(anonymous,base,"GET","/api/products/"+str(first_product["id"])+"/features");expect(status,200)
             if set(features["data"])!={"productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"} or features["data"]["productId"]!=first_product["id"]:
                 raise ValueError("jpa_runtime_product_feature_shape_changed")
+            status,similar=request(anonymous,base,"GET",f"/api/products/{first_product['id']}/similar");expect(status,200)
+            if similar["data"]!={"items":[]}:raise ValueError("jpa_runtime_unapproved_similar_catalog_sent")
         expect(request(anonymous,base,"GET","/api/products/0")[0],404)
         expect(request(anonymous,base,"GET","/api/products/0/features")[0],404)
+        expect(request(anonymous,base,"GET","/api/products/0/similar")[0],404)
         expect(request(anonymous,base,"GET","/api/products?page=2147483647&size=12")[0],400)
         expect(request(anonymous,base,"GET","/api/products?minAbvPercent=5.555")[0],400)
         authored_product={"name":"ci_jpa_packaged_"+uuid.uuid4().hex,"type":"증류주","price":1200,"img":"authored.png","abv":15.5,"orderCount":0}
@@ -414,7 +418,7 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":37,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":38,"registered_api_operations":operations,
             "public_default_current_fallback":True,
             "self_profile_password_and_session_rotation":True,
             "private_preferences_and_lifecycle":True,

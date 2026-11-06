@@ -208,6 +208,62 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             assertEquals(account,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
         }
     }
+
+    @Test void publicSimilarLinksUseCurrentApprovedProductsAndSuppressDriftOrFamilyOnlyScope() throws Exception {
+        try (var f = new Fixture()) {
+            int anchor = f.ids.get(0), candidate = f.ids.get(1);
+            String path = "/api/products/" + anchor + "/similar";
+            var replacement = new HashMap<String, Object>(product(ownName(), 2000));
+            replacement.put("type", "맥주");
+            replacement.put("abv", 10);
+            assertEquals(200, request(f.admin, "PUT", "/api/admin/products/" + candidate, replacement).status());
+            f.bind(CatalogScope.REVIEWED_DEMO);
+            remote.handler.set((exchange, body) -> remote.reply(exchange, 200, similarPositive(body, candidate)));
+
+            var reply = request(client(), "GET", path, null);
+            assertEquals(200, reply.status());
+            assertEquals(Set.of("items"), keys(reply.body().path("data")));
+            assertEquals(1, reply.body().at("/data/items").size());
+            assertEquals(request(client(), "GET", "/api/products/" + candidate, null).body().path("data"),
+                reply.body().at("/data/items/0"));
+            assertEquals(Set.of("catalog", "reference_product_id", "limit"), keys(remote.last.get()));
+            assertEquals(anchor, remote.last.get().path("reference_product_id").intValue());
+            assertEquals(4, remote.last.get().path("limit").intValue());
+            assertNull(remote.cookie.get());
+            assertNull(remote.authorization.get());
+            assertEquals(Boolean.FALSE, observed.inside.get());
+
+            remote.handler.set((exchange, body) -> {
+                assertEquals(200, request(f.admin, "PUT", "/api/admin/products/" + candidate + "/features",
+                    Map.of("volumeMl", 500, "sourceName", "Current authored change")).status());
+                remote.reply(exchange, 200, similarPositive(body, candidate));
+            });
+            assertEquals(json.valueToTree(Map.of("items", List.of())), request(client(), "GET", path, null).body().path("data"));
+            int calls = remote.calls.get();
+            assertEquals(json.valueToTree(Map.of("items", List.of())), request(client(), "GET", path, null).body().path("data"));
+            f.bind(CatalogScope.REVIEWED_FAMILY_BROWSE_DEMO);
+            assertEquals(json.valueToTree(Map.of("items", List.of())), request(client(), "GET", path, null).body().path("data"));
+            assertEquals(404, request(client(), "GET", "/api/products/0/similar", null).status());
+            assertEquals(calls, remote.calls.get());
+        }
+    }
+
+    private ObjectNode similarPositive(JsonNode request, int candidate) {
+        int reference = request.path("reference_product_id").intValue();
+        var root = json.createObjectNode().put("algorithm", "b1-tfidf-minmax-v1").put("fit_scope", "request_catalog")
+            .put("representation_fitted", true).put("model_fingerprint", "a".repeat(64))
+            .put("eligible_count", 1).put("supported_profile_tokens", 1).put("unknown_profile_tokens", 0)
+            .putNull("fallback_reason").put("reference_product_id", reference)
+            .put("reference_sku_group", "authored-" + reference).put("reference_state", "available")
+            .put("profile_source", "reference_product_facts").put("reference_group_policy", "exclude_reference_group")
+            .put("excluded_reference_group_count", 1);
+        root.putArray("active_numeric_preferences").add("abv_percent").add("volume_ml");
+        var item = root.putArray("items").addObject().put("product_id", candidate).put("score", 1.0 / 3);
+        item.putArray("reasons").add("available").add("content_similarity");
+        item.putArray("contributions").addObject().put("component", "text").put("feature", "category:맥주")
+            .put("contribution", 1.0 / 3);
+        return root;
+    }
     @Test void storedZeroUnknownAndHardBoundsRemainExactAndTamperedFactsNeverBecomeRecommendations()throws Exception{
         try(var f=new Fixture()){
             assertEquals(200,request(f.owner,"PUT",PREFS,"{\"surveyStatus\":\"COMPLETED\",\"softPreferences\":{\"tasteTags\":[],\"aromaTags\":null,\"targetAbvPercent\":0.00},\"hardConstraints\":{\"minPriceKrw\":0,\"maxPriceKrw\":0,\"minAbvPercent\":0.00,\"maxAbvPercent\":10.00}}").status());
@@ -264,13 +320,25 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         root.put("eligible_count",maxZero?0:request.path("catalog").size());root.put("supported_profile_tokens",0);root.put("unknown_profile_tokens",0);root.putArray("active_numeric_preferences");if(numeric)root.withArray("active_numeric_preferences").add("abv_percent");root.put("fallback_reason",maxZero?"no_eligible_products":"no_supported_preferences");var items=root.putArray("items");if(!maxZero)for(var row:request.path("catalog")){var item=items.addObject();item.set("product_id",row.get("product_id"));item.put("score",0);item.putArray("reasons").add("available").add("deterministic_baseline");item.putArray("contributions");var e=item.putObject("explanation");e.put("version","r04-facts-v1");e.put("basis","deterministic_baseline");e.putObject("comparison").put("kind","profile");e.putArray("score_evidence");e.put("total_positive_contributions",0);e.put("score_evidence_truncated",false);e.putArray("filter_evidence").addObject().put("kind","availability_filter").put("label","입력 가용 조건 충족").put("actual_value",true);e.put("fallback_reason","no_supported_preferences");}return root;
     }
     static class Source implements ContentCatalogSource {final AtomicReference<Optional<Catalog>> value=new AtomicReference<>(Optional.empty());@Override public Optional<Catalog> current(){return value.get();}}
-    static class Observed implements ContentGateway {final ContentGateway delegate;final AtomicReference<Boolean> inside=new AtomicReference<>();Observed(ContentGateway delegate){this.delegate=delegate;}@Override public Optional<JsonNode> recommend(JsonNode c,UserPreferencesResponse p,int l,ActivityEvidence activity){inside.set(TransactionSynchronizationManager.isActualTransactionActive());return delegate.recommend(c,p,l,activity);}}
+    static class Observed implements ContentGateway, SimilarProductGateway {
+        final ContentHttpClient delegate;
+        final AtomicReference<Boolean> inside = new AtomicReference<>();
+        Observed(ContentHttpClient delegate) { this.delegate = delegate; }
+        @Override public Optional<JsonNode> recommend(JsonNode c, UserPreferencesResponse p, int l, ActivityEvidence activity) {
+            inside.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return delegate.recommend(c, p, l, activity);
+        }
+        @Override public Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit) {
+            inside.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return delegate.similar(catalog, referenceId, limit);
+        }
+    }
     static class Gate implements StatementInspector {final AtomicBoolean armed=new AtomicBoolean();volatile CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);@Override public String inspect(String sql){if(sql.contains("left join") && sql.contains("t_product_feature") && armed.compareAndSet(true,false)){entered.countDown();try{if(!release.await(4,TimeUnit.SECONDS))throw new IllegalStateException("Owned RR test gate deadline");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}}return sql;}}
-    @TestConfiguration(proxyBeanMethods=false) static class Probes {@Bean @Primary Source source(){return new Source();}@Bean @Primary Observed observed(@Qualifier("contentGateway")ContentGateway gateway){return new Observed(gateway);}@Bean Gate gate(){return new Gate();}@Bean HibernatePropertiesCustomizer gates(Gate gate){return properties->properties.put("hibernate.session_factory.statement_inspector",gate);}}
+    @TestConfiguration(proxyBeanMethods=false) static class Probes {@Bean @Primary Source source(){return new Source();}@Bean @Primary Observed observed(@Qualifier("contentGateway")ContentHttpClient gateway){return new Observed(gateway);}@Bean Gate gate(){return new Gate();}@Bean HibernatePropertiesCustomizer gates(Gate gate){return properties->properties.put("hibernate.session_factory.statement_inspector",gate);}}
     @FunctionalInterface interface Handler {void handle(HttpExchange exchange,JsonNode body)throws Exception;}
     static class Remote implements AutoCloseable {
         final HttpServer server;final ExecutorService executor=Executors.newCachedThreadPool();final AtomicReference<Handler> handler=new AtomicReference<>();final AtomicInteger calls=new AtomicInteger();final AtomicReference<JsonNode> last=new AtomicReference<>();final AtomicReference<String> cookie=new AtomicReference<>(),authorization=new AtomicReference<>();
-        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{assertEquals("/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes()));cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,last.get());}catch(Throwable error){exchange.close();}});server.start();}
+        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_id")?"/v1/recommendations/similar":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
         String origin(){return "http://127.0.0.1:"+server.getAddress().getPort();}void reply(HttpExchange exchange,int status,JsonNode body)throws Exception{reply(exchange,status,new ObjectMapper().writeValueAsString(body));}void reply(HttpExchange exchange,int status,String body)throws Exception{byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(status,bytes.length);try(var output=exchange.getResponseBody()){output.write(bytes);}}@Override public void close(){server.stop(0);executor.shutdownNow();try{assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));}catch(InterruptedException error){Thread.currentThread().interrupt();throw new IllegalStateException(error);}}
     }
 }

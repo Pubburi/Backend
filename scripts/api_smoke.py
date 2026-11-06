@@ -197,6 +197,7 @@ def documentation_contract(port):
     verify_default_recommendation_openapi(document)
     verify_search_phrase_openapi(document)
     verify_content_recommendation_openapi(document)
+    verify_similar_products_openapi(document)
     verify_product_filter_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
@@ -349,6 +350,20 @@ def verify_content_recommendation_openapi(document):
     assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]
 
 
+def verify_similar_products_openapi(document):
+    path = document["paths"]["/api/products/{id}/similar"]
+    assert {key for key in path if key in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"get"}
+    operation = path["get"]
+    assert [(parameter["name"], parameter["in"]) for parameter in operation["parameters"]] == [("id", "path")]
+    assert "requestBody" not in operation
+    schemas = document["components"]["schemas"]
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    envelope = schemas[response["$ref"].split("/")[-1]]
+    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
+    assert set(data["properties"]) == {"items"}
+    assert data["properties"]["items"] == {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}
+
+
 def default_recommendation_contract(client, expected_source=None):
     total = client.request("GET", "/products?size=1", 200)["data"]["total"]
     for query, size in (("", 4), ("?size=1", 1), ("?size=12", 12)):
@@ -365,6 +380,15 @@ def default_recommendation_contract(client, expected_source=None):
             assert client.request("GET", f"/products/{item['id']}", 200)["data"] == item
     for size in ("0", "13", "abc", "1.5", "2147483648"):
         client.request("GET", "/recommendations/default?size=" + size, 400, error_code="BAD_REQUEST")
+    if total:
+        first = client.request("GET", "/products?size=1", 200)["data"]["items"][0]
+        similar = client.request("GET", f"/products/{first['id']}/similar", 200)["data"]
+        assert set(similar) == {"items"} and len(similar["items"]) <= 4
+        ids = {item["id"] for item in similar["items"]}
+        assert len(ids) == len(similar["items"]) and first["id"] not in ids
+        for item in similar["items"]:
+            assert client.request("GET", f"/products/{item['id']}", 200)["data"] == item
+    client.request("GET", "/products/0/similar", 404, error_code="NOT_FOUND")
 
 
 def change_ci_product(environ, product_id, price, name):
