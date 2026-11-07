@@ -49,6 +49,22 @@ Python의 [유사 후보 계약](https://github.com/Pubburi/Recommendation/blob/
 전체 바이트 pin·정확 shape/명시 ID·그룹·원 공개 응답 binding과 유효기한을 확인한다. 원 권위/
 매핑 검증과 모델 fit은 Recommendation 소유이며 Java가 Python의 authority loader를 복제하지 않는다.
 
+같은 업무 snapshot에서 각각 검수/발행한 여러 원천은 기존 PATH/SHA에 **로컬 합성 manifest**를
+고정해 한 B1 요청으로 소비할 수 있다. 최상위 필드는 `schema_version:1`,
+`algorithm:"checked-backend-demo-bundle-set-v1"`, `bundles`뿐이다. 각 원소는 원본 bundle 파일의
+`path`, `sha256`만 가진다. manifest 자체와 각 원본의 전체 바이트 SHA를 모두 확인한다.
+path는 manifest 디렉터리 기준 상대 경로이며 그 트리 밖이나 파일/중간 디렉터리의 심볼릭 링크는
+거절한다. 원본 파일/수령증을 새 JSON으로 재직렬화해 해시하거나 새 만료를 부여하지 않는다.
+
+2–16개 원본의 `business_snapshot_sha256`, `snapshot_origin`, `evidence_kind`, `data_scope`가
+모두 같아야 한다. 원천 catalog/매핑/산출물 hash는 각 원본에 그대로 결속되므로 서로 달라도 된다.
+각 원본을 아래 기존 v1 규칙으로 검수하고 backend ID와 catalog_record_id의 전역 중복을 거절한다.
+전체 후보는1000개, manifest와 모든 원본의 바이트 합은10MiB 이하이며 원본별 상한으로 우회하지
+못한다. 입력 순서와 원문 sku_group을 보존하고 이름으로 상품군을 합치거나 나누지 않는다.
+전체 만료는 원래 만료 중 가장 이른 시각이다. 하나라도 불일치/누락/만료/파일 변경이면 일부만
+사용하지 않고 UNAVAILABLE이다. 단일 v1·명시 family opt-in·기존 응답 scope와 현재 DB의 전체
+후보/특성 재검수는 그대로다. 이 조합은 새 원천 승인이나 서비스 SKU 승격이 아니다.
+
 기본은 container DEMO이며 family bundle을 거절한다.
 `PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED=true`를 명시한 경우에만 별도 family-browse DEMO도
 받는다. 두 runtime의 속성은 `pubburi.recommendation.content-family-browse-demo-enabled`이고 기본 false다.
