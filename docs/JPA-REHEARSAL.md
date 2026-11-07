@@ -1,8 +1,10 @@
 # PostgreSQL·JPA 계정/프로필·매장·상품·주문·후기 제공자
 
-`tools/jpa-rehearsal`은 PostgreSQL18.6에 복사한 데이터로 실제 로그인·계정/프로필·매장 CRUD·상품/특성 읽기를
-실행하고 상품/특성 쓰기와 같은 TX의 version/outbox/delivery를 생산하는 별도 Java17 애플리케이션이다. 기본 `./scripts/dev.sh`와 옵션을 생략한 통합 로컬 스택은 현재
-MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 DB03 전환 완료로 표시하지 않는다.
+기본 `pom.xml`은 현재 PG/JPA assembly를 사용한다. 기존 JPA 구현·테스트는 같은 Java package로
+`src/main`·`src/test`에 옮겼고 별도 JPA 실행 POM을 제거했다. `./mvnw verify/package`의
+`target/pubburi-server-0.0.1-SNAPSHOT.jar`는 PostgreSQL 드라이버·JPA만 포함한다.
+이관 전 MySQL은 `tools/mysql-baseline/pom.xml`과 기존 원본/비교 회귀로 보존한다.
+기본 JAR 승격은 실제 DB cutover·전체 DB03–06 완료가 아니다. 기존 local selector는 자동으로 바꾸지 않는다.
 
 준비된 copied PG는 [명시 local release 실행](LOCAL-DEVELOPMENT.md#준비된-postgresql의-명시-실행패키징)으로
 패키징/세 서버에 연결할 수 있다. installer/import·기본 스택 전환과 구분하며 기존 runtime 최소 권한을 유지한다.
@@ -219,11 +221,11 @@ SELECT/UPDATE도 기동 guard에서 거절한다. 사용자 삭제의 메모 정
 업무 schema CREATE/ALTER/DROP 거절도 확인하며 non-super라는 이름만으로 최소 권한을 주장하지 않는다.
 
 공개 CA와 비밀 환경을 로컬에서 준비한 뒤 예시의 변수명을 사용한다. 비밀번호를 argv·Git·공개
-로그에 넣지 않는다. `tools/jpa-rehearsal/.env.example`은 값이 없는 안내이며 자동 로드하지 않는다.
+로그에 넣지 않는다. `tools/postgresql-runtime.env.example`은 값이 없는 안내이며 자동 로드하지 않는다.
 
 ~~~bash
-./mvnw --batch-mode --no-transfer-progress -f tools/jpa-rehearsal/pom.xml verify
-java -jar tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar
+./mvnw --batch-mode --no-transfer-progress verify
+java -jar target/pubburi-server-0.0.1-SNAPSHOT.jar
 ~~~
 
 `PUBBURI_JPA_REHEARSAL=1`, PG URL/DB/USER/PASSWORD/RUN_TOKEN/CA, `PUBBURI_JPA_SOURCE_ID`를
@@ -233,11 +235,11 @@ java -jar tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar
 
 ## 버전과 검증 범위
 
-별도 모듈은 Boot3.5.16, Spring Data JPA3.5.13, Hibernate6.6.53.Final을 실제 resolve했다.
+기본 모듈은 Boot3.5.16, Spring Data JPA3.5.13, Hibernate6.6.53.Final을 실제 resolve했다.
 Java17을 지원하는 [Boot 요구사항](https://docs.spring.io/spring-boot/3.5/system-requirements.html)과
 [BOM](https://docs.spring.io/spring-boot/3.5/appendix/dependency-versions/coordinates.html)을 따른다.
 Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존 springdoc2.8.9의
-실제 문서 생성을 확인한다. 기본 API POM은 변경하지 않는다. Hibernate6.6의
+실제 문서 생성을 확인한다. MySQL baseline은 이전 의존성과 별도 산출물을 유지한다. Hibernate6.6의
 [제한 유지보수 상태](https://hibernate.org/orm/releases/6.6/)를 전사 지원/취약점0으로 표현하지 않는다.
 잠금 선택의 근거는 [실제 translator](https://github.com/hibernate/hibernate-orm/blob/6.6.53/hibernate-core/src/main/java/org/hibernate/dialect/PostgreSQLSqlAstTranslator.java)와
 [PostgreSQL 행 잠금](https://www.postgresql.org/docs/18/explicit-locking.html)이다.

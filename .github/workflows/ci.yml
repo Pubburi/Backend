@@ -133,8 +133,8 @@ jobs:
           ./mvnw --batch-mode --no-transfer-progress -f tools/postgresql-migration/pom.xml verify
           mkdir -p target
           python3 scripts/postgresql_schema.py validate > target/postgresql-schema-report.json
-      - name: Build explicit JPA rehearsal provider
-        run: ./mvnw --batch-mode --no-transfer-progress -f tools/jpa-rehearsal/pom.xml verify
+      - name: Build default PostgreSQL JPA provider
+        run: ./mvnw --batch-mode --no-transfer-progress verify
       - name: Verify isolated read-only source snapshot and failure recovery
         env:
           PUBBURI_SOURCE_CI_RUN: source-snapshot-ci-${{ github.run_id }}-${{ github.run_attempt }}
@@ -162,9 +162,9 @@ jobs:
           docker exec "$MYSQL_CONTAINER_ID" cat /var/lib/mysql/ca.pem > .pubburi/mysql-ca.pem
       - name: Validate local database configuration
         run: docker compose config --quiet
-      - name: Test and package
-        run: ./mvnw --batch-mode --no-transfer-progress verify
-      - name: Verify packaged HTTP API and order rollback
+      - name: Test and package explicit MySQL baseline
+        run: ./mvnw --batch-mode --no-transfer-progress -f tools/mysql-baseline/pom.xml verify
+      - name: Verify MySQL baseline HTTP API and order rollback
         env:
           PUBBURI_SMOKE_MUTATING: '1'
           PUBBURI_SMOKE_CONTAINER_ID: ${{ job.services.mysql.id }}
@@ -188,7 +188,8 @@ jobs:
         with:
           name: backend-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            target/surefire-reports/*.xml
+            target/surefire-reports/TEST-com.pubburi.pub.*.xml
+            tools/mysql-baseline/target/surefire-reports/*.xml
             target/api-smoke-report.json
             target/search-smoke-report.json
             target/postgresql-schema-report.json

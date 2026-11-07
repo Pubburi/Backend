@@ -21,9 +21,9 @@ with socket.socket() as probe:
         raise SystemExit(f'Cannot reserve smoke port: {error.strerror}')
 CHECK_PORT
 shopt -s nullglob
-jars=(target/pubburi-server-*.jar)
+jars=(tools/mysql-baseline/target/pubburi-mysql-baseline-*.jar)
 if ((${#jars[@]} != 1)); then
-  echo 'Expected one packaged server jar; clean stale artifacts and package again' >&2
+  echo 'Expected one explicit MySQL baseline jar; build tools/mysql-baseline/pom.xml' >&2
   exit 1
 fi
 scratch=$(mktemp -d)

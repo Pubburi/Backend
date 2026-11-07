@@ -2,8 +2,10 @@
 
 `./scripts/check.sh`는 저장소 비밀/생성물 검사, Python 도구 회귀와 Java17의 기본 API·
 PostgreSQL migration·JPA 모듈 검증/패키징을 실행한다. DB 없는 통합 skip은 실제 통과가 아니다.
+기본 `./mvnw verify/package`는 PG/JPA JAR을, `-f tools/mysql-baseline/pom.xml`은 기존 MySQL JAR을 만든다.
+두 산출물의 main class/드라이버/설정을 분리하며 기존 DB·selector를 자동 변경하지 않는다.
 문서만 바꿀 때 무관한 새 DB/성능 검사를 추가하지 않는다. 기능별 계약은 각 문서, 회귀의 상세
-조건은 [Java 테스트](../src/test/java/)와 [JPA 테스트](../tools/jpa-rehearsal/src/test/java/)를 따른다.
+조건은 [Java 테스트](../src/test/java/)와 [JPA 테스트](../src/test/java/com/pubburi/rehearsal/)와 [명시 MySQL baseline](../tools/mysql-baseline/)를 따른다.
 
 ## 기본 검사와 필수 CI
 
@@ -17,7 +19,7 @@ PR·main·수동 실행의 필수 `backend-ci`는 다음을 유지한다.
 
 | 범위 | 실행·검증 |
 |---|---|
-| 기본 MySQL8.4 | 새 폐기 schema의 data.sql·실제 JAR HTTP/API·세션/권한·업무 쓰기/롤백·OpenAPI/Swagger |
+| 명시 MySQL8.4 baseline | 새 폐기 schema의 data.sql·실제 JAR HTTP/API·세션/권한·업무 쓰기/롤백·OpenAPI/Swagger |
 | PG18.6 schema | `PUBBURI_PG_INTEGRATION=1`: 별도3DB의 새 설치/no-op·checksum·실패DDL 복구·타입/ID/인덱스 |
 | source/import | 별도 TLS source의 읽기 전용 snapshot·승인 파일 검증과 import4DB의 v1/16표·태그 포함 v2/17표 전체 typed-cell/PK·7개 고수위·수령증·실패 rollback |
 | JPA | `PUBBURI_JPA_INTEGRATION=1`: normal/failure·빈 카탈로그 scratch의 실제 Repository/HTTP·RR/잠금·수명/실패와 packaged 재시작 |

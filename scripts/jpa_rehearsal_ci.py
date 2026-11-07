@@ -208,18 +208,18 @@ def run(environ,snapshot,directory,*,recovery_control=None):
         if result.returncode:raise ValueError("jpa_ci_runtime_grants_failed")
         env.update(PUBBURI_JPA_CONTROL_USER=env["PUBBURI_PG_USER"],PUBBURI_JPA_CONTROL_PASSWORD=env["PUBBURI_PG_PASSWORD"],
                    PUBBURI_PG_USER=runtime,PUBBURI_PG_PASSWORD=environ["PUBBURI_PG_JPA_RUNTIME_PASSWORD"])
-        command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","-Dtest=JpaFixturePreparationTests","test"],
+        command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-Dtest=JpaFixturePreparationTests","test"],
                 dict(env,PUBBURI_JPA_PREPARE_FIXTURE="1"),directory/(purpose+"-fixture.log"))
         if purpose=="JPA":normal=env
         elif purpose=="JPA_FAILURE":failure=env
         elif purpose=="JPA_RECOMMENDATION":recommendation=env
         else:relay_business=env
     scratch=dict(recommendation,PUBBURI_JPA_RECOMMENDATION_DB_NAME=recommendation["PUBBURI_PG_DB_NAME"])
-    command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","-Dtest=JpaRecommendationPreparationTests","test"],
+    command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-Dtest=JpaRecommendationPreparationTests","test"],
             dict(scratch,PUBBURI_JPA_PREPARE_RECOMMENDATION="1"),directory/"JPA_RECOMMENDATION-empty-catalog.log")
     normal.update(PUBBURI_JPA_FAILURE_DB_NAME=failure["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_FAILURE_RUN_TOKEN=failure["PUBBURI_PG_RUN_TOKEN"],
                   PUBBURI_JPA_RECOMMENDATION_DB_NAME=recommendation["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_RECOMMENDATION_RUN_TOKEN=recommendation["PUBBURI_PG_RUN_TOKEN"])
-    command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-f","tools/jpa-rehearsal/pom.xml","verify"],
+    command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","verify"],
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
     local_release(normal)

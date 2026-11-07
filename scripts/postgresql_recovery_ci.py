@@ -19,7 +19,7 @@ def server(env, directory, name):
     verify_owned_postgres(env)
     jar=directory/'runtime.jar'
     if not jar.exists():
-        jar.write_bytes((local_stack.BACKEND/'tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar').read_bytes())
+        jar.write_bytes((local_stack.BACKEND/'target/pubburi-server-0.0.1-SNAPSHOT.jar').read_bytes())
         jar.chmod(0o600)
     verify_jar(jar)
     log=directory/(name+'.log')

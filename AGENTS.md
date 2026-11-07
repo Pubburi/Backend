@@ -2,7 +2,7 @@
 
 ## 구현·검증
 
-- Java17·Spring, `/api`·ApiResponse·세션 인증을 보존한다. 목표는 PostgreSQL18.6·JPA(Hibernate)·Flyway Community·Psycopg3이며, DB06 전환 인수 전 기본 MySQL/MyBatis와 원본을 유지한다.
+- Java17·Spring, `/api`·ApiResponse·세션 인증을 보존한다. 목표는 PostgreSQL18.6·JPA(Hibernate)·Flyway Community·Psycopg3이며, 기본 Maven 산출물은 PG/JPA이며 DB06 전환 인수 전 명시 MySQL/MyBatis baseline과 원본을 유지한다.
 - Backend는 업무 API·DB·인증·트랜잭션·검색/동기화·추천 호출을 소유한다. UI는 Frontend, 데이터·모델·평가는 Recommendation이 소유하며 상세 설계를 복제하지 않는다.
 - 기준 문서는 [전환 계약](docs/POSTGRESQL-MIGRATION.md), [검색 계획](docs/SEARCH-PLAN.md), [검증](docs/TESTING.md), [현재 백엔드 계획](docs/DELIVERY-PLAN.md)이다. 기본 명령은 `./scripts/check.sh`, `./scripts/dev.sh`다.
 - Repository/DTO projection과 필요한 원자 SQL·잠금을 사용한다. OSIV off·ddl-auto=validate·Flyway versioned SQL을 유지하고 자동 create/update/clean을 금지한다. 금액/삭제 이력·ID/epoch·sequence·원문 이벤트·UUID/ACK와 rollback 경계를 보존한다.

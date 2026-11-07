@@ -119,14 +119,14 @@ class PostgreSQLLocalTests(unittest.TestCase):
                          'postgresql_schema.py', 'jpa_smoke.py', 'search_index.py', 'api_smoke.py'):
                 shutil.copy2(local.BACKEND / 'scripts' / name, scripts / name)
             wrapper = root / 'mvnw'
-            wrapper.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$1" "$DEV_TEST_VALUE"\n')
+            wrapper.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$*" "$DEV_TEST_VALUE"\n')
             wrapper.chmod(0o700)
             (root / '.env').write_text('touch legacy-env-read\nDEV_TEST_VALUE=from-dotenv\n')
             marker = root / 'legacy-env-read'
             command = [str(scripts / 'dev.sh')]
 
             self.assertEqual(subprocess.check_output(command, cwd=root, text=True),
-                             'spring-boot:run from-dotenv\n')
+                             '-f tools/mysql-baseline/pom.xml spring-boot:run from-dotenv\n')
             self.assertTrue(marker.is_file())
             marker.unlink()
             state = root / '.pubburi'
@@ -137,7 +137,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
             self.assertIn('PostgreSQL local launch rejected', rejected.stderr)
             self.assertFalse(marker.exists())
             self.assertEqual(subprocess.check_output([*command, '--provider', 'mysql'], cwd=root, text=True),
-                             'spring-boot:run from-dotenv\n')
+                             '-f tools/mysql-baseline/pom.xml spring-boot:run from-dotenv\n')
             self.assertTrue(marker.is_file())
 
     def selection_fixture(self, root):
@@ -296,10 +296,31 @@ class PostgreSQLLocalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path=Path(temporary)/'app.jar'
             entry='BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class'
+            manifest='Main-Class: org.springframework.boot.loader.launch.JarLauncher\nStart-Class: com.pubburi.rehearsal.JpaRehearsalApplication\n'
             with zipfile.ZipFile(path,'w') as jar:
+                jar.writestr('META-INF/MANIFEST.MF',manifest)
                 for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
                     jar.writestr(name,b'fixture')
             pg.validate_jar(path)
+            for invalid in ('Start-Class: com.pubburi.pub.ServerApplication\n',manifest+'Start-Class: com.pubburi.pub.ServerApplication\n'):
+                with zipfile.ZipFile(path,'w') as jar:
+                    jar.writestr('META-INF/MANIFEST.MF',invalid)
+                    jar.writestr(entry,b'fixture')
+                with self.assertRaises(ValueError):pg.validate_jar(path)
+            with zipfile.ZipFile(path,'w') as jar:
+                jar.writestr('META-INF/MANIFEST.MF',manifest)
+                for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
+                    jar.writestr(name,b'fixture')
+            for forbidden in ('BOOT-INF/classes/mappers/product.xml','BOOT-INF/classes/com/pubburi/pub/controller/rest/UnavailableRecommendationFeedbackController.class'):
+                with zipfile.ZipFile(path,'w') as jar:
+                    jar.writestr('META-INF/MANIFEST.MF',manifest)
+                    for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar',forbidden):
+                        jar.writestr(name,b'fixture')
+                with self.assertRaises(ValueError):pg.validate_jar(path)
+            with zipfile.ZipFile(path,'w') as jar:
+                jar.writestr('META-INF/MANIFEST.MF',manifest)
+                for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
+                    jar.writestr(name,b'fixture')
             with zipfile.ZipFile(path,'a') as jar:jar.writestr('BOOT-INF/lib/mysql-connector-j.jar',b'legacy')
             with self.assertRaises(ValueError):pg.validate_jar(path)
 
@@ -387,6 +408,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
             directory=pg.private_directory(scope.STATE/'release',scope,True)
             jar=directory/'runtime.jar'
             with zipfile.ZipFile(jar,'w') as archive:
+                archive.writestr('META-INF/MANIFEST.MF','Main-Class: org.springframework.boot.loader.launch.JarLauncher\nStart-Class: com.pubburi.rehearsal.JpaRehearsalApplication\n')
                 for name in ('BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class',
                              'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
                     archive.writestr(name,b'fixture')
