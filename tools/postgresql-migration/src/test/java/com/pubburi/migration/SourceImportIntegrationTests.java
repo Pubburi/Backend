@@ -37,7 +37,7 @@ class SourceImportIntegrationTests {
         for(var t:SourceContract.TABLES)assertEquals(0,number(c,"SELECT count(*) FROM pubburi."+t.name()),"all business rows must roll back");
         assertEquals(0,number(c,"SELECT count(*) FROM pubburi.migration_source_receipt"));
     }
-    static void schema(Map<String,String> env)throws Exception{assertEquals(4,PostgresSchemaTool.run("migrate",env));}
+    static void schema(Map<String,String> env)throws Exception{assertEquals(5,PostgresSchemaTool.run("migrate",env));}
     @Test void realSourceCopiesEveryValueRecordsReceiptAndRejectsReplay() throws Exception {
         var env=env("FRESH");
         var legacy=PostgresSchemaTool.Settings.from(env);PostgresSchemaTool.guard(legacy);
@@ -50,9 +50,15 @@ class SourceImportIntegrationTests {
             assertThrows(org.flywaydb.core.api.exception.FlywayValidateException.class,()->SourceImportTool.run(env));
             empty(c);assertEquals(before,sequences(c));
         }
-        assertEquals(2,PostgresSchemaTool.run("migrate",env));
+        assertEquals(3,PostgresSchemaTool.run("migrate",env));
         assertEquals(source.report(),SourceImportTool.run(env));assertEquals(source.report(),SourceImportTool.verify(env));
         try(Connection c=settings.connect();var sql=c.createStatement()) {
+            sql.execute("INSERT INTO pubburi.t_user_notebook(id,user_id,product_name,experience) SELECT '00000000-0000-4000-8000-000000000005'::uuid,id,'authored private','INTERESTED' FROM pubburi.t_user LIMIT 1");
+            try {
+                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
+                assertEquals("postgresql_import_notebook_not_empty",error.getMessage());
+                assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
+            } finally {sql.execute("DELETE FROM pubburi.t_user_notebook WHERE id='00000000-0000-4000-8000-000000000005'::uuid");}
             int id;try(var rows=sql.executeQuery("SELECT id FROM pubburi.t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
             sql.execute("""
                 INSERT INTO pubburi.t_user_recommendation_feedback(user_id,product_id,feedback)

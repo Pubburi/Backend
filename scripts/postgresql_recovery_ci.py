@@ -82,6 +82,10 @@ def run(environ, runtime, recovery_control):
         feedback_headers={'X-Pubburi-Feedback-Owner':actor}
         retained_feedback=request(user,base,'PUT',feedback_path,{'feedback':'MATCHED'},headers=feedback_headers)
         if retained_feedback!={'productId':pid,'feedback':'MATCHED'}:raise ValueError('recovery_ci_feedback_write_changed')
+        notebook_headers={'X-Pubburi-Account-Owner':actor}
+        notebook=request(user,base,'POST','/api/users/me/notebook',{'productId':pid,'experience':'TRIED','rating':4.25,
+            'tasteTags':['  Raw,comma\n🥃  ','🌾'*40],'aromaTags':[],'memo':'  Recovery private\n🥃  '},201,headers=notebook_headers)
+        notebook_path='/api/users/me/notebook/'+notebook['id']
         request(user,base,'PUT','/api/users/me/password',{'currentPassword':password,'newPassword':new_password})
         changed={key:product[key] for key in ('name','type','price','img','abv','orderCount')}
         changed.update(name='Recovery changed price',price=9999)
@@ -94,6 +98,7 @@ def run(environ, runtime, recovery_control):
             for raw_tag in ('UPPER Trail ','🌾'*40):
                 connection.execute('INSERT INTO pubburi.t_comment_taste_tag(comment_id,tag) VALUES (%s,%s)',(review['id'],raw_tag))
         retained_reviews=request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')
+        retained_notebook=request(user,base,'GET',notebook_path,headers=notebook_headers)
     # These are explicit authored control fixtures, not claims that a real relay ACK happened.
     with recovery.connect(control) as connection:
         event=connection.execute('SELECT max(event_id) FROM pubburi.t_product_search_outbox WHERE product_id=%s',(pid,)).fetchone()[0]
@@ -229,11 +234,13 @@ def run(environ, runtime, recovery_control):
         if request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')!=retained_reviews:raise ValueError('recovery_ci_reviews_not_restored')
         if not request(user,base,'GET','/api/users/me/favorites/'+str(pid))['favorited']:raise ValueError('recovery_ci_favorite_not_restored')
         if request(user,base,'GET',feedback_path,headers=feedback_headers)!=retained_feedback:raise ValueError('recovery_ci_feedback_not_restored')
+        if request(user,base,'GET',notebook_path,headers=notebook_headers)!=retained_notebook:raise ValueError('recovery_ci_notebook_not_restored')
         created=request(user,base,'POST','/api/comments',{'productId':pid,'rating':2.5,'comment':'After recovery','tasteTags':[]},201)
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
-    report={'status':'passed','business_tables':18,'control_tables':2,'sequences':7,
+    report={'status':'passed','business_tables':19,'control_tables':2,'sequences':7,
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
+        'private_notebook_original_arrays_memo_revision_preserved':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],

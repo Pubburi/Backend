@@ -15,10 +15,14 @@ public final class FeedbackOwner {
     private FeedbackOwner() { }
 
     public static boolean confirmed(HttpServletRequest request, SessionUser owner) {
-        var expected = Collections.list(request.getHeaders(HEADER));
+        return confirmed(request,owner,HEADER);
+    }
+
+    public static boolean confirmed(HttpServletRequest request, SessionUser owner,String header) {
+        var expected = Collections.list(request.getHeaders(header));
         if (expected.isEmpty()) return false;
         if (expected.size() != 1 || !expected.get(0).matches("(?:[a-zA-Z0-9.!~*'()_-]|%[0-9A-F]{2})++")) {
-            throw new IllegalArgumentException("Exactly one canonically encoded feedback owner header is required");
+            throw new IllegalArgumentException("Exactly one canonically encoded expected account header is required");
         }
         // Match encodeURIComponent exactly. URLDecoder silently replaces malformed UTF-8.
         String encoded = URLEncoder.encode(owner.id(), StandardCharsets.UTF_8)

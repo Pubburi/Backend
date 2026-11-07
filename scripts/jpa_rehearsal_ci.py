@@ -177,6 +177,8 @@ def runtime_grants(runtime):
             "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_favorite TO "+runtime+"; "
             "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_recommendation_feedback TO "+runtime+"; "
             "GRANT UPDATE(feedback) ON pubburi.t_user_recommendation_feedback TO "+runtime+"; "
+            "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_notebook TO "+runtime+"; "
+            "GRANT UPDATE(experience,rating,taste_tags,aroma_tags,memo,version,updated_at) ON pubburi.t_user_notebook TO "+runtime+"; "
             "GRANT SELECT,INSERT ON pubburi.t_user_preference TO "+runtime+"; "
             "GRANT UPDATE(survey_status,categories_known,taste_known,aroma_known,target_abv_percent,min_price_krw,max_price_krw,min_abv_percent,max_abv_percent) ON pubburi.t_user_preference TO "+runtime+"; "
             "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_preference_value TO "+runtime+"; "

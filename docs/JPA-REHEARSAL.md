@@ -62,10 +62,13 @@
 | GET | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 상품별 추천 피드백 읽기 |
 | PUT | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 선택 저장·교체, 삭제된 상품404 |
 | DELETE | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 선택 해제, 이미 없으면 그대로 성공 |
+| GET·POST | `/api/users/me/notebook` | 본인 비공개 기록 목록/생성·실경험/관심 구분 |
+| GET | `/api/users/me/notebook/by-product/{productId}` | 상품당 본인 기록 또는 null |
+| GET·PUT·DELETE | `/api/users/me/notebook/{id}` | UUID 기록·기대 revision 검수·삭제상품 원문 보존 |
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 마흔 개/마흔아홉 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위43개/55작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 추천 피드백은 Flyway V4와 최소 권한을 적용한 명시 PostgreSQL 런타임에서 쓴다. 세 메서드는
 세션에서 본인을 정하고 URL 인코딩한 현재 ID와 `X-Pubburi-Feedback-Owner`를 비교한다. 다른
@@ -247,3 +250,5 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 필수 CI는 기본 MySQL과 분리된 소유 PG에서 실제 제공자·실패/경합·JAR 재시작을 검사한다.
 실행 방법·fixture 격리·원본/권한 보존·기한과 자식 정리·보고서 개인정보 정책은 [TESTING](TESTING.md)이 정본이다.
 현재 source UUID/ACK·V1/V2·기본 runtime은 보존하며 전체 DB03–06 cutover/rollback과 거래/웹 인수는 별도다.
+
+비공개 notebook은 [F07 API](NOTEBOOK.md)의 V5·최소 권한·개인 원문/상품 삭제 보존·revision 계약을 따른다. 공개 후기/추천 서버 입력으로 자동 승격하지 않는다.

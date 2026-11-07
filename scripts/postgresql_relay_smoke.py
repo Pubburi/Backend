@@ -31,7 +31,11 @@ from api_smoke import verify_search_phrase_openapi, verify_content_recommendatio
 def verify_business_api(spec):
     methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
     operations = sum(method in methods for path in spec["paths"].values() for method in path)
-    assert len(spec["paths"]) == 40 and operations == 49
+    assert len(spec["paths"]) == 43 and operations == 55
+    for path, expected in (("/api/users/me/notebook",{"get","post"}),
+            ("/api/users/me/notebook/{id}",{"get","put","delete"}),
+            ("/api/users/me/notebook/by-product/{productId}",{"get"})):
+        assert methods.intersection(spec["paths"].get(path,{}))==expected
     assert methods.intersection(spec["paths"].get("/api/users/me/search-phrases", {})) == {"post"}
     assert methods.intersection(spec["paths"].get("/api/users/me/recommendations/feedback/{productId}", {})) == {"get", "put", "delete"}
     verify_search_phrase_openapi(spec)
