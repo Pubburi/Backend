@@ -12,6 +12,8 @@ import com.fasterxml.jackson.databind.*;
 /** Operator-pinned output of Recommendation's authority loader. Never infers permission. */
 public final class PinnedContentCatalog implements ContentCatalogSource {
     public static final int MAX_BUNDLE_BYTES=10485760;
+    public static final int MAX_BUNDLES=16;
+    public static final String SET_ALGORITHM="checked-backend-demo-bundle-set-v1";
     private final String path,sha256;
     private final Clock clock;
     private final boolean familyBrowseDemoEnabled;
@@ -27,11 +29,46 @@ public final class PinnedContentCatalog implements ContentCatalogSource {
     @Override public Optional<Catalog> current(){
         if(path==null || path.isBlank() || sha256==null || !sha256.matches("[a-f0-9]{64}"))return Optional.empty();
         try{
-            Path file=Path.of(path);require(Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS));
-            byte[] bytes;try(var stream=Files.newInputStream(file)){bytes=stream.readNBytes(MAX_BUNDLE_BYTES+1);}
-            require(bytes.length<=MAX_BUNDLE_BYTES && HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).equals(sha256));
-            return Optional.of(validate(mapper.readTree(bytes),sha256,clock.instant(),familyBrowseDemoEnabled));
+            Path file=Path.of(path);byte[] bytes=read(file,sha256,MAX_BUNDLE_BYTES);
+            JsonNode root=mapper.readTree(bytes);require(root!=null && root.isObject());Instant now=clock.instant();
+            return Optional.of(text(root.get("algorithm"),SET_ALGORITHM)?compose(root,file,bytes.length,now)
+                :validate(root,sha256,now,familyBrowseDemoEnabled));
         }catch(java.io.IOException|java.security.NoSuchAlgorithmException|IllegalArgumentException|DateTimeException invalid){return Optional.empty();}
+    }
+    private static byte[] read(Path file,String expected,int budget)throws java.io.IOException,java.security.NoSuchAlgorithmException{
+        require(budget>0 && expected!=null && expected.matches("[a-f0-9]{64}") && Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS));
+        byte[] bytes;try(var stream=Files.newInputStream(file,LinkOption.NOFOLLOW_LINKS)){bytes=stream.readNBytes(budget+1);}
+        require(bytes.length<=budget && HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).equals(expected));
+        return bytes;
+    }
+    private Catalog compose(JsonNode root,Path manifest,int consumed,Instant now)throws java.io.IOException,java.security.NoSuchAlgorithmException{
+        require(fields(root,"schema_version","algorithm","bundles"));integer(root.get("schema_version"),1,1);
+        JsonNode members=root.get("bundles");require(members.isArray() && members.size()>=2 && members.size()<=MAX_BUNDLES);
+        Path parent=manifest.toAbsolutePath().getParent().toRealPath();
+        var paths=new HashSet<Path>();var keys=new HashSet<String>();var bindings=new LinkedHashMap<Integer,Binding>();
+        var catalog=mapper.createArrayNode();JsonNode authority=null;CatalogScope scope=null;Instant until=null;
+        for(var member:members){
+            require(fields(member,"path","sha256"));string(member.get("path"),1024,false);
+            require(member.path("sha256").isTextual());String hash=member.path("sha256").textValue();
+            Path relative=Path.of(member.path("path").textValue());require(!relative.isAbsolute());
+            Path file=parent.resolve(relative).normalize();require(file.startsWith(parent) && paths.add(file));
+            // A local operator descriptor cannot traverse outside its own tree or through links.
+            Path current=parent;for(Path part:parent.relativize(file)){current=current.resolve(part);require(!Files.isSymbolicLink(current));}
+            byte[] bytes=read(file,hash,MAX_BUNDLE_BYTES-consumed);consumed+=bytes.length;
+            JsonNode bundle=mapper.readTree(bytes);Catalog checked=validate(bundle,hash,now,familyBrowseDemoEnabled);
+            JsonNode proof=bundle.path("checked_export");
+            if(authority==null){authority=proof;scope=checked.scope();}
+            else{
+                for(String field:List.of("business_snapshot_sha256","snapshot_origin","evidence_kind","data_scope"))require(equal(authority.get(field),proof.get(field)));
+                require(scope==checked.scope());
+            }
+            require(catalog.size()+checked.catalog().size()<=1000);
+            for(var record:bundle.path("records"))require(keys.add(record.path("catalog_record_id").textValue()));
+            for(var binding:checked.bindings().values())require(bindings.putIfAbsent(binding.productId(),binding)==null);
+            checked.catalog().forEach(catalog::add);
+            if(until==null || checked.validUntil().isBefore(until))until=checked.validUntil();
+        }
+        return new Catalog(catalog,Collections.unmodifiableMap(bindings),until,sha256,scope);
     }
     public static Catalog validate(JsonNode root,String sha256,Instant now){return validate(root,sha256,now,false);}
     public static Catalog validate(JsonNode root,String sha256,Instant now,boolean familyBrowseDemoEnabled){
