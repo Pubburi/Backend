@@ -20,6 +20,7 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 | PUT | `/api/admin/markets/{id}` | 현재 관리자만 변경, 기존 boolean 응답 |
 | DELETE | `/api/admin/markets/{id}` | 현재 관리자만 삭제, 기존 boolean 응답 |
 | GET | `/api/products` | 기존 AND 필터·정렬·페이지·items/count |
+| GET | `/api/products/suggestions` | 현재 상품명 접두어·최대8개의 공개 후보 |
 | GET | `/api/products/popular` | 기존 주문수 내림차순·ID tie-break·최대12개 |
 | GET | `/api/products/{id}` | 기존 ProductResponse 일곱 필드·없는 ID404 |
 | GET | `/api/products/{id}/features` | 기존 특성 여덟 필드·unknown/검수[]·없는 상품404 |
@@ -62,7 +63,7 @@ MySQL/MyBatis API를 계속 실행한다. 이 제공자를 전체 서비스나 D
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 서른아홉 개/마흔여덟 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 마흔 개/마흔아홉 작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 추천 피드백은 Flyway V4와 최소 권한을 적용한 명시 PostgreSQL 런타임에서 쓴다. 세 메서드는
 세션에서 본인을 정하고 URL 인코딩한 현재 ID와 `X-Pubburi-Feedback-Owner`를 비교한다. 다른

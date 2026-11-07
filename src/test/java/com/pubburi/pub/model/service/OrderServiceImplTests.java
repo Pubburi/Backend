@@ -383,6 +383,7 @@ class OrderServiceImplTests {
 	private static class FakeProductDao implements ProductDao {
 		@Override public List<Product> selectDefaultCandidates(int limit) { throw new UnsupportedOperationException(); }
 		@Override public List<Product> selectCurrentByIds(List<Integer> ids) { throw new UnsupportedOperationException(); }
+		@Override public List<com.pubburi.pub.model.dto.ProductSuggestion> selectNameSuggestions(String pattern, int limit) { throw new UnsupportedOperationException(); }
 		private Map<Integer, Integer> orderCountIncrements = new LinkedHashMap<>();
 		private Set<Integer> missingProductIds = Set.of();
 		private int price = 1000;

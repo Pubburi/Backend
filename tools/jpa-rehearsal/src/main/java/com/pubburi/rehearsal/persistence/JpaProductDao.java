@@ -3,6 +3,7 @@ package com.pubburi.rehearsal.persistence;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dao.ProductDao;
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.model.dto.ProductSuggestion;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.util.List;
@@ -24,6 +25,9 @@ public class JpaProductDao implements ProductDao {
     @Override public List<Product> selectAll() { return reads.byIdOrder(Integer.MAX_VALUE); }
     @Override public List<Product> selectDefaultCandidates(int limit) { return reads.byIdOrder(limit); }
     @Override public List<Product> selectCurrentByIds(List<Integer> ids) { return reads.currentByIds(ids); }
+    @Override public List<ProductSuggestion> selectNameSuggestions(String pattern, int limit) {
+        return reads.nameSuggestions(pattern, limit);
+    }
     @Override public Product selectById(int id) { return reads.find(id); }
     @Override public List<Product> selectPopular() { return reads.popular(); }
     @Override public Product selectByExactName(String name) { return reads.exactName(name); }

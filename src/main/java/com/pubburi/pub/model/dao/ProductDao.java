@@ -5,6 +5,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.model.dto.ProductSuggestion;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 
 public interface ProductDao {
@@ -21,6 +22,8 @@ public interface ProductDao {
 
 	List<Product> selectFiltered(@Param("type") String type, @Param("q") String q, @Param("sort") String sort,
 			@Param("filters") ProductSearchFilters filters, @Param("limit") int limit, @Param("offset") int offset);
+
+	List<ProductSuggestion> selectNameSuggestions(@Param("pattern") String pattern, @Param("limit") int limit);
 
 	int countFiltered(@Param("type") String type, @Param("q") String q, @Param("filters") ProductSearchFilters filters);
 

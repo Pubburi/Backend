@@ -1,6 +1,8 @@
 package com.pubburi.pub.model.service;
 
+import java.text.Normalizer;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,9 +13,12 @@ import com.pubburi.pub.controller.api.PageResponse;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dao.ProductDao;
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.model.dto.ProductSuggestion;
 
 @Service
 public class ProductServiceImpl implements ProductService {
+	private static final Pattern EDGE_WHITESPACE = Pattern.compile("(?U)^\\s+|\\s+$");
+	private static final int SUGGESTION_LIMIT = 8;
 
 	private final ProductDao productDao;
 	private final ProductSearchOutbox searchOutbox;
@@ -39,6 +44,20 @@ public class ProductServiceImpl implements ProductService {
 		List<Product> products = productDao.selectFiltered(safeType, safeQ, blankToNull(sort), filters, criteria.size(),
 				(int) offset);
 		return PageResponse.of(products, criteria, productDao.countFiltered(safeType, safeQ, filters));
+	}
+
+	@Override
+	public List<ProductSuggestion> suggestByName(String query) {
+		if (query.codePoints().anyMatch(Character::isISOControl)) {
+			throw new IllegalArgumentException("Product name prefix contains a control character");
+		}
+		String prefix = Normalizer.normalize(EDGE_WHITESPACE.matcher(query).replaceAll(""), Normalizer.Form.NFC);
+		int length = prefix.codePointCount(0, prefix.length());
+		if (length < 2) return List.of();
+		if (length > 100) throw new IllegalArgumentException("Product name prefix exceeds 100 code points");
+		// These are LIKE literals; the last percent is the only wildcard.
+		String pattern = prefix.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+		return productDao.selectNameSuggestions(pattern, SUGGESTION_LIMIT);
 	}
 
 	@Override

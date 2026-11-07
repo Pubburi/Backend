@@ -27,6 +27,9 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         paths["/api/products/{id}/similar"] = {"get": {
             "parameters": [{"name": "id", "in": "path"}],
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SimilarEnvelope"}}}}}}}
+        paths["/api/products/suggestions"] = {"get": {
+            "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}],
+            "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SuggestionEnvelope"}}}}}}}
         paths["/api/users/me/recommendations/feedback/{productId}"] = {"get": {}, "put": {}, "delete": {}}
         return {"paths": paths, "components": {"schemas": {
             "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}, "includeActivity": {"type": "boolean", "default": False}}},
@@ -36,6 +39,10 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "PositiveReference": {"properties": {"productId": {}, "name": {}}},
             "ActivityEvidence": {"properties": {key: {"type": "array", "items": {"type": "string"}}
                 for key in ("favoriteCategories", "highlyRatedCategories")}},
+            "SuggestionEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SuggestionResponse"}}},
+            "SuggestionResponse": {"properties": {"items": {"type": "array", "maxItems": 8, "items": {"$ref": "#/components/schemas/SuggestionItem"}}}},
+            "SuggestionItem": {"properties": {name: {"type": kind} for name, kind in
+                (("id", "integer"), ("name", "string"), ("type", "string"), ("price", "integer"))}},
             "SimilarEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SimilarProductsResponse"}}},
             "SimilarProductsResponse": {"properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
@@ -43,7 +50,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
 
     def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
-        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 39, "api_operations": 48})
+        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 40, "api_operations": 49})
         missing = copy.deepcopy(spec)
         missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
         extra_method = copy.deepcopy(spec)

@@ -63,6 +63,7 @@ class ControllerBehaviorTests {
 		@Override public PageResponse<Product> searchProducts(String type, String q, String sort, com.pubburi.pub.controller.api.ProductSearchFilters filters, PageCriteria criteria) {
 			return PageResponse.of(List.of(), criteria, 0);
 		}
+		@Override public List<com.pubburi.pub.model.dto.ProductSuggestion> suggestByName(String query) { return List.of(); }
 		@Override public Product getProductById(int id) { return null; }
 		@Override public int addProduct(Product product) { return 0; }
 		@Override public int updateProduct(Product product) { return 0; }
