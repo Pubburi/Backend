@@ -72,11 +72,12 @@ bulk의 개별 실패를 처리하고 재색인은 변경 재생을 완료한 �
 시연 주문수나 검색 결과를 실제 이용자 인기·만족도·구매 전환 성과로 해석하지 않는다.
 
 현재 구현은 가격/도수·명시 태그 필수조건과 페이지/정렬을 두 DB에서 보존하며 기존 공개 GET의
-명시 엔진 읽기/현재 DB 대조·대체를 제공한다. 현재 DB 확인 쿼리를 유지하므로 성능 개선으로 보지 않는다.
+명시 엔진 읽기/현재 DB 대조·대체를 제공한다. 현재 DB 확인 쿼리를 유지하므로 성능 개선으로 보지 않는다. [상품명 자동완성](PRODUCT-SEARCH.md#상품명-자동완성)은
+현재 두 DB의 이름 접두어를 별도 공개 API로 제공한다.
 선택적 OpenSearch3.9.0/nori·strict ID 문서/버전·삭제 표식·명시 재생은
 [S02 기록](https://github.com/Pubburi/Backend/blob/e7a957babd094442d9e027174bb795aefccc4219/docs/plans/2026-11-01-local-search-replay.md)에 둔다. 원자적 업무 버전/outbox 생산은
 [생산 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-product-search-outbox.md), 개별 claim/ack·lease 재전달은
-[relay 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·자동완성/동의어/오타·
+[relay 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·동의어/오타·
 개인화 검색·성능 개선은 후속이다.
 R06의 [본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향과 별도 선택만 기존 제공자에
 전달하며 원격 뒤 현재 snapshot/수명을 확인한다. 조건 검증·장애/빈 결과는 구분하지만 상품을

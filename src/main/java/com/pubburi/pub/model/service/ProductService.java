@@ -6,6 +6,7 @@ import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.model.dto.ProductSuggestion;
 
 public interface ProductService {
 
@@ -21,6 +22,8 @@ public interface ProductService {
 	}
 
 	PageResponse<Product> searchProducts(String type, String q, String sort, ProductSearchFilters filters, PageCriteria criteria);
+
+	List<ProductSuggestion> suggestByName(String query);
 
 	/**
 	 * 주어진 ID에 해당하는 상품을 조회한다.

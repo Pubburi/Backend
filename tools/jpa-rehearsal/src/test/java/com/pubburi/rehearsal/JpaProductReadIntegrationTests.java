@@ -6,6 +6,7 @@ import java.net.*;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.sql.*;
+import java.text.Normalizer;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -127,6 +128,65 @@ class JpaProductReadIntegrationTests {
         }
     }
 
+    @Test void currentNameSuggestionsKeepLiteralPrefixesDuplicateSkusAndFailureBoundaries() throws Exception {
+        try (var f = new Fixture()) {
+            String path = "/api/products/suggestions";
+            String literal = f.prefix + " %_!\\한글";
+            int first = f.add(" %_!\\한글", "탁주", 1500, 5, 0);
+            int duplicate = f.add(" %_!\\한글", "맥주", 2700, 4, 0);
+            f.add(" ab!\\한글", "증류주", 1000, 7, 0);
+            f.add(" underXscore", "증류주", 1000, 7, 0);
+            f.add(" slashXtail", "증류주", 1000, 7, 0);
+            var products = suggestions("\u00a0" + Normalizer.normalize(literal, Normalizer.Form.NFD) + " ");
+            assertEquals(List.of(first, duplicate), ids(products));
+            assertEquals(Set.of("id", "name", "type", "price"), keys(products.get(0)));
+            assertEquals(literal, products.get(0).path("name").textValue());
+            assertEquals("맥주", products.get(1).path("type").textValue());
+            assertEquals(2700, products.get(1).path("price").intValue());
+            assertEquals(List.of(f.e), ids(suggestions(f.prefix + " under_")));
+            assertEquals(List.of(f.f), ids(suggestions(f.prefix + " slash\\")));
+            assertFalse(ids(suggestions("under_score")).contains(f.e));
+            assertFalse(ids(suggestions("증류주")).contains(f.a));
+            assertEquals(List.of(), ids(suggestions("")));
+            assertEquals(List.of(), ids(suggestions("한")));
+            for (String invalid : List.of("", "?q=aa&q=bb", "?q=aa&limit=1", "?q=aa%00", "?q=" + encode("가".repeat(101)))) {
+                assertEquals(400, get(path + invalid).status());
+            }
+
+            var ordered = new ArrayList<Integer>();
+            for (int i = 0; i < 9; i++) ordered.add(f.add(" cap-" + i, "탁주", 900, 2, 0));
+            assertEquals(ordered.subList(0, 8), ids(suggestions(f.prefix + " cap-")));
+
+            f.sql.update("UPDATE pubburi.t_product SET name=?,price=? WHERE id=?", f.prefix + " renamed", 3600, first);
+            assertEquals(List.of(duplicate), ids(suggestions(literal)));
+            var renamed = suggestions(f.prefix + " renamed");
+            assertEquals(List.of(first), ids(renamed));
+            assertEquals(3600, renamed.get(0).path("price").intValue());
+            f.sql.update("DELETE FROM pubburi.t_product WHERE id=?", duplicate);
+            assertTrue(suggestions(literal).isEmpty());
+
+            String role = required("PUBBURI_PG_USER");
+            assertTrue(role.matches("[a-z][a-z0-9_]{0,62}"));
+            f.sql.execute("REVOKE SELECT ON pubburi.t_product FROM " + role);
+            try {
+                assertTrue(suggestions("한").isEmpty());
+                assertTrue(suggestions("🍶").isEmpty());
+                var failed = get(path + "?q=" + encode(f.prefix));
+                assertEquals(500, failed.status());
+                assertEquals("INTERNAL_SERVER_ERROR", failed.body().at("/error/code").textValue());
+            } finally {
+                f.sql.execute("GRANT SELECT ON pubburi.t_product TO " + role);
+            }
+        }
+    }
+
+    private JsonNode suggestions(String query) throws Exception {
+        var result = get("/api/products/suggestions?q=" + encode(query));
+        assertEquals(200, result.status(), () -> result.body().toString());
+        assertEquals(Set.of("items"), keys(result.body().path("data")));
+        return result.body().at("/data/items");
+    }
+
     @Test void featureUnknownAndReviewedEmptyStayDifferentAndProducerCannotRewriteQueue()throws Exception {
         try(var f=new Fixture()) {
             var known=get("/api/products/"+f.a+"/features");assertEquals(200,known.status());var value=known.body().path("data");
@@ -186,7 +246,7 @@ class JpaProductReadIntegrationTests {
 
     @Test void runtimeOpenApiRetainsProductAndFeatureSchemasAndRepeatedTagQuery()throws Exception {
         var response=get("/v3/api-docs");assertEquals(200,response.status());var spec=response.body();var paths=spec.path("paths");
-        for(String path:List.of("/api/products","/api/products/popular","/api/products/{id}","/api/products/{id}/features"))assertEquals(Set.of("get"),keys(paths.path(path)));
+        for(String path:List.of("/api/products","/api/products/popular","/api/products/suggestions","/api/products/{id}","/api/products/{id}/features"))assertEquals(Set.of("get"),keys(paths.path(path)));
         assertEquals(Set.of("post"),keys(paths.path("/api/admin/products")));
         assertEquals(Set.of("put","delete"),keys(paths.path("/api/admin/products/{id}")));
         assertEquals(Set.of("put"),keys(paths.path("/api/admin/products/{id}/features")));

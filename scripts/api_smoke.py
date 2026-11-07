@@ -9,6 +9,7 @@ import re
 import subprocess
 import urllib.error
 import urllib.parse
+import unicodedata
 import urllib.request
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
@@ -200,6 +201,7 @@ def documentation_contract(port):
     verify_similar_products_openapi(document)
     assert "/api/users/me/recommendations/feedback/{productId}" not in document["paths"]
     verify_product_filter_openapi(document)
+    verify_product_suggestions_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
         assert response.status == 200 and response.headers.get_content_type() == "text/html"
         assert "swagger-ui" in response.read().decode("utf-8").lower(), "Swagger UI entry is absent"
@@ -357,6 +359,26 @@ def verify_content_recommendation_openapi(document):
     assert set(reference["properties"]) == {"productId", "name"}
     assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
     assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]
+
+
+def verify_product_suggestions_openapi(document):
+    path = document["paths"]["/api/products/suggestions"]
+    assert {method for method in path if method in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"get"}
+    operation = path["get"]
+    (query,) = operation["parameters"]
+    assert query["name"] == "q" and query["in"] == "query" and query["required"] is True
+    assert query["schema"]["type"] == "string"
+    schemas = document["components"]["schemas"]
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    envelope = schemas[response["$ref"].split("/")[-1]]
+    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
+    assert set(data["properties"]) == {"items"}
+    items = data["properties"]["items"]
+    assert items["type"] == "array" and items["maxItems"] == 8
+    product = schemas[items["items"]["$ref"].split("/")[-1]]
+    assert {name: prop["type"] for name, prop in product["properties"].items()} == {
+        "id": "integer", "name": "string", "type": "string", "price": "integer",
+    }
 
 
 def verify_similar_products_openapi(document):
@@ -964,6 +986,55 @@ def product_filter_contract(environ):
         assert public.request("GET", f"/products/{product['id']}", 200)["data"] == product
         admin.request("DELETE", f"/admin/products/{product['id']}", 200)
     search([])
+    product_suggestion_contract(public, admin, prefix)
+
+
+def product_suggestion_contract(public, admin, prefix):
+    """Use the same verified disposable DB and fixture administrator as product filtering."""
+    path = "/products/suggestions"
+    created = []
+
+    def put_name(name, kind="탁주", price=1000):
+        body = {"name": name, "type": kind, "price": price, "img": "authored.png", "abv": 5, "orderCount": 0}
+        row = admin.request("POST", "/admin/products", 201, body)["data"]
+        created.append(row["id"])
+        return row
+
+    def items(term):
+        data = public.request("GET", path + "?" + urllib.parse.urlencode({"q": term}), 200)["data"]
+        assert set(data) == {"items"}
+        assert all(set(row) == {"id", "name", "type", "price"} for row in data["items"])
+        return data["items"]
+
+    def projection(row):
+        return {key: row[key] for key in ("id", "name", "type", "price")}
+
+    try:
+        literal = prefix + " %_!\\한글"
+        first = put_name(literal)
+        duplicate = put_name(literal, kind="맥주", price=2200)
+        put_name(prefix + " xy!\\한글")
+        put_name("Infix " + literal)
+        assert items("\u00a0" + unicodedata.normalize("NFD", literal) + " ") == [
+            projection(first), projection(duplicate),
+        ]
+        assert items("") == [] and items("한") == []
+        over_limit = "?" + urllib.parse.urlencode({"q": "가" * 101})
+        for query in ("", "?q=aa&q=bb", "?q=aa&limit=1", over_limit, "?q=aa%00"):
+            public.request("GET", path + query, 400, error_code="BAD_REQUEST")
+        ordered = [put_name(prefix + f" Cap {index:02}") for index in range(9)]
+        assert items(prefix + " Cap") == [projection(row) for row in ordered[:8]]
+        changed = {key: first[key] for key in ("name", "type", "price", "img", "abv", "orderCount")}
+        changed.update(name=prefix + " renamed", price=3200)
+        admin.request("PUT", "/admin/products/" + str(first["id"]), 200, changed)
+        assert items(literal) == [projection(duplicate)]
+        assert items(prefix + " renamed") == [projection(dict(first, **changed))]
+        admin.request("DELETE", "/admin/products/" + str(duplicate["id"]), 200)
+        created.remove(duplicate["id"])
+        assert items(literal) == []
+    finally:
+        for product_id in created:
+            admin.request("DELETE", "/admin/products/" + str(product_id), 200)
 
 
 def count_ci_preferences(environ, user_id):

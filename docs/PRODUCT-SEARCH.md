@@ -2,8 +2,21 @@
 
 `GET /api/products`는 기본 DB 조회와 명시한 엔진 읽기를 같은 공개 계약으로 제공한다. [부분 OpenAPI](openapi/product-search.json)와 실행
 `/v3/api-docs`가 제공자 계약이며 기존 ApiResponse·ProductResponse 일곱 필드와 PageResponse를
-유지한다. 기본 스택은 MySQL이고 별도 JPA 제공자는 PostgreSQL을 사용한다. 자동완성·한국어
-질의 품질·추천 재정렬과 기본 DB 전환 완료로 표시하지 않는다.
+유지한다. 기본 스택은 MySQL이고 별도 JPA 제공자는 PostgreSQL을 사용한다. 한국어 질의 품질·추천 재정렬과 기본 DB 전환은 별도다.
+
+## 상품명 자동완성
+
+`GET /api/products/suggestions?q=...`는 현재 DB의 상품명 접두어 후보를 최대8개 반환한다.
+응답은 `ApiResponse.data.items`의 `{id,name,type,price}`이며 price는 현재 원화 가격이다.
+DB에 설치된 이름 collation의 오름차순, 동률일 때 ID 오름차순이다. 이름이 같아도 서로 다른
+상품은 같은 항목으로 합치지 않는다. 선택한 ID로 기존 상품 상세를 열 수 있다.
+
+`q`는 한 번만 허용한다. 유니코드 White_Space의 앞뒤 공백을 제거한 뒤 NFC로 정규화한다.
+정규화 결과가 0–1 코드 포인트면 조회 없이 빈 목록을 반환한다. 100을 넘거나 제어문자,
+누락·중복·추가 query가 있으면400이다. 바인딩한 LIKE의 접두어 뒤에만 와일드카드를 붙이므로
+입력의 `%`, `_`, `!`, 역슬래시는 문자 그대로 처리한다. 이름 안쪽이나 주종은 검색하지 않는다.
+읽기 실패는500이며 성공·오류 응답에는 캐시를 사용하지 않는다. 기존 상품 목록의 q/필터/정렬은
+그대로 유지한다. 자동완성은 OpenSearch·개인화·유사어·오타 허용을 사용하지 않는다.
 
 ## 조건과 단위
 
@@ -93,5 +106,5 @@ total 일치), DATABASE_FALLBACK(오류/불일치/미지원)으로 구분한다.
 ~~~
 
 검증·제한은 [작업 계획](https://github.com/Pubburi/Backend/blob/de7f80747932996678577b0ce9dfd779667846ed/docs/plans/2026-11-01-product-search-filters.md)과 [TESTING](TESTING.md)에 둔다.
-현재는 두 DB의 필수조건과 명시 엔진 읽기/현재 DB 대체를 제공한다. 전체 F02·재색인/유실 복구·
+현재는 두 DB의 필수조건·이름 자동완성과 명시 엔진 읽기/현재 DB 대체를 제공한다. 전체 F02·재색인/유실 복구·
 기본 스택 전환과 부하/검색 품질 인수 완료를 뜻하지 않는다.

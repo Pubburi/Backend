@@ -2,6 +2,7 @@ package com.pubburi.rehearsal.persistence;
 
 import com.pubburi.pub.controller.api.*;
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.model.dto.ProductSuggestion;
 import com.pubburi.pub.model.dto.ProductFeatures;
 import com.pubburi.pub.model.dto.ProductFeatureTag;
 import com.pubburi.pub.model.dto.ProductFeatureTagRow;
@@ -45,6 +46,17 @@ public class JpaProductQueries {
         var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
         query.select(projection(cb,product)).where(product.get("id").in(ids));
         return entityManager.createQuery(query).getResultList();
+    }
+
+    public List<ProductSuggestion> nameSuggestions(String pattern, int limit) {
+        var cb = entityManager.getCriteriaBuilder();
+        var query = cb.createQuery(ProductSuggestion.class);
+        var product = query.from(JpaProduct.class);
+        Path<String> name = product.get("name");
+        var prefix = cb.parameter(String.class, "prefix");
+        query.select(cb.construct(ProductSuggestion.class, product.get("id"), name, product.get("type"), product.get("price")))
+            .where(cb.like(name, prefix, '!')).orderBy(cb.asc(name), cb.asc(product.get("id")));
+        return entityManager.createQuery(query).setParameter(prefix, pattern).setMaxResults(limit).getResultList();
     }
 
     public Product exactName(String name) {

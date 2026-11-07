@@ -187,6 +187,74 @@
           }
         }
       }
+    },
+    "/api/products/suggestions": {
+      "get": {
+        "operationId": "suggestCurrentProductsByName",
+        "security": [],
+        "description": "Public current MySQL or PostgreSQL name-prefix lookup. Literal input under the database name collation. Results are sorted by name then ID and are not cached.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "One query. Trim Unicode edge whitespace, normalize NFC, return empty at 0–1 code points and reject more than 100 or control characters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to eight current product suggestions.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BAD_REQUEST: missing, repeated, extra or invalid query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "NOT_ACCEPTABLE fixed JSON error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal/DB read failure. A failed query is never a successful empty list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -332,6 +400,67 @@
           },
           "error": {
             "type": "null"
+          }
+        }
+      },
+      "SuggestionEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "message",
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "items"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "$ref": "#/components/schemas/Suggestion"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      },
+      "Suggestion": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "price"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "price": {
+            "type": "integer",
+            "description": "Current KRW price."
           }
         }
       }

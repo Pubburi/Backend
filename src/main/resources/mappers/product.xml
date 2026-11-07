@@ -15,6 +15,21 @@
 		<result column="order_count" property="orderCount" />
 	</resultMap>
 
+	<resultMap id="ProductSuggestionResult" type="com.pubburi.pub.model.dto.ProductSuggestion">
+		<constructor>
+			<idArg column="id" javaType="_int" />
+			<arg column="name" javaType="string" />
+			<arg column="type" javaType="string" />
+			<arg column="price" javaType="_int" />
+		</constructor>
+	</resultMap>
+	<select id="selectNameSuggestions" resultMap="ProductSuggestionResult">
+		SELECT id, name, type, price FROM t_product
+		WHERE name LIKE #{pattern} ESCAPE '!'
+		ORDER BY name, id
+		LIMIT #{limit}
+	</select>
+
 	<select id="selectAll" resultMap="ProductResult">
 		SELECT id, name, type, price, img, abv, order_count
 		FROM t_product

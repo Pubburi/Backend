@@ -5,7 +5,7 @@ MySQL 기준이며 기존 볼륨을 보존한다. 아래 `activate-pg` 후에는
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
 완료로 간주하지 않는다. 기본 스택 전환과 복구 인수는 별도 게이트다.
 
-현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의39경로/48작업은
+현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의40경로/49작업은
 별도 [명시 JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
 copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 원본 MySQL을 바꾸지 않는다.
 검증한 범위의 웹 연결은 가능하지만 기본 MySQL runtime/전체 cutover·복구 인수 완료와 구분한다.
@@ -104,7 +104,7 @@ DB 초기화는 **전용 로컬 DB의 모든 변경을 삭제**한다. 앱을 �
 
 ## 준비된 PostgreSQL의 명시 실행·패키징
 
-DB06의 이 경로는 기존39경로/48작업 JPA 제공자를 소유한 로컬 폐기 복사본에서 실행한다.
+DB06의 이 경로는 기존40경로/49작업 JPA 제공자를 소유한 로컬 폐기 복사본에서 실행한다.
 DB 설치·source import·ID 예약·기본 DB 전환을 수행하지 않는다. 먼저 [복사/검수](SOURCE-IMPORT.md)와
 [JPA 제공자](JPA-REHEARSAL.md)의 TLS/marker/receipt·최소 runtime 역할 준비를 마친다.
 원본 DB나 운영 DB를 이 도구에 지정하지 않는다. 새 역할/권한 추가는 필요하지 않다.
@@ -146,7 +146,7 @@ FE/추천 자식에 DB 자격을 전달하지 않는다. trusted toolchain의 ru
 실행은 release/소유 CID를 검증하고 같은 로컬 작업 잠금·미점유 포트를 확보한 뒤 복사한 JAR를
 Java17로 먼저 시작한다. 원래 TLS verify-full/SCRAM·PG18.6/UTF8·receipt/source·최소 권한·
 Flyway validate/Hibernate validate·OSIV off 검증을 재사용한다. 준비 실패 시 FE/추천은 시작하지 않는다.
-자기 JVM 기동 로그와 상품 API·OpenAPI39/48를 확인한 뒤 FE/추천 health와 `/api` 프록시를 검사한다.
+자기 JVM 기동 로그와 상품 API·OpenAPI40/49를 확인한 뒤 FE/추천 health와 `/api` 프록시를 검사한다.
 `--backend-only`는 doctor/up/smoke/status에서 API release만 확인하는 CI/개별 실행 옵션이며
 세 서버·세션/사용자 흐름 인수가 아니다. `status`도 endpoint 관측이지 프로세스 소유 증명은 아니다.
 

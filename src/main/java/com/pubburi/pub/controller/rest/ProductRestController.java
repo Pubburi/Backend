@@ -2,6 +2,7 @@ package com.pubburi.pub.controller.rest;
 
 import java.util.List;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -23,6 +24,7 @@ import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.request.ProductRequest;
 import com.pubburi.pub.controller.response.ProductResponse;
+import com.pubburi.pub.controller.response.ProductSuggestionsResponse;
 import com.pubburi.pub.controller.response.ResponseMapper;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.service.ProductService;
@@ -30,6 +32,7 @@ import com.pubburi.pub.model.service.PublicProductSearchService;
 
 import jakarta.servlet.http.HttpSession;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -71,6 +74,21 @@ public class ProductRestController {
 		var result = publicSearch.search(type, q, sort, filters, PageCriteria.of(page, size, 12));
 		PageResponse<ProductResponse> products = result.page().map(ResponseMapper::product);
 		return ResponseEntity.ok().header("X-Pubburi-Search-Source", result.source().name()).body(ApiResponse.ok(products));
+	}
+
+	@GetMapping(value = "/products/suggestions", produces = MediaType.APPLICATION_JSON_VALUE)
+	@Operation(summary = "Suggest current products by literal name prefix", parameters = @Parameter(
+		name = "q", in = ParameterIn.QUERY, required = true, schema = @Schema(type = "string"),
+		description = "One name prefix. NFC after edge whitespace removal, 2–100 Unicode code points. Short inputs return an empty list."))
+	public ResponseEntity<ApiResponse<ProductSuggestionsResponse>> suggestions(HttpServletRequest request,
+			HttpServletResponse response) {
+		response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+		var query = request.getParameterValues("q");
+		if (request.getParameterMap().size() != 1 || query == null || query.length != 1) {
+			throw new IllegalArgumentException("Exactly one q parameter is required");
+		}
+		var data = new ProductSuggestionsResponse(productService.suggestByName(query[0]));
+		return ResponseEntity.ok(ApiResponse.ok(data));
 	}
 
 	@GetMapping("/products/popular")
