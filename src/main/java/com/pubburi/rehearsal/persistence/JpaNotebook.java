@@ -36,5 +36,6 @@ public class JpaNotebook {
     public UUID id(){return id;} public Integer productId(){return productId;} public String productName(){return productName;}
     public Experience experience(){return experience;} public BigDecimal rating(){return rating;}
     public List<String> tasteTags(){return tasteTags==null?null:List.of(tasteTags);} public List<String> aromaTags(){return aromaTags==null?null:List.of(aromaTags);}
-    public String memo(){return memo;} public long version(){return version;} public long createdAt(){return createdAt.toEpochMilli();} public long updatedAt(){return updatedAt.toEpochMilli();}
+    // Spring Data checks a nullable version to distinguish this assigned UUID's first persist.
+    public String memo(){return memo;} public Long version(){return version;} public long createdAt(){return createdAt.toEpochMilli();} public long updatedAt(){return updatedAt.toEpochMilli();}
 }
