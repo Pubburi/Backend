@@ -86,7 +86,10 @@ public final class SourceImportTool {
         });
     }
     static SourceArtifact.Report verify(Map<String,String> env) throws Exception {
-        var source=input(env,false);var settings=PostgresSchemaTool.Settings.from(env);
+        return verify(env,input(env,false));
+    }
+    static SourceArtifact.Report verify(Map<String,String> env,SourceArtifact.Snapshot source) throws Exception {
+        var settings=PostgresSchemaTool.Settings.from(env);
         PostgresSchemaTool.guard(settings);PostgresSchemaTool.configuration(settings,PostgresSchemaTool.LOCATION).load().validate();
         try(Connection c=settings.connect()) {
             c.setReadOnly(true);c.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);c.setAutoCommit(false);
@@ -106,10 +109,46 @@ public final class SourceImportTool {
             } catch(Exception error){c.rollback();throw error;}
         }
     }
+    static void compareSource(SourceSession current,SourceArtifact.Snapshot approved) throws Exception {
+        if(!current.server.equals(approved.data().path("sourceServer").textValue())
+                || !current.settings.window().equals(approved.data().path("window").textValue())
+                || !SourceContract.JSON.valueToTree(current.textCollations).equals(approved.data().path("textCollations"))
+                || !SourceContract.JSON.valueToTree(current.next).equals(approved.data().path("sourceNext")))
+            throw new IllegalArgumentException("source_cutover_identity_or_highwater_changed");
+        for(int t=0;t<approved.tables().size();t++) {
+            var spec=approved.tables().get(t);var table=approved.data().path("tables").get(t);
+            if(current.counts.get(spec.name())!=table.path("count").longValue())throw new IllegalArgumentException("source_cutover_rows_changed");
+            Map<String,JsonNode> expected=new HashMap<>();for(var row:table.path("rows"))expected.put(TargetValues.key(spec,row),row);
+            String columns=String.join(",",spec.columns().stream().map(c->'`'+c.name()+'`').toList());
+            try(var statement=current.connection.createStatement()) {
+                statement.setQueryTimeout(30);
+                try(var rows=statement.executeQuery("SELECT "+columns+" FROM `"+spec.name()+"`")) {
+                    while(rows.next()) {
+                        JsonNode actual=SourceContract.JSON.valueToTree(SourceContract.row(spec,rows));
+                        JsonNode wanted=expected.remove(TargetValues.key(spec,actual));
+                        if(wanted==null || !wanted.equals(actual))throw new IllegalArgumentException("source_cutover_value_changed");
+                    }
+                }
+            }
+            if(!expected.isEmpty())throw new IllegalArgumentException("source_cutover_rows_changed");
+        }
+    }
+    static SourceArtifact.Report verifyCutover(Map<String,String> env) throws Exception {
+        var approved=input(env,false);
+        // This read-only snapshot is not a writer fence. Both operators' write-stop
+        // declarations are required; a fresh invocation observes subsequent commits.
+        try(var current=new SourceSession(SourceSettings.from(env),approved.version())) {
+            compareSource(current,approved);
+            var report=verify(env,approved);
+            current.finish();
+            return report;
+        }
+    }
     public static int mainResult(String[] args,Map<String,String> env) {
         try {
-            if(args.length!=1 || !Set.of("import-source","verify-import").contains(args[0]))throw new IllegalArgumentException();
-            var report=args[0].equals("import-source")?run(env):verify(env);System.out.println("{\"status\":\"passed\",\"tables\":"+report.tables()+",\"rows\":"+report.rows()+"}");return 0;
+            if(args.length!=1 || !Set.of("import-source","verify-import","verify-cutover").contains(args[0]))throw new IllegalArgumentException();
+            var report=switch(args[0]) {case "import-source" -> run(env);case "verify-cutover" -> verifyCutover(env);default -> verify(env);};
+            System.out.println("{\"status\":\"passed\",\"tables\":"+report.tables()+",\"rows\":"+report.rows()+"}");return 0;
         } catch(Exception error){
             String code=error instanceof ImportTransaction.OutcomeException outcome?outcome.code:"postgresql_source_import_rejected";
             System.err.println("{\"status\":\"failed\",\"error_code\":\""+code+"\"}");return 2;

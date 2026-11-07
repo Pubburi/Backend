@@ -23,7 +23,7 @@ PR·main·수동 실행의 필수 `backend-ci`는 다음을 유지한다.
 | PG18.6 schema | `PUBBURI_PG_INTEGRATION=1`: 별도3DB의 새 설치/no-op·checksum·실패DDL 복구·타입/ID/인덱스 |
 | source/import | 별도 TLS source의 읽기 전용 snapshot·승인 파일 검증과 import4DB의 v1/16표·태그 포함 v2/17표 전체 typed-cell/PK·7개 고수위·수령증·실패 rollback |
 | JPA | `PUBBURI_JPA_INTEGRATION=1`: normal/failure·빈 카탈로그 scratch의 실제 Repository/HTTP·RR/잠금·수명/실패와 packaged 재시작 |
-| PG local release | `jpa_rehearsal_ci.local_release`: runtime 키만 private 설정에 복사해 실제 package-pg·backend-only40경로/49작업 기동/종료·격리 STATE에서 명시 PG 활성화와 개발 명령의 선택된 PG 재기동 |
+| PG local release | import 직후 업무 쓰기 전에 source/target 초기 일치 검수·runtime만의 실제 package-pg·backend-only40경로/49작업 기동/종료·격리 STATE의 PG 선택과 개발 명령 재기동 |
 | 검색/relay | 실제 CLI·현재 업무 producer·두 worker·lease/token·DB 시각·중복/삭제·엔진 재시작/물리 교체와 같은 필수조건의 공개 DB fallback |
 
 `PUBBURI_PG_RELAY_CI=1`은 실제 source/JPA 준비와 search/relay 통합 step에만 둔다.
