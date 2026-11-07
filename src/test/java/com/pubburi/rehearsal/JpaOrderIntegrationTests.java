@@ -176,8 +176,9 @@ class JpaOrderIntegrationTests extends JpaOrderTestSupport {
                 value.setCompleted("N"); value.setTotalPrice(0); value.setPriceBasis("ORDER_SNAPSHOT");
                 assertEquals(1, orders.insert(value)); ids.add(value.getoId());
                 Instant stored = orders.selectById(value.getoId()).getOrderTime().toInstant();
-                assertFalse(stored.isBefore(lower));
-                assertFalse(stored.isAfter(sql.queryForObject("SELECT statement_timestamp()", java.sql.Timestamp.class).toInstant()));
+                Instant upper = sql.queryForObject("SELECT statement_timestamp()", java.sql.Timestamp.class).toInstant();
+                assertFalse(stored.isBefore(lower), () -> "statement clock lower="+lower+", stored="+stored+", upper="+upper);
+                assertFalse(stored.isAfter(upper), () -> "statement clock lower="+lower+", stored="+stored+", upper="+upper);
                 return null;
             });
         } finally { for (int id : ids) sql.update("DELETE FROM pubburi.t_order WHERE o_id=? AND user_id=?", id, user); assertEquals(1, users.removeUser(user)); }
