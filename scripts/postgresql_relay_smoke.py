@@ -433,7 +433,7 @@ def consume_business(http, endpoint, private, environ, index="pubburi-products-v
     validate_business_events(original_events)
     assert sql(owner, "SELECT COUNT(*) AS n FROM t_product_search_outbox o LEFT JOIN t_product_search_delivery d USING(event_id) WHERE d.event_id IS NULL")[0]["n"] == 0
     engine = Engine(http, index, "backend_product_events", source_id, refresh="false"); engine.ready(create=True)
-    jar = Path(environ.get("PUBBURI_PG_RELAY_JPA_JAR", ROOT / "tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar"))
+    jar = Path(environ.get("PUBBURI_PG_RELAY_JPA_JAR", ROOT / "target/pubburi-server-0.0.1-SNAPSHOT.jar"))
     verify_jar(jar)
     immutable = private / "pg-relay-business-runtime.jar"
     with immutable.open("xb") as target: target.write(jar.read_bytes())

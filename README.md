@@ -4,7 +4,7 @@
   <p><strong>취향에 맞는 한 잔을 발견하고 기록하는 주류 큐레이션</strong></p>
   <p>회원·상품·후기·데모 주문을 제공하는 Spring Boot API</p>
   <a href="https://github.com/Pubburi/Backend/actions/workflows/ci.yml"><img src="https://github.com/Pubburi/Backend/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/Java-17-437291" alt="Java 17" /> <img src="https://img.shields.io/badge/Spring_Boot-3.5-6DB33F" alt="Spring Boot 3.5" /> <img src="https://img.shields.io/badge/MySQL-8.4-4479A1" alt="MySQL 8.4" />
+  <img src="https://img.shields.io/badge/Java-17-437291" alt="Java 17" /> <img src="https://img.shields.io/badge/Spring_Boot-3.5-6DB33F" alt="Spring Boot 3.5" /> <img src="https://img.shields.io/badge/PostgreSQL-18.6-4169E1" alt="PostgreSQL 18.6" />
 </div>
 
 <br />
@@ -26,7 +26,7 @@
 
 ## ✍ 프로젝트 개요
 
-주류 탐색·후기·데모 주문과 관리자 기능을 제공하는 공통 API입니다. Java 17·Spring Boot·MyBatis·MySQL로 구성하며 세션 인증을 사용합니다.
+주류 탐색·후기·데모 주문과 관리자 기능을 제공하는 공통 API입니다. Java 17·Spring Boot·Spring Data JPA·PostgreSQL을 기본 산출물로 제공하며 세션 인증을 사용합니다. 이관 전 MySQL/MyBatis는 명시 baseline으로 보존합니다.
 
 <a id="features"></a>
 
@@ -72,23 +72,23 @@ API와 응답 계약은 [API Map](docs/API-MAP.md)을 참고하세요.
 
 ## 🏛️ 시스템 구조
 
-기본 실행은 MySQL/MyBatis이며 PostgreSQL/JPA는 별도 제공자로 동작합니다. 전체 기본 스택 전환과 cutover 인수는 아직 미완료입니다.
+기본 Maven JAR은 PostgreSQL/JPA입니다. 기존 MySQL/MyBatis는 명시 비교 빌드로 보존하며, 실제 DB 선택과 전체 cutover 인수는 별도입니다.
 
 ```mermaid
 flowchart LR
     Web["웹 클라이언트"] --> API["/api · 세션 인증"]
     API --> Service["서비스 · 트랜잭션"]
-    Service --> Mapper["MyBatis"]
-    Mapper --> DB[("MySQL")]
+    Service --> JPA["Spring Data JPA · Hibernate"]
+    JPA --> DB[("PostgreSQL")]
     Service -->|B0/대체| Recommendation["추천 서비스"]
     Events["명시 이벤트 파일"] --> CLI["색인 관리 CLI"]
     CLI --> Search["로컬 OpenSearch · nori"]
 ```
 
-로컬 색인 기동·재생과 미완료 범위는 [실행 안내](docs/LOCAL-SEARCH.md)를 따릅니다. 현재 상품 검색은 MySQL을 사용합니다.
+로컬 색인 기동·재생과 미완료 범위는 [실행 안내](docs/LOCAL-SEARCH.md)를 따릅니다. 상품 검색은 선택한 PostgreSQL 또는 명시 MySQL baseline을 사용합니다.
 
 PostgreSQL의 독립 Flyway 스키마·[읽기 전용 원본 추출](docs/SOURCE-SNAPSHOT.md)·[승인 자료의 빈 대상 복사/검증](docs/SOURCE-IMPORT.md)을 제공합니다. 기존 업무 값·명시 ID·원문 JSON 보존과 전체 전환 범위는 [전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따릅니다.
-별도 [JPA 제공자](docs/JPA-REHEARSAL.md)는 회원·세션/프로필, 매장·상품/특성, 후기·본인 찜/명시취향, 기본 목록·데모 주문을 기존 API 계약으로 제공합니다.
+기본 [JPA 제공자](docs/JPA-REHEARSAL.md)는 회원·세션/프로필, 매장·상품/특성, 후기·본인 찜/명시취향, 기본 목록·데모 주문을 기존 API 계약으로 제공합니다.
 
 별도 [명시 relay](docs/SEARCH-RELAY.md)는 MySQL/PostgreSQL을 선택해 같은 Engine/CLI와 검증 TLS·개별 claim/ACK로 전달합니다.
 [공개 상품 검색](docs/PRODUCT-SEARCH.md)은 명시적으로 엔진을 읽고 현재 DB의 페이지/total과 대조하며, 누락·지연·장애에는 같은 필수조건의 현재 DB 응답을 반환합니다. 기본은 비활성이며 DB 확인 쿼리를 유지합니다. 자동완성/검색 품질·성능 인수는 후속입니다.
@@ -279,7 +279,8 @@ ALTER TABLE t_order_detail
 
 ## 🚀 로컬 실행
 
-Java 17과 Docker Compose가 필요합니다. 레포 루트에서 실행합니다.
+Java 17과 Docker Compose가 필요합니다. 레포 루트의 `./mvnw verify`는 기본 PostgreSQL JAR을 만들며 기존 DB를 준비하거나 전환하지 않습니다.
+MySQL 비교 산출물은 `./mvnw -f tools/mysql-baseline/pom.xml verify`로 별도 빌드합니다.
 기존 DB는 [주문 가격 스냅샷 전환](docs/ORDER-PRICE-SNAPSHOT.md)부터 필요한 선행 전환과
 [007 검색 변경 기록 전환](docs/SEARCH-OUTBOX.md)과 [008 전송 예약 전환](docs/SEARCH-RELAY.md)을
 순서대로 확인하세요. 초기화 SQL을 다시 실행하지 않습니다.

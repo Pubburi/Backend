@@ -1,14 +1,16 @@
 # 로컬 통합 실행
 
-확정 목표 DB/영속 계층은 PostgreSQL18.6·JPA(Hibernate)·Flyway다. 명시 PG 활성화 전 옵션을 생략한 통합 기동은 이관 전
+기본 Maven 산출물은 PostgreSQL18.6·JPA(Hibernate)·Flyway다.
+`./mvnw verify/package`는 PG JAR, `./mvnw -f tools/mysql-baseline/pom.xml verify`는 기존 MySQL 비교 JAR을 만든다.
+`package-pg`도 같은 기본 PG JAR을 고정한다. 기존 selector와 실제 DB를 자동 전환하지 않는다. 명시 PG 활성화 전 옵션을 생략한 통합 기동은 이관 전
 MySQL 기준이며 기존 볼륨을 보존한다. 아래 `activate-pg` 후에는 같은 명령이 선택한 PG를 사용한다. 준비된 소유 PostgreSQL 복사본은 아래 명시 경로로 실행한다. PostgreSQL schema installer는 별도 폐기 검증 DB에서
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
 완료로 간주하지 않는다. 기본 스택 전환과 복구 인수는 별도 게이트다.
 
 현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의40경로/49작업은
-별도 [명시 JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
+기본 [JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
 copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 원본 MySQL을 바꾸지 않는다.
-검증한 범위의 웹 연결은 가능하지만 기본 MySQL runtime/전체 cutover·복구 인수 완료와 구분한다.
+검증한 범위의 웹 연결은 가능하지만 실제 DB cutover·복구 인수 완료와 구분한다.
 
 본인 B1은 [공급 계약](CONTENT-RECOMMENDATIONS.md)의 공식 fresh container-DEMO bundle을
 운영자가 path/SHA로 고정할 때만 전송한다. 기본 빈 설정은 원본80 자동 fit 없이 UNAVAILABLE이며
@@ -186,7 +188,7 @@ PostgreSQL 선택이나 기동이 잘못되면 명령이 실패하며 `.env`를 
 활성 상태의 `init/install/down/reset-db`도 기존 PG 거절을 유지한다. `--provider mysql`은
 이관 전 기준을 의도적으로 별도 실행하는 명시 옵션이며 전환 후 쓰기를 MySQL로 되돌리는
 복구가 아니다. 원본 MySQL·스키마·역할·receipt·UUID/ACK를 선택 명령으로 바꾸지 않는다.
-이 선택은 로컬 launcher의 기본 대상만 바꾸며 root POM/전체 DB06·최종 cutover 완료가 아니다.
+이 선택은 로컬 launcher의 기본 대상만 바꾸며 전체 DB06·최종 cutover 완료가 아니다.
 CI는 별도 private STATE/선택 파일을 사용하여 실제 사용자 선택을 덮어쓰지 않는다.
 
 ## 쓰기 정지 PostgreSQL 복사본의 백업·새 대상 복구

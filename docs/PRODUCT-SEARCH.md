@@ -2,7 +2,7 @@
 
 `GET /api/products`는 기본 DB 조회와 명시한 엔진 읽기를 같은 공개 계약으로 제공한다. [부분 OpenAPI](openapi/product-search.json)와 실행
 `/v3/api-docs`가 제공자 계약이며 기존 ApiResponse·ProductResponse 일곱 필드와 PageResponse를
-유지한다. 기본 스택은 MySQL이고 별도 JPA 제공자는 PostgreSQL을 사용한다. 한국어 질의 품질·추천 재정렬과 기본 DB 전환은 별도다.
+유지한다. 기본 Maven JAR은 PostgreSQL/JPA이며 명시 MySQL baseline도 같은 계약을 유지한다. 실제 DB 선택은 기존 local selector를 따른다. 한국어 질의 품질·추천 재정렬과 기본 DB 전환은 별도다.
 
 ## 상품명 자동완성
 

@@ -95,11 +95,16 @@ def child_environment(environ):
 def verify_jar(path):
     with zipfile.ZipFile(path) as archive:
         names=archive.namelist()
+        try: manifest=archive.read("META-INF/MANIFEST.MF").decode("utf-8").splitlines()
+        except (KeyError,UnicodeError):raise ValueError("jpa_runtime_entrypoint_rejected") from None
+    expected="Start-Class: com.pubburi.rehearsal.JpaRehearsalApplication"
+    if [line for line in manifest if line.startswith("Start-Class:")]!=[expected] or "Main-Class: org.springframework.boot.loader.launch.JarLauncher" not in manifest:
+        raise ValueError("jpa_runtime_entrypoint_rejected")
     if "BOOT-INF/classes/com/pubburi/rehearsal/JpaRehearsalApplication.class" not in names:
         raise ValueError("jpa_runtime_provider_missing")
     if any(name.startswith("BOOT-INF/lib/") and any(bad in name.lower() for bad in ("mybatis","mysql-connector","h2-")) for name in names):
         raise ValueError("jpa_runtime_legacy_driver_rejected")
-    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","JpaSessionController.class")):
+    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","JpaSessionController.class","UnavailableRecommendationFeedbackController.class")) or any(name.startswith("BOOT-INF/classes/mappers/") for name in names):
         raise ValueError("jpa_runtime_unregistered_scope_rejected")
     if not any("spring-data-jpa-" in name for name in names) or not any("hibernate-core-" in name for name in names):
         raise ValueError("jpa_runtime_provider_missing")
@@ -147,7 +152,7 @@ def run(environ):
         raise ValueError("jpa_smoke_separate_failure_fixture_required")
     failure_env={"PUBBURI_PG_DB_NAME":failure_name,"PUBBURI_PG_URL":environ["PUBBURI_PG_URL"].rsplit("/",1)[0]+"/"+failure_name,"PUBBURI_PG_RUN_TOKEN":failure_token}
     verify_owned_postgres(dict(environ,**failure_env))
-    jar=ROOT/"tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar"
+    jar=ROOT/"target/pubburi-server-0.0.1-SNAPSHOT.jar"
     verify_jar(jar)
     directory=ROOT/".pubburi"/("worker-jpa-runtime-"+str(uuid.uuid4()));directory.mkdir(mode=0o700)
     immutable=directory/"runtime.jar";immutable.write_bytes(jar.read_bytes());immutable.chmod(0o600)

@@ -55,7 +55,7 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
     if dialect == "postgresql":
         from postgresql_relay_smoke import fixture, validate_business_events
         store, owner, _ = fixture(environ)
-        jar = Path(environ.get("PUBBURI_PG_RELAY_JPA_JAR", ROOT / "tools/jpa-rehearsal/target/pubburi-jpa-rehearsal-0.0.1-SNAPSHOT.jar"))
+        jar = Path(environ.get("PUBBURI_PG_RELAY_JPA_JAR", ROOT / "target/pubburi-server-0.0.1-SNAPSHOT.jar"))
         verify_jar(jar); base_env = child_environment(environ)
         payload_sql = "payload::text"
     elif dialect == "mysql":
@@ -63,7 +63,7 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         require_disposable_database(environ)
         settings = database_settings(environ)
         store = owner = Store(lambda: connect_database(settings))
-        jar = ROOT / "target/pubburi-server-0.0.1-SNAPSHOT.jar"
+        jar = ROOT / "tools/mysql-baseline/target/pubburi-mysql-baseline-0.0.1-SNAPSHOT.jar"
         base_env = {key: value for key, value in environ.items() if key in {"PATH", "JAVA_HOME", "HOME", "TMPDIR", "LANG", "PUBBURI_DB_URL", "PUBBURI_DB_USER", "PUBBURI_DB_PASSWORD"}}
         payload_sql = "CAST(payload AS CHAR)"
         if not environ.get("PUBBURI_JPA_ADMIN_ID") and not environ.get("PUBBURI_JPA_ADMIN_PASSWORD"):

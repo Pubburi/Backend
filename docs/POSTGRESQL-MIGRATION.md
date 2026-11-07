@@ -2,7 +2,7 @@
 
 2026-11-01 사용자 결정에 따라 목표는 **PostgreSQL18.6 + Spring Data JPA(Hibernate) +
 Flyway Community**, Python relay는 **Psycopg3**다. MyBatis 대체 기술 선정은 끝났으며 다시
-선택 대기로 두지 않는다. 현재 API의 MySQL/MyBatis는 이관 전 기준으로 보존한다.
+선택 대기로 두지 않는다. 기본 Maven JAR은 PG/JPA이며 MySQL/MyBatis는 명시 baseline과 이관 전 원본으로 보존한다.
 DB01–DB06은 기존 필수20기능의 기술 선행 조건이지 추가 사용자 기능이 아니다.
 
 ## 일정과 완료 경계
@@ -27,12 +27,12 @@ DB06 실제 전환/rollback과 세 서버 필수 회귀는 MVP를 위한 선행/
   PostgreSQL 문법으로 덮어쓰지 않는다. 새 설치·복사 이관·런타임 cutover는 각각 검증한다.
 - DB02는 독립 `tools/postgresql-migration`의 실제 스키마 installer/검증과 [원본 snapshot export](SOURCE-SNAPSHOT.md) 및
   [승인 snapshot의 빈 target 복사/검증](SOURCE-IMPORT.md)를 제공한다. 이 단계는 root POM/API를
-  바꾸지 않았다. DB03은 별도 `tools/jpa-rehearsal`에서 [실제 세션·매장 JPA 제공자](JPA-REHEARSAL.md)를
-  제공한다. 미제공 API는 등록하지 않으며 비사용 entity/stub로 전체 전환을 주장하지 않는다.
-- Java17과 기존 Boot3.5.0을 보존한다. 현재 BOM의 Hibernate6.6.15.Final/JDBC42.7.5를 확인했다.
+  바꾸지 않았다. 현재 DB03은 그 [실제 JPA 제공자](JPA-REHEARSAL.md)를 root `src/main`과 기본
+  `pom.xml`로 승격했다. `tools/mysql-baseline/pom.xml`은 기존 MySQL 런타임/회귀를 명시 빌드한다. 미제공 API는 등록하지 않으며 비사용 entity/stub로 전체 전환을 주장하지 않는다.
+- Java17과 기존 MySQL baseline의 Boot3.5.0을 보존한다. 기존 BOM의 Hibernate6.6.15.Final/JDBC42.7.5를 확인했다.
   독립 도구는 Flyway OSS13.12.0 + PostgreSQL plugin13.12.0과 보안 수정된 JDBC42.7.14를 고정한다.
-  별도 JPA 제공자는 Boot3.5.16/Spring Data JPA3.5.13/Hibernate6.6.53.Final과 실제 기동을
-  검증한다. 기본 API Boot3.5.0/기존 jar와 전체 JPA 전환 상태는 구분한다.
+  기본 JPA 제공자는 Boot3.5.16/Spring Data JPA3.5.13/Hibernate6.6.53.Final과 실제 기동을
+  검증한다. 기본 JAR 승격과 실제 DB/launcher 선택·전체 전환 상태는 구분한다.
 
 근거: [Flyway13.12.0](https://github.com/flyway/flyway/releases/tag/flyway-13.12.0),
 [Java17/14부터 Java21](https://documentation.red-gate.com/fd/api-java-277579358.html),
@@ -135,17 +135,17 @@ python3 scripts/postgresql_schema.py reserve-identities
 ## 현재 제공과 남은 전환
 
 DB02의 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md)는16표 전체 값/PK·
-7개 고수위·UUID/epoch·원문 JSON/receipt를 검수한다. DB03의 [명시 JPA 제공자](JPA-REHEARSAL.md)는
+7개 고수위·UUID/epoch·원문 JSON/receipt를 검수한다. DB03의 [기본 JPA 제공자](JPA-REHEARSAL.md)는
 40경로/49작업과 거래/계정 수명·취향/찜·기존 추천 caller를 제공한다. [로컬 실행](LOCAL-DEVELOPMENT.md)은
 완료 release를 준비된 소유 copied PG에 연결하며 schema/역할을 만들거나 DB를 초기화하지 않는다.
-명시 `activate-pg`는 검증한 복사본을 로컬 명령의 기본 대상으로 고정한다. 이는 root POM/전체
+명시 `activate-pg`는 검증한 복사본을 로컬 명령의 기본 대상으로 고정한다. 이는 기본 JAR의 PG 승격 및 전체
 DB 전환 인수와 별개이며 선택/입력/기동 실패에 MySQL로 자동 복귀하지 않는다.
 
 DB05의 [Psycopg3 relay](SEARCH-RELAY.md)와 [공개 검색/필수조건 대체](PRODUCT-SEARCH.md)는
 같은 source/target binding·기존 ACK·현재 DB 사실을 보존한다. JPA 공개 앱은 엔진/ACK를 쓰지 않는다.
 필수 검증과 원본/자원 보존 정책은 [TESTING](TESTING.md)을 따른다.
 
-기본 MySQL/MyBatis 제거·실제 전환·콜레이션/전체 업무·웹 재인수·relay 운영·cutover 후 쓰기
+기본 JAR에서 MySQL/MyBatis 런타임은 제외했다. 실제 DB 전환·콜레이션/전체 업무·웹 재인수·relay 운영·cutover 후 쓰기
 역이관/rollback은 DB03–06의 남은 게이트다. TX/문장/실제시각과 잠금 의미를 이름만 보고 복사하지
 않고 원본/과거 검증을 PG 성과로 바꾸지 않는다. UUID/ACK 초기화·재색인을 복구로 자동 실행하지 않는다.
 

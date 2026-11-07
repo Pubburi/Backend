@@ -28,8 +28,7 @@ OPTIONAL = frozenset(('PUBBURI_LOG_LEVEL', 'PUBBURI_RECOMMENDATION_BASE_URL',
     'PUBBURI_SEARCH_ENABLED', 'PUBBURI_SEARCH_ENDPOINT', 'PUBBURI_SEARCH_INDEX',
     'PUBBURI_CONTENT_CATALOG_PATH', 'PUBBURI_CONTENT_CATALOG_SHA256',
     'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED'))
-INPUTS = ('pom.xml', 'mvnw', '.mvn', 'src/main', 'tools/jpa-rehearsal/pom.xml',
-          'tools/jpa-rehearsal/src/main', 'tools/postgresql-migration/src/main/resources')
+INPUTS = ('pom.xml', 'mvnw', '.mvn', 'src/main', 'tools/postgresql-migration/src/main/resources')
 
 
 def reject():
@@ -243,15 +242,14 @@ def package(local, destination):
             log = stack.enter_context((directory / 'build.log').open('x'))
             os.chmod(directory / 'build.log', 0o600)
             with defer_termination():
-                child = subprocess.Popen(['./mvnw', '--batch-mode', '--no-transfer-progress', '-f',
-                'tools/jpa-rehearsal/pom.xml', 'verify'], cwd=local.BACKEND, env=env,
+                child = subprocess.Popen(['./mvnw', '--batch-mode', '--no-transfer-progress', 'verify'], cwd=local.BACKEND, env=env,
                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
                 stack.callback(local.stop, child)
             if child.wait() != 0:
                 reject()
         if source_files(local) != before or subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=local.BACKEND, text=True).strip() != commit:
             reject()
-        candidates = list((local.BACKEND / 'tools/jpa-rehearsal/target').glob('*.jar'))
+        candidates = list((local.BACKEND / 'target').glob('pubburi-server-*.jar'))
         if len(candidates) != 1:
             reject()
         shutil.copyfile(candidates[0], directory / 'runtime.jar')

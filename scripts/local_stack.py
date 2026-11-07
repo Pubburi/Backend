@@ -211,7 +211,7 @@ def start(env, smoke):
                 candidate.bind(("127.0.0.1", int(env[key])))
         compose("up", "-d", "--wait", "db", env=env)
         commands = {
-            "backend": (BACKEND, ["./mvnw", "--batch-mode", "--no-transfer-progress", "spring-boot:run"]),
+            "backend": (BACKEND, ["./mvnw", "--batch-mode", "--no-transfer-progress", "-f", "tools/mysql-baseline/pom.xml", "spring-boot:run"]),
             "frontend": (FRONTEND, ["./scripts/dev.sh"]),
             "recommendation": (RECOMMENDATION, ["./scripts/dev.sh"]),
         }
@@ -286,7 +286,7 @@ def main():
         doctor(env)
     elif args.command == "install":
         doctor(env)
-        run(["./mvnw", "--batch-mode", "--no-transfer-progress", "verify"], env=env)
+        run(["./mvnw", "--batch-mode", "--no-transfer-progress", "-f", "tools/mysql-baseline/pom.xml", "verify"], env=env)
         run(["npm", "ci"], cwd=FRONTEND, env=env)
         run(["uv", "sync", "--locked", "--python", "3.12"], cwd=RECOMMENDATION, env=env)
     elif args.command in ["up", "smoke"]:

@@ -1,84 +1,64 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.0</version>
-        <relativePath/>
-    </parent>
-
-    <groupId>com.pubburi</groupId>
-    <artifactId>pubburi-server</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <name>pubburi-server</name>
-    <description>Pubburi web backend</description>
-
-    <properties>
-        <java.version>17</java.version>
-        <!-- Keep embedded core, EL and WebSocket on one patched Tomcat 10.1 line. -->
-        <tomcat.version>10.1.61</tomcat.version>
-        <!-- Keep JSON modules aligned while applying the Reader field-name limit fix. -->
-        <jackson-bom.version>2.21.8</jackson-bom.version>
-    </properties>
-
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.security</groupId>
-            <artifactId>spring-security-crypto</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>3.0.3</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.8.9</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-devtools</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.5.16</version><relativePath/></parent>
+  <groupId>com.pubburi</groupId><artifactId>pubburi-server</artifactId><version>0.0.1-SNAPSHOT</version>
+  <properties><java.version>17</java.version><tomcat.version>10.1.61</tomcat.version><jackson-bom.version>2.21.8</jackson-bom.version><postgresql.version>42.7.14</postgresql.version><flyway.version>13.12.0</flyway.version></properties>
+  <dependencies>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
+    <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-crypto</artifactId></dependency>
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId></dependency>
+    <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
+    <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-database-postgresql</artifactId><version>${flyway.version}</version></dependency>
+    <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId><version>2.8.9</version></dependency>
+    <!-- Real legacy annotation types at compile time only; never an annotation stub or runtime mapper. -->
+    <dependency><groupId>org.mybatis</groupId><artifactId>mybatis</artifactId><version>3.5.19</version><scope>provided</scope></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <!-- Keep former MySQL target/classes and resources out of the default PG artifact. -->
+    <outputDirectory>${project.build.directory}/postgresql-classes</outputDirectory>
+    <testOutputDirectory>${project.build.directory}/postgresql-test-classes</testOutputDirectory>
+    <resources>
+      <resource><directory>src/main/resources</directory><excludes><exclude>mappers/**</exclude></excludes></resource>
+      <resource><directory>tools/postgresql-migration/src/main/resources</directory><includes><include>db/postgresql/**</include></includes></resource>
+    </resources>
+    <plugins>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><includes>
+        <include>com/pubburi/rehearsal/**/*.java</include>
+        <include>com/pubburi/pub/controller/api/*.java</include><include>com/pubburi/pub/controller/auth/*.java</include><include>com/pubburi/pub/controller/response/*.java</include>
+        <include>com/pubburi/pub/controller/request/LoginRequest.java</include><include>com/pubburi/pub/controller/request/MarketRequest.java</include><include>com/pubburi/pub/controller/rest/MarketRestController.java</include>
+        <include>com/pubburi/pub/controller/request/ProductRequest.java</include><include>com/pubburi/pub/controller/request/ProductFeaturesRequest.java</include>
+        <include>com/pubburi/pub/controller/request/StrictIntegerDeserializer.java</include><include>com/pubburi/pub/controller/request/StrictStringDeserializer.java</include>
+        <include>com/pubburi/pub/controller/rest/ProductRestController.java</include><include>com/pubburi/pub/controller/rest/ProductFeatureRestController.java</include>
+        <include>com/pubburi/pub/controller/rest/OrderRestController.java</include><include>com/pubburi/pub/controller/request/OrderCreateRequest.java</include><include>com/pubburi/pub/controller/request/OrderDetailRequest.java</include>
+        <include>com/pubburi/pub/controller/rest/UserRestController.java</include><include>com/pubburi/pub/controller/request/JoinUserRequest.java</include><include>com/pubburi/pub/controller/request/AdminUserRequest.java</include>
+        <include>com/pubburi/pub/model/service/GradeService.java</include>
+        <include>com/pubburi/pub/controller/request/SelfProfileRequest.java</include><include>com/pubburi/pub/controller/request/SelfPasswordRequest.java</include><include>com/pubburi/pub/controller/request/Utf8ByteLength.java</include>
+        <include>com/pubburi/pub/controller/rest/CommentRestController.java</include><include>com/pubburi/pub/controller/request/ReviewTasteTagsDeserializer.java</include><include>com/pubburi/pub/controller/request/CommentCreateRequest.java</include><include>com/pubburi/pub/controller/request/CommentUpdateRequest.java</include>
+        <include>com/pubburi/pub/model/dao/CommentDao.java</include><include>com/pubburi/pub/model/service/CommentService.java</include><include>com/pubburi/pub/model/service/CommentServiceImpl.java</include>
+        <include>com/pubburi/pub/controller/rest/FavoriteRestController.java</include><include>com/pubburi/pub/model/dao/FavoriteDao.java</include>
+        <include>com/pubburi/pub/model/service/FavoriteService.java</include><include>com/pubburi/pub/model/service/FavoriteServiceImpl.java</include>
+        <include>com/pubburi/pub/controller/rest/UserPreferenceRestController.java</include><include>com/pubburi/pub/controller/request/UserPreferencesRequest.java</include><include>com/pubburi/pub/controller/request/StrictDecimalDeserializer.java</include>
+        <include>com/pubburi/pub/model/dao/UserPreferenceDao.java</include><include>com/pubburi/pub/model/service/UserPreferenceService.java</include><include>com/pubburi/pub/model/service/UserPreferenceServiceImpl.java</include>
+        <include>com/pubburi/pub/controller/rest/DefaultRecommendationController.java</include><include>com/pubburi/pub/model/service/DefaultRecommendationService.java</include>
+        <include>com/pubburi/pub/controller/rest/SearchPhraseController.java</include><include>com/pubburi/pub/model/service/SearchPhraseService.java</include><include>com/pubburi/pub/controller/request/SearchPhraseRequest.java</include>
+        <include>com/pubburi/pub/config/RecommendationConfig.java</include><include>com/pubburi/pub/recommendation/*.java</include>
+        <include>com/pubburi/pub/controller/rest/OwnedContentRecommendationController.java</include><include>com/pubburi/pub/controller/request/ContentRecommendationRequest.java</include><include>com/pubburi/pub/model/service/OwnedContentRecommendationService.java</include><include>com/pubburi/pub/model/service/OwnedContentSnapshotService.java</include>
+        <include>com/pubburi/pub/controller/rest/SimilarProductController.java</include><include>com/pubburi/pub/model/service/SimilarProductService.java</include>
+        <include>com/pubburi/pub/config/ProductSearchConfig.java</include><include>com/pubburi/pub/search/*.java</include><include>com/pubburi/pub/model/service/PublicProductSearchService.java</include><include>com/pubburi/pub/model/dao/ProductSearchIdentityDao.java</include>
+        <include>com/pubburi/pub/model/dto/*.java</include><include>com/pubburi/pub/model/dao/UserDao.java</include><include>com/pubburi/pub/model/dao/MarketDao.java</include>
+        <include>com/pubburi/pub/model/dao/ProductDao.java</include><include>com/pubburi/pub/model/dao/ProductFeatureDao.java</include><include>com/pubburi/pub/model/dao/ProductSearchOutboxDao.java</include>
+        <include>com/pubburi/pub/model/dao/OrderDao.java</include><include>com/pubburi/pub/model/dao/OrderDetailDao.java</include><include>com/pubburi/pub/model/dao/StampDao.java</include>
+        <include>com/pubburi/pub/model/service/OrderService.java</include><include>com/pubburi/pub/model/service/OrderServiceImpl.java</include>
+        <include>com/pubburi/pub/model/service/ProductService.java</include><include>com/pubburi/pub/model/service/ProductServiceImpl.java</include>
+        <include>com/pubburi/pub/model/service/ProductFeatureService.java</include><include>com/pubburi/pub/model/service/ProductFeatureServiceImpl.java</include><include>com/pubburi/pub/model/service/ProductSearchOutbox.java</include>
+        <include>com/pubburi/pub/model/service/UserService.java</include><include>com/pubburi/pub/model/service/UserServiceImpl.java</include><include>com/pubburi/pub/model/service/PasswordHasher.java</include>
+        <include>com/pubburi/pub/model/service/MarketService.java</include><include>com/pubburi/pub/model/service/MarketServiceImpl.java</include><include>com/pubburi/pub/config/CorsConfig.java</include>
+      </includes></configuration></plugin>
+      <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><configuration><mainClass>com.pubburi.rehearsal.JpaRehearsalApplication</mainClass><excludes><exclude><groupId>org.mybatis</groupId><artifactId>mybatis</artifactId></exclude></excludes></configuration></plugin>
+    </plugins>
+  </build>
 </project>
