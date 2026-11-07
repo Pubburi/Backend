@@ -16,6 +16,22 @@ class NotebookContractTests {
     static final String PATH="/api/users/me/notebook";
     static final String ID="00000000-0000-4000-8000-000000000001";
     static final SessionUser OWNER=new SessionUser("own","Owner",0,"USER","00000000-0000-4000-8000-000000000002");
+    @Test void oversizedDeclaredAndUnknownLengthBodiesStopBeforeAnyBusinessWrite()throws Exception{
+        var guard=mock(AccessGuard.class);when(guard.requireLogin(any())).thenReturn(OWNER);var notes=mock(NotebookService.class);
+        var mvc=MockMvcBuilders.standaloneSetup(new NotebookController(guard,notes)).setControllerAdvice(new GlobalExceptionHandler()).addFilters(new NotebookPrivacyFilter()).build();
+        String body="{\"memo\":\""+"x".repeat(NotebookPrivacyFilter.MAX_BODY_BYTES)+"\"}";
+        mvc.perform(post(PATH).header(NotebookController.OWNER_HEADER,"own").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isPayloadTooLarge()).andExpect(header().string("Cache-Control","private, no-store"));
+        mvc.perform(post(PATH+";matrix=1").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isPayloadTooLarge()).andExpect(header().string("Cache-Control","private, no-store"));
+        mvc.perform(post(java.net.URI.create("/api/users/me/%6Eotebook")).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isPayloadTooLarge()).andExpect(header().string("Cache-Control","private, no-store"));
+        mvc.perform(context->{
+            var request=new org.springframework.mock.web.MockHttpServletRequest(context,"POST",PATH){
+                @Override public long getContentLengthLong(){return -1;}
+                @Override public int getContentLength(){return -1;}
+            };
+            request.setContentType(MediaType.APPLICATION_JSON_VALUE);request.addHeader(NotebookController.OWNER_HEADER,"own");request.setContent(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));return request;
+        }).andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control","private, no-store"));
+        verifyNoInteractions(notes);
+    }
     @Test void accountAndRevisionSelectorsAreStrictAndEveryOutcomeIsPrivate()throws Exception{
         var guard=mock(AccessGuard.class);var notes=mock(NotebookService.class);when(guard.requireLogin(any())).thenReturn(OWNER);
         when(notes.page(eq(OWNER),any(),isNull())).thenReturn(PageResponse.of(List.of(),new PageCriteria(1,20),0));

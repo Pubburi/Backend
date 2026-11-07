@@ -9,7 +9,8 @@ F07은 PostgreSQL 제공자에서 현재 본인의 기록만 저장한다. 공�
 모든 요청은 세션과 `X-Pubburi-Account-Owner: encodeURIComponent(현재 계정 ID)`를 요구한다.
 헤더는 계정을 선택하지 않는다. 미로그인/만료 epoch/관측 계정 불일치는401, 헤더 누락·중복·
 비canonical 인코딩은400이다. 관리자도 다른 사람의 UUID 기록을 조회/수정/삭제할 수 없다.
-모든 성공·오류는 `Cache-Control: private, no-store`, `Vary: Cookie`다.
+모든 성공·오류는 `Cache-Control: private, no-store`, `Vary: Cookie`다. POST/PUT body는64KiB
+이내이며 선언 길이 초과는413, 길이 없는 stream의 상한 초과는 읽기를 중단해400으로 거절한다.
 
 | 메서드 | 경로 | 동작 |
 |---|---|---|

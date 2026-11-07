@@ -12,6 +12,7 @@ import java.util.*;
 /** Personal observations retain literal text, null/empty values and array order. */
 public final class NotebookInput {
     public static final long MAX_VERSION=9007199254740991L;
+    private static final ObjectReader EXACT_JSON=new ObjectMapper().reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
     private NotebookInput(){ }
     public record Content(Experience experience,BigDecimal rating,List<String> tasteTags,List<String> aromaTags,String memo){ }
     @JsonDeserialize(using=CreateDeserializer.class)
@@ -28,7 +29,7 @@ public final class NotebookInput {
     private static IllegalArgumentException invalid(){return new IllegalArgumentException("Invalid notebook input");}
     private static JsonNode root(JsonParser parser,String...fields)throws IOException{
         parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-        JsonNode value=parser.getCodec().readTree(parser);
+        JsonNode value=EXACT_JSON.readTree(parser);
         if(value==null || !value.isObject() || value.size()!=fields.length || Arrays.stream(fields).anyMatch(key->!value.has(key)) || parser.nextToken()!=null)throw invalid();
         return value;
     }
@@ -51,8 +52,9 @@ public final class NotebookInput {
         JsonNode score=node.get("rating");BigDecimal rating=null;
         if(!score.isNull()){
             if(!score.isNumber())throw invalid();
-            try{rating=score.decimalValue().setScale(2,RoundingMode.UNNECESSARY);}catch(ArithmeticException error){throw invalid();}
-            if(rating.signum()<0 || rating.compareTo(BigDecimal.valueOf(5))>0)throw invalid();
+            BigDecimal observed=score.decimalValue();
+            if(observed.signum()<0 || observed.compareTo(BigDecimal.valueOf(5))>0 || observed.stripTrailingZeros().scale()>2)throw invalid();
+            try{rating=observed.setScale(2,RoundingMode.UNNECESSARY);}catch(ArithmeticException error){throw invalid();}
         }
         var taste=tags(node.get("tasteTags"));var aroma=tags(node.get("aromaTags"));String memo=literal(node.get("memo"),2000,true);
         if(experience==Experience.INTERESTED && (rating!=null || taste!=null || aroma!=null))throw invalid();

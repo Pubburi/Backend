@@ -19,6 +19,7 @@ class NotebookInputTests {
     @Test void malformedUnknownCoercedOrInconsistentInputNeverBecomesAnObservation()throws Exception{
         var baseline=create();
         var invalid=new ArrayList<String>(List.of("null","[]","{}",baseline.toString()+" {}",baseline.toString().replace("\"experience\":\"TRIED\"","\"experience\":\"TRIED\",\"experience\":\"TRIED\"")));
+        for(String number:List.of("1e999999999","1e-999999999","4.25000000000000000000000001"))invalid.add(create().toString().replace("\"rating\":null","\"rating\":"+number));
         for(JsonNode product:List.of(json.getNodeFactory().numberNode(1.0),json.getNodeFactory().booleanNode(true),json.getNodeFactory().numberNode(0)))invalid.add(create().set("productId",product).toString());
         for(JsonNode score:List.of(json.getNodeFactory().numberNode(-0.1),json.getNodeFactory().numberNode(5.01),json.getNodeFactory().numberNode(1.234),json.getNodeFactory().textNode("4"),json.getNodeFactory().booleanNode(true)))invalid.add(create().set("rating",score).toString());
         invalid.add(create().put("memo","x".repeat(2001)).toString());invalid.add(create().put("memo","bad\0text").toString());invalid.add(create().put("memo","\ud800").toString());
