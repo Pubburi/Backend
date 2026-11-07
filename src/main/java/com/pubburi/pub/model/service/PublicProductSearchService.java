@@ -1,22 +1,36 @@
 package com.pubburi.pub.model.service;
 
+import java.util.List;
 import org.springframework.stereotype.Service;
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.PageResponse;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dao.ProductSearchIdentityDao;
 import com.pubburi.pub.model.dto.Product;
+import com.pubburi.pub.model.dto.ProductSuggestion;
+import com.pubburi.pub.search.ProductNamePrefix;
 import com.pubburi.pub.search.ProductSearchGateway;
 
 @Service
 public class PublicProductSearchService {
     public enum Source { DATABASE, ENGINE_VERIFIED, DATABASE_FALLBACK }
     public record Result(PageResponse<Product> page, Source source) { }
+    public record Suggestions(List<ProductSuggestion> items, Source source) { }
     private final ProductService products;
     private final ProductSearchIdentityDao identities;
     private final ProductSearchGateway engine;
     public PublicProductSearchService(ProductService products, ProductSearchIdentityDao identities, ProductSearchGateway engine) {
         this.products=products;this.identities=identities;this.engine=engine;
+    }
+    public Suggestions suggest(String query) {
+        String prefix=ProductNamePrefix.normalize(query);
+        if(prefix.isEmpty())return new Suggestions(List.of(),Source.DATABASE);
+        if(!engine.enabled())return new Suggestions(products.suggestByName(prefix),Source.DATABASE);
+        var selected=engine.suggest(identities.selectSourceId(),prefix);
+        // Read current canonical facts only after remote I/O; source documents never enter the response.
+        var current=products.suggestByName(prefix);
+        boolean verified=selected.isPresent() && selected.get().ids().equals(current.stream().map(ProductSuggestion::id).toList());
+        return new Suggestions(current,verified?Source.ENGINE_VERIFIED:Source.DATABASE_FALLBACK);
     }
     // Remote I/O is outside the canonical service's short read-only RR transaction.
     public Result search(String type,String q,String sort,ProductSearchFilters filters,PageCriteria page) {

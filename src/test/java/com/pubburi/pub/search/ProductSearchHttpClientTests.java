@@ -34,6 +34,30 @@ class ProductSearchHttpClientTests {
             for(String mode:List.of("status","redirect","media","source","generation")){server.mode.set(mode);int before=server.calls.get();assertThat(server.call()).isEmpty();assertThat(server.calls.get()-before).isLessThanOrEqualTo(3);}
         }
     }
+    @Test void suggestionsUseLiteralPrefixAndTheSameOwnedGenerationDeadlineAndStrictSelection()throws Exception{
+        try(var server=new Server()){
+            String prefix="한글 %_!\\*?";
+            assertThat(server.client().suggest(SOURCE,prefix)).contains(new ProductSearchGateway.Selection(List.of(2,5),2));
+            JsonNode body=server.last.get();
+            assertThat(body.path("size").intValue()).isEqualTo(8);
+            assertThat(body.at("/query/bool/filter/1/prefix/name.raw/value").textValue()).isEqualTo(prefix);
+            assertThat(body.at("/query/bool/filter/1/prefix/name.raw/case_insensitive").booleanValue()).isTrue();
+            assertThat(body.at("/sort/0/name.raw").textValue()).isEqualTo("asc");
+            assertThat(body.at("/sort/1/product_id").textValue()).isEqualTo("asc");
+            assertThat(body.toString()).doesNotContain("wildcard","category","query_string");
+            for(String bad:List.of(HITS.replace("\"failed\":0","\"failed\":1"),HITS.replace("\"relation\":\"eq\"","\"relation\":\"gte\""),HITS.replace("\"value\":2","\"value\":3"),HITS.replace("\"_id\":\"5\"","\"_id\":\"2\""),HITS.replace("\"_id\":\"2\"","\"_source\":{},\"_id\":\"2\""))){
+                server.response.set(bad);assertThat(server.client().suggest(SOURCE,prefix)).isEmpty();
+            }
+            server.response.set(HITS);
+            for(String mode:List.of("source","generation","status","media")){
+                server.metadata.set(0);server.mode.set(mode);assertThat(server.client().suggest(SOURCE,prefix)).isEmpty();
+            }
+            server.mode.set("slowBody");
+            var executor=Executors.newSingleThreadExecutor();
+            try{var result=executor.submit(()->server.client().suggest(SOURCE,prefix));assertThat(server.entered.await(2,TimeUnit.SECONDS)).isTrue();assertThat(result.get(2,TimeUnit.SECONDS)).isEmpty();}
+            finally{server.release.countDown();executor.shutdownNow();assertThat(executor.awaitTermination(2,TimeUnit.SECONDS)).isTrue();}
+        }
+    }
     @Test void unsupportedLegacyLikeDeepPagesAndInvalidSourceNeverMakeRemoteRequests()throws Exception{
         try(var server=new Server()){
             for(String q:List.of("%","_","a\\b","x".repeat(101)))assertThat(server.client().search(SOURCE,null,q,null,ProductSearchFilters.none(),PageCriteria.of(1,12,12))).isEmpty();

@@ -8,6 +8,7 @@ import com.pubburi.pub.controller.api.ProductSearchFilters;
 public interface ProductSearchGateway {
     boolean enabled();
     Optional<Selection> search(String sourceId, String type, String q, String sort, ProductSearchFilters filters, PageCriteria page);
+    default Optional<Selection> suggest(String sourceId, String prefix) { return Optional.empty(); }
     record Selection(List<Integer> ids, int total) { }
     static ProductSearchGateway disabled() {
         return new ProductSearchGateway() {

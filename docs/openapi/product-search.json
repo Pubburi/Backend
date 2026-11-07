@@ -192,7 +192,7 @@
       "get": {
         "operationId": "suggestCurrentProductsByName",
         "security": [],
-        "description": "Public current MySQL or PostgreSQL name-prefix lookup. Literal input under the database name collation. Results are sorted by name then ID and are not cached.",
+        "description": "Public current MySQL or PostgreSQL name-prefix lookup. Literal input under the database name collation. Results are sorted by name then ID and are not cached. Configured source-bound OpenSearch candidates are verified against the current ordered database IDs; failures preserve current database facts.",
         "parameters": [
           {
             "name": "q",
@@ -212,6 +212,17 @@
                 "schema": {
                   "type": "string",
                   "const": "no-store"
+                }
+              },
+              "X-Pubburi-Search-Source": {
+                "description": "DATABASE for disabled/short input; ENGINE_VERIFIED for equal current top-eight ordered IDs; DATABASE_FALLBACK for engine errors or differences. No whole-index or performance guarantee.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "DATABASE",
+                    "ENGINE_VERIFIED",
+                    "DATABASE_FALLBACK"
+                  ]
                 }
               }
             },
