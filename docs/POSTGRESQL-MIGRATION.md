@@ -140,6 +140,8 @@ DB02의 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md)�
 완료 release를 준비된 소유 copied PG에 연결하며 schema/역할을 만들거나 DB를 초기화하지 않는다.
 명시 `activate-pg`는 검증한 복사본을 로컬 명령의 기본 대상으로 고정한다. 이는 기본 JAR의 PG 승격 및 전체
 DB 전환 인수와 별개이며 선택/입력/기동 실패에 MySQL로 자동 복귀하지 않는다.
+첫 선택은 writer 정지 창의 현재 MySQL/PG·승인 artifact 전행/7고수위 검수가 필요하며, PG 쓰기 뒤의
+복구본 승계는 초기 cutover와 별도인 PG 백업/복구·promote로 검사한다.
 
 DB05의 [Psycopg3 relay](SEARCH-RELAY.md)와 [공개 검색/필수조건 대체](PRODUCT-SEARCH.md)는
 같은 source/target binding·기존 ACK·현재 DB 사실을 보존한다. JPA 공개 앱은 엔진/ACK를 쓰지 않는다.

@@ -26,6 +26,7 @@ class SourceImportTypedIntegrationTests {
         }
         assertEquals(source.report(),SourceImportTool.run(env));
         var readOnly=new HashMap<>(env);readOnly.remove("PUBBURI_PG_MUTATING");assertEquals(source.report(),SourceImportTool.verify(readOnly));
+        assertEquals(source.report(),SourceImportTool.verifyCutover(readOnly));
         try(Connection c=PostgresSchemaTool.Settings.from(env).connect()) {
             SourceImportTool.compare(c,source);
             assertEquals(1,SourceImportIntegrationTests.number(c,"SELECT count(*) FROM pubburi.t_product_feature WHERE volume_ml=500 AND NOT taste_known AND aroma_known"));

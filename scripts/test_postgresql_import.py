@@ -15,6 +15,18 @@ class PostgreSqlImportChildTests(unittest.TestCase):
              "PUBBURI_PG_ADMIN_PASSWORD":"admin-only","PUBBURI_SOURCE_PASSWORD":"source-only","PUBBURI_DB_PASSWORD":"api-only",
              "PGPASSWORD":"admin-other","JAVA_TOOL_OPTIONS":"authored-untrusted-option"}
         self.assertEqual(child_environment(env),{key:env[key] for key in ("JAVA_HOME","PUBBURI_PG_URL","PUBBURI_PG_PASSWORD","PUBBURI_PG_IMPORT_SHA256","PUBBURI_SOURCE_SNAPSHOT_DIR")})
+        cutover=child_environment(env,True)
+        self.assertEqual(cutover['PUBBURI_SOURCE_PASSWORD'],'source-only')
+        for key in ('PUBBURI_PG_ADMIN_PASSWORD','PUBBURI_DB_PASSWORD','PGPASSWORD','JAVA_TOOL_OPTIONS'):
+            self.assertNotIn(key,cutover)
+
+    def test_cutover_checks_both_owned_containers_before_the_read_only_child(self):
+        env={'PUBBURI_PG_IMPORT_WRITES_STOPPED':'1'}
+        with patch('postgresql_import.private_path'),patch('postgresql_import.verify_owned_postgres') as pg, \
+             patch('postgresql_import.verify_owned_source',side_effect=ValueError('owned source changed')), \
+             patch('postgresql_import.subprocess.run') as child:
+            with self.assertRaises(ValueError):postgresql_import.execute(env,'verify-cutover')
+            pg.assert_called_once_with(env);child.assert_not_called()
 
     def test_parent_timeout_does_not_claim_an_import_rollback_or_leak_exception_details(self):
         env={"PUBBURI_PG_MUTATING":"1","PUBBURI_PG_IMPORT_WRITES_STOPPED":"1"}

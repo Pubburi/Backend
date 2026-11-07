@@ -144,6 +144,8 @@ def run(environ):
                          PUBBURI_SOURCE_FORMAT_VERSION="2", PUBBURI_SOURCE_SNAPSHOT_DIR=str(directory / "typed-accepted"))
             command(["python3", "scripts/mysql_source_snapshot.py", "export-source"], env=typed, cwd=ROOT, timeout=120)
             source["PUBBURI_SOURCE_TYPED_SNAPSHOT_DIR"] = typed["PUBBURI_SOURCE_SNAPSHOT_DIR"]
+            for key in ('URL','DB_NAME','USER','PASSWORD','RUN_TOKEN','WINDOW_UUID'):
+                source['PUBBURI_SOURCE_TYPED_'+key] = typed['PUBBURI_SOURCE_'+key]
             with (directory / "import-integration.log").open("w") as log:
                 result = subprocess.run([str(ROOT / "mvnw"), "--batch-mode", "--no-transfer-progress", "-f", "tools/postgresql-migration/pom.xml",
                     "-Dtest=SourceImportIntegrationTests,SourceImportTypedIntegrationTests", "test"], cwd=ROOT, env=source, stdout=log, stderr=subprocess.STDOUT, timeout=120)

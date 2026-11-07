@@ -67,7 +67,7 @@ def command(args,env,log,budget=180):
         if write is not None:os.close(write)
     if code:raise ValueError("jpa_ci_rehearsal_failed")
 
-def local_release(environ):
+def local_release(environ, cutover_environment):
     import local_stack
     import postgresql_local as pg
     if environ.get('PUBBURI_JPA_CI') != '1':
@@ -87,12 +87,16 @@ def local_release(environ):
             env[key] = str(listener.getsockname()[1])
     config = directory / 'config.json'
     pg.write_json(config, {'schema_version':1,'environment':env})
+    import postgresql_import
+    cutover_config = directory / 'cutover.json'
+    pg.write_json(cutover_config, {'schema_version':1,'environment':{
+        key:cutover_environment[key] for key in postgresql_import.CUTOVER_REQUIRED}})
     # Run in this process so TERM/KeyboardInterrupt unwinds the launcher's
     # owned process-group cleanup, rather than killing a nested CLI on timeout.
     with cleanup_on_termination():
         pg.package(local, release)
         pg.start(local, SimpleNamespace(pg_config=config, release_dir=release,
-            backend_only=True, command='activate-pg'))
+            cutover_config=cutover_config, backend_only=True, command='activate-pg'))
         # A valid sibling copy shares the source UUID but has its own marker.
         selector = directory / pg.DEFAULT_SELECTION
         selected_bytes = selector.read_bytes()
@@ -208,6 +212,13 @@ def run(environ,snapshot,directory,*,recovery_control=None):
         if result.returncode:raise ValueError("jpa_ci_runtime_grants_failed")
         env.update(PUBBURI_JPA_CONTROL_USER=env["PUBBURI_PG_USER"],PUBBURI_JPA_CONTROL_PASSWORD=env["PUBBURI_PG_PASSWORD"],
                    PUBBURI_PG_USER=runtime,PUBBURI_PG_PASSWORD=environ["PUBBURI_PG_JPA_RUNTIME_PASSWORD"])
+        if purpose=="JPA":
+            # The first selector may only certify the untouched source copy.
+            # Later fixture accounts/business writes belong to PG recovery, not initial cutover.
+            cutover=dict(env,PUBBURI_PG_USER=env['PUBBURI_JPA_CONTROL_USER'],PUBBURI_PG_PASSWORD=env['PUBBURI_JPA_CONTROL_PASSWORD'])
+            env.update(PUBBURI_JPA_FAILURE_DB_NAME=environ['PUBBURI_PG_JPA_FAILURE_DB_NAME'],
+                       PUBBURI_JPA_FAILURE_RUN_TOKEN=environ['PUBBURI_PG_JPA_FAILURE_RUN_TOKEN'])
+            local_release(env,cutover)
         command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-Dtest=JpaFixturePreparationTests","test"],
                 dict(env,PUBBURI_JPA_PREPARE_FIXTURE="1"),directory/(purpose+"-fixture.log"))
         if purpose=="JPA":normal=env
@@ -222,7 +233,6 @@ def run(environ,snapshot,directory,*,recovery_control=None):
     command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","verify"],
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
-    local_release(normal)
     from postgresql_recovery_ci import run as run_recovery
     run_recovery(environ,normal,recovery_control)
     if environ.get("PUBBURI_PG_RELAY_CI")=="1":

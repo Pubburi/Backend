@@ -162,7 +162,7 @@ DB/컨테이너/볼륨은 항상 보존하며 PG 모드의 init/install/down/res
 준비한 복사본을 이 checkout의 기본 로컬 실행 대상으로 명시 선택하려면 다음을 실행한다.
 
 ```bash
-./scripts/local-stack.sh activate-pg --pg-config <비공개 JSON> --release-dir <release 폴더>
+./scripts/local-stack.sh activate-pg --pg-config <비공개 runtime JSON> --release-dir <release 폴더> --cutover-config <비공개 초기 검수 JSON>
 ./scripts/local-stack.sh smoke
 ./scripts/local-stack.sh up
 ```
@@ -180,7 +180,20 @@ PostgreSQL 선택이나 기동이 잘못되면 명령이 실패하며 `.env`를 
 복귀하지 않는다. `doctor`는 파일/소유 container 검사이고 실제 DB/marker/권한 검사는 앱 기동 때
 실행한다. `--backend-only` 검증은 기존과 같이 전체 웹 인수를 대신하지 않는다.
 
+첫 선택은 source/target writer·relay·DDL을 운영자가 정지하고 `--cutover-config`를 제공해야 한다.
+이 파일은 mode0600의 소유 regular JSON이며 `{schema_version:1,environment:{...}}` 형식이다.
+environment는 [기존 설정 예시](../tools/postgresql-migration/.env.example)의 source reader/소유 CID·label·
+snapshot 설정과 PG 검수자/소유 CID·label·승인 import 설정을 담는다. 정확한 키는
+`scripts/postgresql_import.py`의 `CUTOVER_REQUIRED`이며 MUTATING·FORMAT_VERSION·앱/관리자 설정은
+넣지 않는다. PG URL/DB/CID/label/marker/CA와 source UUID는 runtime 설정에 일치해야 한다.
+원본 자격은 별도 검수 자식에만 전달한다. 먼저 이관 모듈을 빌드하고, 기동 전과 소유 앱 종료 뒤
+게시 직전에 [verify-cutover](SOURCE-IMPORT.md)를 실행해 현재 source/target 전행·7고수위와 승인
+파일의 일치를 확인한다. 설정 변경·drift·검수 실패는 selector를 쓰지 않는다. READ ONLY는 writer
+차단이 아니므로 실제 쓰기 정지 창을 유지해야 하며 concurrent writer 무손실 전환을 보장하지 않는다.
+PG 업무 쓰기 이후에는 초기 일치를 다시 주장하지 않고 아래의 PG 백업/복구·promote를 사용한다.
+
 다시 `activate-pg`를 실행할 때는 선택한 DB의 CID·label·DB명·marker·source UUID가 같아야 한다.
+같은 PG의 release 갱신에는 초기 검수 파일을 주지 않는다.
 같은 source UUID의 다른 복구본도 활성화 전에 거절한다. 같은 대상의 새 release, 자격, 포트는
 새 비공개 설정으로 검증할 수 있다. 기존 선택에 결속된 설정은 갱신을 마칠 때까지 그대로 둔다.
 복구본을 기본 대상으로 승계할 때는 아래의 명시 `promote` 검증을 사용한다.

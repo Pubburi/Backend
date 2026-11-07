@@ -175,6 +175,35 @@ def activation_selection(local, environment):
     return previous
 
 
+def initial_cutover(path, environment, expected_sha256=None):
+    import postgresql_import
+    if not path:
+        raise RuntimeError('Initial PostgreSQL selection requires --cutover-config and stopped source/target writers.')
+    raw = private_file(path, 65536)
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256:
+        reject()
+    value = strict_json(raw)
+    if (not isinstance(value, dict) or set(value) != {'schema_version', 'environment'}
+            or type(value['schema_version']) is not int or value['schema_version'] != 1
+            or not isinstance(value['environment'], dict)
+            or set(value['environment']) != postgresql_import.CUTOVER_REQUIRED
+            or any(not isinstance(v, str) or not v or '\x00' in v for v in value['environment'].values())):
+        reject()
+    proof = value['environment']
+    for key in (*DATABASE_IDENTITY[:-1], 'PUBBURI_PG_URL', 'PUBBURI_PG_CA'):
+        if proof[key] != environment[key]:
+            reject()
+    if proof['PUBBURI_PG_IMPORT_SOURCE_ID'] != environment['PUBBURI_JPA_SOURCE_ID']:
+        reject()
+    # Control/source-reader settings are confined to the read-only verifier;
+    # child_environments still receives only the runtime configuration.
+    result = postgresql_import.execute(dict(base_environment(), **proof), 'verify-cutover')
+    if result.returncode != 0:
+        raise RuntimeError('Initial cutover source/target verification failed; no selection was published.')
+    return digest
+
+
 def publish_selection(local, config, directory, pins, *, announce=True):
     if selection_pins(config, directory) != pins:
         reject()
@@ -345,6 +374,11 @@ def start(local, args):
             if selection_pins(Path(args.pg_config), directory) != pins:
                 reject()
             previous = activation_selection(local, env)
+            cutover_config = getattr(args, 'cutover_config', None)
+            if previous is None:
+                cutover_pin = initial_cutover(cutover_config, env)
+            elif cutover_config:
+                raise RuntimeError('--cutover-config is only for the first PostgreSQL selection, before PG business writes.')
         with ExitStack() as stack:
             ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT']
             for key in ports:
@@ -408,10 +442,14 @@ def start(local, args):
         if pins is not None:
             if activation_selection(local, env) != previous:
                 reject()
+            if previous is None:
+                initial_cutover(cutover_config, env, cutover_pin)
             publish_selection(local, args.pg_config, directory, pins)
 
 
 def dispatch(local, args):
+    if getattr(args, 'cutover_config', None) and args.command != 'activate-pg':
+        reject()
     if args.command == 'package-pg':
         if not args.output_dir or args.pg_config or args.release_dir or args.backend_only or args.confirm_delete_local_data:
             reject()

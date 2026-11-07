@@ -15,6 +15,7 @@ import zipfile
 
 import local_stack as local
 import postgresql_local as pg
+import postgresql_import as importing
 
 
 class PostgreSQLLocalTests(unittest.TestCase):
@@ -259,13 +260,61 @@ class PostgreSQLLocalTests(unittest.TestCase):
                     self.assertTrue((root/'local-stack-lock').is_dir())
                     self.assertFalse((root/pg.DEFAULT_SELECTION).exists())
                     if cleanup_fails:raise local.ProcessCleanupError('owned child remains')
-                with patch.object(local,'STATE',root), patch.object(pg,'doctor',return_value=(env,directory,{'jar_sha256':pg.sha(directory/'runtime.jar')})), patch.object(pg.subprocess,'Popen',side_effect=spawn), patch.object(pg,'api_ready') as ready, patch.object(local,'stop',side_effect=stop):
+                with patch.object(local,'STATE',root), patch.object(pg,'doctor',return_value=(env,directory,{'jar_sha256':pg.sha(directory/'runtime.jar')})), patch.object(pg.subprocess,'Popen',side_effect=spawn), patch.object(pg,'api_ready') as ready, patch.object(pg,'initial_cutover',return_value='a'*64) as proof, patch.object(local,'stop',side_effect=stop):
                     if cleanup_fails:
                         with self.assertRaises(local.ProcessCleanupError):pg.start(local,args)
                     else:pg.start(local,args)
                     ready.assert_called_once()
+                    self.assertEqual(proof.call_count,1 if cleanup_fails else 2)
                 self.assertEqual((root/pg.DEFAULT_SELECTION).exists(),not cleanup_fails)
                 self.assertEqual((root/'local-stack-lock').exists(),cleanup_fails)
+
+    def test_initial_cutover_configuration_is_exact_bound_private_and_never_an_app_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);env=self.env();path=root/'cutover.json'
+            proof={key:'authored' for key in importing.CUTOVER_REQUIRED}
+            for key in (*pg.DATABASE_IDENTITY[:-1],'PUBBURI_PG_URL','PUBBURI_PG_CA'):proof[key]=env[key]
+            proof['PUBBURI_PG_IMPORT_SOURCE_ID']=env['PUBBURI_JPA_SOURCE_ID']
+            pg.write_json(path,{'schema_version':1,'environment':proof})
+            with patch.object(importing,'execute',return_value=types.SimpleNamespace(returncode=0)) as verify:
+                pin=pg.initial_cutover(path,env)
+                self.assertEqual(verify.call_args.args[1],'verify-cutover')
+                self.assertEqual(verify.call_args.args[0]['PUBBURI_SOURCE_PASSWORD'],'authored')
+                self.assertNotIn('PUBBURI_SOURCE_PASSWORD',pg.child_environments(env)[0])
+                pg.initial_cutover(path,env,pin)
+                path.write_bytes(path.read_bytes()+b' ')
+                with self.assertRaises(RuntimeError):pg.initial_cutover(path,env,pin)
+                self.assertEqual(verify.call_count,2)
+            for mutation in ({'PUBBURI_PG_URL':'jdbc:postgresql://127.0.0.1:25432/other_ci'},
+                             {'PUBBURI_PG_RUN_TOKEN':'different'}, {'PUBBURI_PG_IMPORT_SOURCE_ID':'other'},
+                             {'PUBBURI_PG_MUTATING':'1'}, {'JAVA_TOOL_OPTIONS':'untrusted'}):
+                path.unlink()
+                pg.write_json(path,{'schema_version':1,'environment':dict(proof,**mutation)})
+                with patch.object(importing,'execute') as verify:
+                    with self.assertRaises(RuntimeError):pg.initial_cutover(path,env)
+                    verify.assert_not_called()
+            path.unlink();pg.write_json(path,{'schema_version':1,'environment':proof});path.chmod(0o644)
+            with self.assertRaises(RuntimeError):pg.initial_cutover(path,env)
+            with self.assertRaises(RuntimeError):pg.initial_cutover(None,env)
+
+    def test_initial_cutover_drift_before_launch_or_after_smoke_never_publishes(self):
+        for drift_check in (1,2):
+            with self.subTest(drift_check=drift_check), tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);config,directory=self.selection_fixture(root);env=self.env()
+                with socket.socket() as server:
+                    server.bind(('127.0.0.1',0));env['PUBBURI_SERVER_PORT']=str(server.getsockname()[1])
+                args=argparse.Namespace(pg_config=config,release_dir=directory,backend_only=True,command='activate-pg',cutover_config='private-proof')
+                child=MagicMock();child.poll.return_value=None
+                def spawn(*a,**kw):
+                    kw['stdout'].write('Tomcat started on port '+env['PUBBURI_SERVER_PORT']+' ');kw['stdout'].flush();return child
+                checks=[RuntimeError('source drift')] if drift_check==1 else ['pin',RuntimeError('source drift')]
+                with patch.object(local,'STATE',root),patch.object(pg,'doctor',return_value=(env,directory,{'jar_sha256':pg.sha(directory/'runtime.jar')})), \
+                     patch.object(pg,'initial_cutover',side_effect=checks) as verify,patch.object(pg.subprocess,'Popen',side_effect=spawn) as started, \
+                     patch.object(pg,'api_ready'),patch.object(local,'stop') as stopped:
+                    with self.assertRaisesRegex(RuntimeError,'source drift'):pg.start(local,args)
+                    self.assertEqual(started.call_count,drift_check-1);self.assertEqual(stopped.call_count,drift_check-1)
+                    self.assertEqual(verify.call_count,drift_check)
+                self.assertFalse((root/pg.DEFAULT_SELECTION).exists());self.assertFalse((root/'local-stack-lock').exists())
 
     def test_private_directory_refuses_reuse_external_and_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -373,7 +422,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
                 self.assertTrue(args.backend_only);self.assertEqual(args.command,'activate-pg')
                 raise RuntimeError('projection verified')
             with patch.object(local,'STATE',state), patch.object(pg,'package') as package, patch.object(pg,'start',side_effect=stop_before_cli):
-                with self.assertRaisesRegex(RuntimeError,'projection verified'):ci.local_release(env)
+                with self.assertRaisesRegex(RuntimeError,'projection verified'):ci.local_release(env,{key:'authored' for key in importing.CUTOVER_REQUIRED})
             package.assert_called_once()
 
     def test_doctor_and_status_observe_while_up_holds_the_lifecycle_lock(self):

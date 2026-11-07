@@ -20,6 +20,7 @@ CA/SAN verify-full·SCRAM·비superuser·이번 marker를 검사한다. schema �
 python3 scripts/postgresql_schema.py migrate
 python3 scripts/postgresql_import.py import-source
 python3 scripts/postgresql_import.py verify-import
+python3 scripts/postgresql_import.py verify-cutover
 ~~~
 
 원본과 대상의 쓰기·relay·DDL이 중단된 작업 창에서 `PUBBURI_PG_IMPORT_WRITES_STOPPED=1`을
@@ -30,7 +31,14 @@ python3 scripts/postgresql_import.py verify-import
 잡아 사용한다. 자식에는 대상 전용 자격/입력 설정만 전달하며 source reader·admin/API 자격은
 전달하지 않는다. SQL/비밀번호/행 원문은 CLI 응답에 출력하지 않는다.
 
-이 hash/수령증은 **서명·권리 승인·현재 source writer 정지의 증명**이 아니다. import는 source에
+`verify-cutover`만 현재 원본의 소유 CID/label·TLS reader와 새 READ ONLY RR snapshot을 추가로
+연다. 승인 파일의 server/source/window·문자 collation·16/17표 전체 typed cell·7 AUTO_INCREMENT를
+현재 source와 비교하고, target의 기존 verify-import도 같은 승인 트리로 검사한다. 일반 UPDATE,
+원본/대상 행 변경·window 변경·rollback으로 소비한 ID·PG-only 피드백은 초기 일치 검수를 통과하지
+못한다. DB/sequence/receipt를 쓰거나 source를 덮어쓰지 않는다. 두 DB의 실제 writer/relay/DDL
+정지가 계속 전제이며 READ ONLY나 QUIESCED marker는 다른 writer를 물리적으로 막지 않는다.
+
+이 hash/수령증은 **서명·권리 승인·현재 source writer 정지의 증명**이 아니다. import-source/verify-import는 source에
 재접속하지 않는다. 원본 파일 보관/접근 통제와 실제 작업 창 유지는 운영자의 별도 책임이며
 환경 선언만으로 모든 writer/관리자 직접 변경을 물리적으로 통제했다고 주장하지 않는다.
 

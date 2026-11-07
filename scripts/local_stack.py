@@ -254,6 +254,7 @@ def main():
     parser.add_argument("--confirm-delete-local-data", action="store_true")
     parser.add_argument("--provider", choices=("mysql", "postgresql"))
     parser.add_argument("--pg-config")
+    parser.add_argument("--cutover-config")
     parser.add_argument("--release-dir")
     parser.add_argument("--output-dir")
     parser.add_argument("--backend-only", action="store_true")
@@ -276,7 +277,7 @@ def main():
         args.backend_only = True
     if args.provider == "postgresql":
         return postgresql_local.dispatch(local, args)
-    if args.pg_config or args.release_dir or args.output_dir or args.backend_only:
+    if args.pg_config or args.cutover_config or args.release_dir or args.output_dir or args.backend_only:
         raise RuntimeError("PostgreSQL options require the explicit PostgreSQL provider.")
     if args.command == "init":
         initialize()

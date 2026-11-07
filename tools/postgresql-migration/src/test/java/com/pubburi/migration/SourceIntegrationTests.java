@@ -43,6 +43,8 @@ class SourceIntegrationTests {
             assertThrows(IllegalArgumentException.class,()->{try(var unused=new SourceSession(SourceSettings.from(wildcard))){}});
         }
         var baseline=artifact(accepted);assertEquals(16,SourceArtifact.validate(accepted).tables());assertEquals(16,SourceArtifact.validate(accepted).tables());
+        var approved=SourceArtifact.load(accepted);
+        try(var current=new SourceSession(settings)){SourceImportTool.compareSource(current,approved);current.finish();}
         assertThrows(IllegalArgumentException.class,()->SourceArtifact.path(accepted,false));
         assertTrue(table(baseline,"t_product").path("rows").size()>0,"copied catalog required");
         // The database-side marker is not an authorization token for a writer account.
@@ -58,6 +60,9 @@ class SourceIntegrationTests {
                 update(control,"UPDATE t_product SET name=? WHERE id="+Integer.parseInt(product),"Authored changed source name");
                 try(var s=control.prepareStatement("UPDATE t_user SET name=? WHERE id=?")){s.setString(1,"Authored changed account name");s.setString(2,user);assertEquals(1,s.executeUpdate());}
                 control.commit();control.setAutoCommit(true);
+                try(var current=new SourceSession(settings)) {
+                    assertThrows(IllegalArgumentException.class,()->SourceImportTool.compareSource(current,approved));
+                }
                 Path coherent=output("coherent");SourceArtifact.export(snapshot,coherent);
                 assertTrue(table(artifact(coherent),"t_product").path("rows").get(0).get(1).textValue().equals(oldProduct),"RR catalog value must predate concurrent commit");
                 assertTrue(table(artifact(coherent),"t_user").path("rows").get(0).get(1).textValue().equals(oldUser),"RR account value must predate concurrent commit");
@@ -94,6 +99,10 @@ class SourceIntegrationTests {
                 control.rollback();control.setAutoCommit(true);
                 assertThrows(IllegalArgumentException.class,()->SourceArtifact.export(snapshot,highwater));
                 assertFalse(SourceContract.parse(Files.readAllBytes(highwater.resolve("receipt.json"))).path("accepted").booleanValue());
+                try(var current=new SourceSession(settings)) {
+                    var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.compareSource(current,approved));
+                    assertEquals("source_cutover_identity_or_highwater_changed",error.getMessage());
+                }
             } finally {if(!control.getAutoCommit()){control.rollback();control.setAutoCommit(true);}}
         }
         Path finalOutput=output("restored");try(SourceSession source=new SourceSession(settings)){SourceArtifact.export(source,finalOutput);}
