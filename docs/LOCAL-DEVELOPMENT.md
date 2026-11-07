@@ -7,7 +7,7 @@ MySQL 기준이며 기존 볼륨을 보존한다. 아래 `activate-pg` 후에는
 [전환 계약](POSTGRESQL-MIGRATION.md)에 따라 명시 실행한다. schema 검증을 전체 API/cutover
 완료로 간주하지 않는다. 기본 스택 전환과 복구 인수는 별도 게이트다.
 
-현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의40경로/49작업은
+현재 인증/회원·매장·상품/특성·주문·후기·찜/취향·기본 목록/본인 문구·B1 DEMO caller의43경로/55작업은
 기본 [JPA 제공자](JPA-REHEARSAL.md)에서 실행할 수 있다.
 copied PG/최소 runtime 역할·동적 loopback 포트에서만 실행하며 원본 MySQL을 바꾸지 않는다.
 검증한 범위의 웹 연결은 가능하지만 실제 DB cutover·복구 인수 완료와 구분한다.
@@ -106,7 +106,7 @@ DB 초기화는 **전용 로컬 DB의 모든 변경을 삭제**한다. 앱을 �
 
 ## 준비된 PostgreSQL의 명시 실행·패키징
 
-DB06의 이 경로는 기존40경로/49작업 JPA 제공자를 소유한 로컬 폐기 복사본에서 실행한다.
+DB06의 이 경로는 기존43경로/55작업 JPA 제공자를 소유한 로컬 폐기 복사본에서 실행한다.
 DB 설치·source import·ID 예약·기본 DB 전환을 수행하지 않는다. 먼저 [복사/검수](SOURCE-IMPORT.md)와
 [JPA 제공자](JPA-REHEARSAL.md)의 TLS/marker/receipt·최소 runtime 역할 준비를 마친다.
 원본 DB나 운영 DB를 이 도구에 지정하지 않는다. 새 역할/권한 추가는 필요하지 않다.
@@ -148,7 +148,7 @@ FE/추천 자식에 DB 자격을 전달하지 않는다. trusted toolchain의 ru
 실행은 release/소유 CID를 검증하고 같은 로컬 작업 잠금·미점유 포트를 확보한 뒤 복사한 JAR를
 Java17로 먼저 시작한다. 원래 TLS verify-full/SCRAM·PG18.6/UTF8·receipt/source·최소 권한·
 Flyway validate/Hibernate validate·OSIV off 검증을 재사용한다. 준비 실패 시 FE/추천은 시작하지 않는다.
-자기 JVM 기동 로그와 상품 API·OpenAPI40/49를 확인한 뒤 FE/추천 health와 `/api` 프록시를 검사한다.
+자기 JVM 기동 로그와 상품 API·OpenAPI43/55를 확인한 뒤 FE/추천 health와 `/api` 프록시를 검사한다.
 `--backend-only`는 doctor/up/smoke/status에서 API release만 확인하는 CI/개별 실행 옵션이며
 세 서버·세션/사용자 흐름 인수가 아니다. `status`도 endpoint 관측이지 프로세스 소유 증명은 아니다.
 
@@ -231,13 +231,13 @@ artifact에 올리지 않는다. 결과 폴더는 Backend ignored `.pubburi` 바
 .venv-relay/bin/python scripts/postgresql_recovery.py restore --config <target private JSON> --archive-dir <백업 폴더> --expected-sha256 <검수한 manifest SHA256> --output-dir <새 복구 시도 폴더>
 ```
 
-백업은 V3의 17업무표 또는 V4의 18업무표와 Flyway/원본 receipt를 SHARE 잠금·exported snapshot에 결속한다. 원문 JSON을
+백업은 V3의 17업무표·V4의 18업무표·V5의 19업무표와 Flyway/원본 receipt를 SHARE 잠금·exported snapshot에 결속한다. 원문 JSON을
 포함한 binary-cell digest·행 수/타입/PK/FK/index/콜레이션과7개 sequence의 정의·현재값·is_called를
 보존한다. 미지 relation·사용자 함수/trigger/rule·extension과 미허용 archive TOC는 거절한다.
 서버/클라이언트는18.6이며 archive는128MiB 이하다. SHA는 파일 동일성 근거이며 임의 SQL의 안전
 승인이 아니며 TOC 검사는 SQL sandbox나 서명이 아니다. 신뢰하는 소유 source/control만 사용하고
 외부 dump를 실행하지 않는다. 원본 archive를 수정하거나 결과 폴더를 재사용해 덮어쓰지 않는다.
-스키마는 V3/V4의 각각 고정된 catalog와 대조한다. PG18 dump/reparse가 바꾸는 enum CHECK의 캐스트는
+스키마는 V3/V4/V5의 각각 고정된 catalog와 대조한다. PG18 dump/reparse가 바꾸는 enum CHECK의 캐스트는
 정확한 이름·원본/roundtrip 정의 쌍만 의미 동등하게 비교하며 그 외 차이는 거절한다. 스키마 SQL
 원문 동일성과 이 표현의 동등성을 구분하고 데이터/원문 JSON은 별도 binary-cell로 대조한다.
 
@@ -247,11 +247,11 @@ artifact에 올리지 않는다. 결과 폴더는 Backend ignored `.pubburi` 바
 있으므로 격리해 조사한다. 자동 DROP·clean/create·재시도·receipt/UUID 재생성은 없다. 원본과
 archive는 보존한다. 완료 후 기존 최소 runtime GRANT를 별도 적용하고 `NOLOGIN`을 해제한 뒤
 위 JPA release의 doctor/smoke·업무 인수를 수행한다. 새 대상 marker는 유지하며 source UUID·epoch·
-claim/ACK·Flyway/receipt와 소비된 ID를 초기화하지 않는다. V3 복구본으로 현재 V4 애플리케이션을
-기동하려면 쓰기 중단 상태에서 명시 Flyway V4를 적용하고 피드백 표에 SELECT/INSERT/DELETE와
-feedback 열 UPDATE 권한만 추가한다. V3 복구 완료 검수와 그 뒤 스키마 변경은 별개다. 기존 기본 대상의 승계는 source와 target의 exact
-상태가 같아야 하므로 V3 백업과 그 백업을 V4로 바꾼 대상의 조합을 거절한다. V4 승계에는 중단된
-소유 source를 먼저 명시적으로 이행한 뒤 새 V4 백업·복구·검수 결과를 사용한다.
+claim/ACK·Flyway/receipt와 소비된 ID를 초기화하지 않는다. V3/V4 복구 완료와 현재 V5 runtime의
+기동 준비는 별개다. 새 runtime 전에 쓰기 중단 상태에서 필요한 Flyway V4/V5를 명시 적용하고
+[notebook 최소 grant](NOTEBOOK.md)와 기존 피드백 grant를 추가한다. source/target의 exact 상태가
+같아야 하므로 구버전 백업과 그 대상을 V5로 바꾼 조합은 승격을 거절한다. 새 V5 승계는 중단한
+소유 source를 먼저 명시 이행한 뒤 새 V5 백업·복구·검수 결과를 사용한다.
 
 ### 검증한 복구본을 기본 로컬 대상으로 승계
 

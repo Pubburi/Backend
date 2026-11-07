@@ -17,13 +17,17 @@ final class TargetSchemaContract {
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relname='t_comment_taste_tag')")) {r.next();reviewTags=r.getBoolean(1);}
         expected.add("t_user_recommendation_feedback");
         verifyEmptyFeedback(connection);
+        expected.add("t_user_notebook");
+        verifyEmptyNotebook(connection);
         if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
         if(version==2 && !reviewTags) throw new IllegalArgumentException("postgresql_v2_review_tags_required");
         if(reviewTags) {expected.add("t_comment_taste_tag");reviewTags(connection,version==1);}
         if(!actual.equals(expected)) throw new IllegalArgumentException("postgresql_import_schema_set_changed");
         var indexes=SchemaIndexContract.actual(connection);
         if(!indexes.containsAll(SchemaIndexContract.expected())
-                || !indexes.contains(new SchemaIndexContract.Key("t_user_recommendation_feedback",false,"product_id:A:-"))) {
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_recommendation_feedback",false,"product_id:A:-"))
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_notebook",true,"user_id:A:-,product_id:A:L"))
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_notebook",false,"product_id:A:L"))) {
             throw new IllegalArgumentException("postgresql_import_indexes_changed");
         }
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT c.collprovider,c.collisdeterministic,c.colllocale FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace WHERE n.nspname='pubburi' AND c.collname='pubburi_ci'")) {
@@ -79,7 +83,24 @@ final class TargetSchemaContract {
         if(!"user_id,product_id".equals(primary.get("t_user_recommendation_feedback"))) throw new IllegalArgumentException("postgresql_feedback_primary_changed");
         expectedForeign.add("t_user_recommendation_feedback\tuser_id\tt_user\tid\tCASCADE");
         expectedForeign.add("t_user_recommendation_feedback\tproduct_id\tt_product\tid\tCASCADE");
+        if(!"id".equals(primary.get("t_user_notebook")))throw new IllegalArgumentException("postgresql_notebook_primary_changed");
+        expectedForeign.add("t_user_notebook\tuser_id\tt_user\tid\tCASCADE");
+        expectedForeign.add("t_user_notebook\tproduct_id\tt_product\tid\tSET NULL");
         if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("postgresql_import_foreign_changed");
+    }
+    private static void verifyEmptyNotebook(Connection connection)throws SQLException{
+        try(var s=connection.createStatement()){
+            s.execute("LOCK TABLE pubburi.t_user_notebook IN ACCESS SHARE MODE");
+            try(var rows=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.t_user_notebook)")){
+                if(!rows.next() || rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_notebook_not_empty");
+            }
+            String shape="id:uuid:0:false,user_id:character varying(100):0:false,product_id:integer:0:true,product_name:character varying(100):0:false,experience:character varying(10):0:false,rating:numeric(3,2):0:true,taste_tags:character varying(40)[]:1:true,aroma_tags:character varying(40)[]:1:true,memo:character varying(2000):0:true,version:bigint:0:false,created_at:timestamp(6) with time zone:0:false,updated_at:timestamp(6) with time zone:0:false";
+            try(var rows=s.executeQuery("SELECT string_agg(a.attname||':'||format_type(a.atttypid,a.atttypmod)||':'||a.attndims::text||':'||(NOT a.attnotnull)::text,',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid='pubburi.t_user_notebook'::regclass AND a.attnum>0 AND NOT a.attisdropped")){
+                // Array dimensionality is part of the declared type, independently of empty data.
+                String actual=rows.next()?rows.getString(1):null;
+                if(!shape.equals(actual))throw new IllegalArgumentException("postgresql_notebook_shape_changed");
+            }
+        }
     }
     private static void verifyEmptyFeedback(Connection connection) throws SQLException {
         // The MySQL artifact has no feedback. Never certify a fresh import over PG-only data.

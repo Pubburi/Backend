@@ -37,6 +37,7 @@
 | 회원 | 회원가입, 세션 로그인·로그아웃, 본인 이름·현재 암호 확인 후 비밀번호 변경, 현재 계정·역할 기반 접근 제어, 삭제·비밀번호 변경 세션 회수 |
 | 명시취향 | 본인 전용 조회·전체 교체 API, 설문 상태·미입력/빈 선호·soft 목표/hard 범위 구분 |
 | 계정 찜 | 본인 전용 저장·해제·단건 상태·페이지 API, 반복 요청 멱등성·현재 상품 정보·삭제/재가입 격리 |
+| 비공개 기록 | PG의 본인 전용 TRIED/INTERESTED·선택 평점·맛/향·메모 CRUD, 원문·삭제 상품 기록 보존·동시 수정 충돌 검수 |
 | 기본 주류 목록 | 비개인 ID순 B0 연결, 전체 응답 대기·크기 제한, 현재 DB 재조회와 장애 대체 |
 | 본인 B1 DEMO API | 현재 본인 취향·명시 검수 container catalog의 B1/R04 호출, 현재 상품/조건 재확인·제공 불가 구분. 검수 DEMO 웹 연결 제공. 일반 서비스 catalog/최종 인수는 후속 |
 | 검색 문구 API | 본인 현재 취향·별도 검색 선택의 정확 조건 호출, 필수조건/수명 검증과 제공 불가 구분. 검색 화면 연결 제공 |
@@ -88,7 +89,7 @@ flowchart LR
 로컬 색인 기동·재생과 미완료 범위는 [실행 안내](docs/LOCAL-SEARCH.md)를 따릅니다. 상품 검색은 선택한 PostgreSQL 또는 명시 MySQL baseline을 사용합니다.
 
 PostgreSQL의 독립 Flyway 스키마·[읽기 전용 원본 추출](docs/SOURCE-SNAPSHOT.md)·[승인 자료의 빈 대상 복사/검증](docs/SOURCE-IMPORT.md)을 제공합니다. 기존 업무 값·명시 ID·원문 JSON 보존과 전체 전환 범위는 [전환 계약](docs/POSTGRESQL-MIGRATION.md)을 따릅니다.
-기본 [JPA 제공자](docs/JPA-REHEARSAL.md)는 회원·세션/프로필, 매장·상품/특성, 후기·본인 찜/명시취향, 기본 목록·데모 주문을 기존 API 계약으로 제공합니다.
+기본 [JPA 제공자](docs/JPA-REHEARSAL.md)는 회원·세션/프로필, 매장·상품/특성, 후기·본인 찜/명시취향·비공개 기록, 기본 목록·데모 주문을 제공합니다.
 
 별도 [명시 relay](docs/SEARCH-RELAY.md)는 MySQL/PostgreSQL을 선택해 같은 Engine/CLI와 검증 TLS·개별 claim/ACK로 전달합니다.
 [공개 상품 검색](docs/PRODUCT-SEARCH.md)은 명시적으로 엔진을 읽고 현재 DB의 페이지/total과 대조하며, 누락·지연·장애에는 같은 필수조건의 현재 DB 응답을 반환합니다. 기본은 비활성이며 DB 확인 쿼리를 유지합니다. 자동완성/검색 품질·성능 인수는 후속입니다.

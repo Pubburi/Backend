@@ -73,6 +73,10 @@ NOT_STARTED/SKIPPED/COMPLETED·null/[]/0을 구분한다. [본인 전용 계약]
 현재 일곱 필드를 반환한다. [계정 찜 계약](ACCOUNT-FAVORITES.md)·[OpenAPI](openapi/account-favorites.json)의
 페이지·반복 PUT·삭제/재가입·405 Allow 정책을 따른다. 찜 DELETE의 멱등 200은 일반 리소스 삭제 404와 구분한다.
 
+PG 제공자의 본인 비공개 기록은 [Notebook 계약](NOTEBOOK.md)의 목록·상품별 조회·UUID CRUD와
+명시 계정 guard·기대 revision·개인 원문/삭제 상품 보존을 따른다. MySQL baseline은 명시404이며
+공개 후기·추천 입력으로 자동 전송하지 않는다.
+
 ## Products
 
 - `GET /api/recommendations/default?size=4`: 공개 비개인 기본 주류 목록, 기존 상품 배열과 BASELINE/FALLBACK

@@ -23,7 +23,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
 
 @SpringBootApplication
-@Import({CorsConfig.class,GlobalExceptionHandler.class,AccessGuard.class,MarketRestController.class,
+@Import({CorsConfig.class,GlobalExceptionHandler.class,AccessGuard.class,com.pubburi.pub.controller.auth.NotebookPrivacyFilter.class,MarketRestController.class,
     ProductRestController.class,ProductFeatureRestController.class,ProductServiceImpl.class,ProductSearchOutbox.class,
     UserServiceImpl.class,PasswordHasher.class,MarketServiceImpl.class,OrderRestController.class,OrderServiceImpl.class,
     UserRestController.class,GradeService.class,CommentRestController.class,CommentServiceImpl.class,
