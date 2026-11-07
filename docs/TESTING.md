@@ -87,6 +87,8 @@ V4의 18업무표+2control표 binary-cell/스키마·7sequence·UUID/원문/rece
 
 [공개 검색](PRODUCT-SEARCH.md)은 relay/restart/물리 교체 검증 뒤 실제 현재/지연/변경/삭제를 만들어
 DB-only/엔진/미기동 응답 전체를 비교한다. 원래 업무행·version/event·기존 ACK를 따로 보존한다.
+이름 자동완성도 두 DB에서 literal/동명 SKU/8개 제한·지연된 추가/이름 변경/삭제와 재생을 비교한다.
+틀린 source와 실제 엔진 응답 뒤 주입한 partial shard·미기동 엔진은 현재 DB 후보를 유지해야 한다.
 새 fixture 관리자 로그인의 hash CAS만 정확한 ID/hash 열에 허용하며 epoch/역할·타계정은 보호한다.
 
 HTTP 검증은 connect/write/헤더/본문의 절대 기한과 본문 상한을 유지한다. 느린 trickle·짧은 EOF·

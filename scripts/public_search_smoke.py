@@ -1,5 +1,6 @@
 """Actual public search on already-owned databases/engine; never provisions or resets resources."""
 from http.cookiejar import CookieJar
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import copy
 import hashlib
 import json
@@ -8,6 +9,7 @@ from pathlib import Path
 import re
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -64,6 +66,13 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         jar = ROOT / "target/pubburi-server-0.0.1-SNAPSHOT.jar"
         base_env = {key: value for key, value in environ.items() if key in {"PATH", "JAVA_HOME", "HOME", "TMPDIR", "LANG", "PUBBURI_DB_URL", "PUBBURI_DB_USER", "PUBBURI_DB_PASSWORD"}}
         payload_sql = "CAST(payload AS CHAR)"
+        if not environ.get("PUBBURI_JPA_ADMIN_ID") and not environ.get("PUBBURI_JPA_ADMIN_PASSWORD"):
+            # Only a fresh actor in the already proven disposable schema; retain all prior users.
+            actor="ci_admin_"+uuid.uuid4().hex;password=uuid.uuid4().hex
+            with owner.transaction() as cursor:
+                cursor.execute("INSERT INTO t_user(id,name,password_hash,role,auth_epoch,stamps) VALUES(%s,%s,%s,%s,%s,0)",
+                    (actor,"Authored public search",hashlib.sha256(password.encode()).hexdigest(),"ADMIN",str(uuid.uuid4())))
+            environ=dict(environ,PUBBURI_JPA_ADMIN_ID=actor,PUBBURI_JPA_ADMIN_PASSWORD=password)
     else:
         raise ValueError("public_search_explicit_database_required")
     source = store.source_id()
@@ -130,6 +139,8 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         with response:
             assert response.status == expected, "Owned public-search HTTP status changed"
             assert response.headers.get_content_type() == "application/json"
+            if path.startswith("/api/products/suggestions"):
+                assert response.headers.get("Cache-Control") == "no-store"
             return json.load(response), response.headers.get("X-Pubburi-Search-Source")
     def compare(query, source, name, expected_status=200):
         actual, header = request(live,"GET","/api/products"+query,expected=expected_status)
@@ -139,6 +150,16 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         views.append({"case":name,"status":expected_status,"source":header,"response":actual})
         progress.write_text(json.dumps({"status":"running","cases":views},ensure_ascii=False));progress.chmod(0o600)
         return actual["data"]
+    def suggestions(prefix, source, name, base=None):
+        path="/api/products/suggestions?"+urllib.parse.urlencode({"q":prefix})
+        actual,header=request(base or live,"GET",path)
+        expected,baseline_header=request(baseline,"GET",path)
+        assert baseline_header=="DATABASE" or baseline_jar!=jar and baseline_header is None
+        assert actual==expected,"Suggestions differ from current database-only contract"
+        assert header==source,"Suggestion source changed: "+name
+        assert len(actual["data"]["items"])<=8
+        views.append({"case":"suggestions-"+name,"status":200,"source":header,"response":actual})
+        return actual["data"]["items"]
     admin = CookieJar(); live = baseline = None
     with cleanup_on_termination(), socket.socket() as refusal:
         refusal.bind(("127.0.0.1",0))
@@ -158,9 +179,50 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             def features(identifier,taste,aroma): request(live,"PUT","/api/admin/products/"+str(identifier)+"/features",{"tasteTags":taste,"aromaTags":aroma,"sourceName":"Authored search fixture"},admin)
             a, a_body = create("A",1000,5.555); features(a,["a,b","line\nx","sweet"],["floral"]); drain()
             assert compare(root,"ENGINE_VERIFIED","first-current-product")["total"]==1
+            name_prefix="ci_jpa_search_"+token
+            assert [row["id"] for row in suggestions(name_prefix,"ENGINE_VERIFIED","first-current-product")]==[a]
             b, _ = create("B",2000,0)
             assert compare(root,"DATABASE_FALLBACK","missing-pending-product")["total"]==2
+            assert len(suggestions(name_prefix,"DATABASE_FALLBACK","missing-pending-product"))==2
             features(b,[],None); c, _ = create("C",1000,5.1); features(c,["a","b","line\nx"],[]); drain()
+            suggestions(name_prefix,"ENGINE_VERIFIED","replayed-products")
+            literal=" %_!\\*?한글"; first,first_body=create(literal,1234,5); second,_=create(literal,4321,6)
+            drain()
+            assert [row["id"] for row in suggestions("\u00a0"+name_prefix+literal+"\u00a0","ENGINE_VERIFIED","literal-duplicate-skus")]==[first,second]
+            for n in range(9):create("cap"+str(n),1000+n,5)
+            drain(); assert len(suggestions(name_prefix+"cap","ENGINE_VERIFIED","fixed-eight-cap"))==8
+            first_body["name"]="ci_jpa_renamed_"+token
+            request(live,"PUT","/api/admin/products/"+str(first),first_body,admin)
+            assert [row["id"] for row in suggestions(name_prefix+literal,"DATABASE_FALLBACK","delayed-rename")]==[second]
+            drain(); suggestions(name_prefix+literal,"ENGINE_VERIFIED","rename-replayed")
+            request(live,"DELETE","/api/admin/products/"+str(second),cookies=admin)
+            assert suggestions(name_prefix+literal,"DATABASE_FALLBACK","delayed-delete")==[]
+            drain(); assert suggestions(name_prefix+literal,"ENGINE_VERIFIED","delete-replayed")==[]
+            meta=http.request("GET","/"+index+"/_mapping")[1][index]["mappings"]["_meta"]
+            try:
+                assert http.request("PUT","/"+index+"/_mapping",{"_meta":dict(meta,source_id=str(uuid.uuid4()))})[0]==200
+                suggestions(name_prefix,"DATABASE_FALLBACK","wrong-source")
+            finally:
+                assert http.request("PUT","/"+index+"/_mapping",{"_meta":meta})[0]==200
+            suggestions(name_prefix,"ENGINE_VERIFIED","source-restored")
+            # Inject a partial reply after the real owned engine responds; never accept partial IDs.
+            class PartialReply(BaseHTTPRequestHandler):
+                def log_message(self,*args):pass
+                def do_GET(self):self.forward()
+                def do_POST(self):self.forward()
+                def forward(self):
+                    body=None
+                    if self.command=="POST":body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                    status,value=http.request(self.command,self.path,body)
+                    if self.command=="POST" and status==200:value["_shards"]["failed"]=1
+                    raw=json.dumps(value).encode();self.send_response(status);self.send_header("Content-Type","application/json")
+                    self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw)
+            proxy=ThreadingHTTPServer(("127.0.0.1",0),PartialReply);worker=threading.Thread(target=proxy.serve_forever,daemon=True);worker.start()
+            try:
+                partial=start("partial",True,"http://127.0.0.1:"+str(proxy.server_address[1]))
+                suggestions(name_prefix,"DATABASE_FALLBACK","injected-partial-real-engine-reply",partial)
+            finally:
+                proxy.shutdown();proxy.server_close();worker.join(timeout=3);assert not worker.is_alive()
             for sort in ("popular","priceAsc","priceDesc","name"):
                 compare(root+"&sort="+sort+"&size=2&page=1","ENGINE_VERIFIED","sort-"+sort)
                 compare(root+"&sort="+sort+"&size=2&page=2","ENGINE_VERIFIED","page-"+sort)
@@ -174,6 +236,7 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             compare(root+"&maxPriceKrw=1500","DATABASE_FALLBACK","stale-price-hard-bound")
             latest=compare(root,"ENGINE_VERIFIED","latest-fields-with-same-ids")
             assert next(row for row in latest["items"] if row["id"]==a)["price"]==9000
+            assert next(row for row in suggestions(name_prefix+"A","ENGINE_VERIFIED","current-price") if row["id"]==a)["price"]==9000
             drain(); compare(root+"&maxPriceKrw=1500","ENGINE_VERIFIED","price-replayed")
             features(a,[],None); compare(root+"&tasteTag=a%2Cb","DATABASE_FALLBACK","stale-tag-condition"); drain()
             compare(root+"&tasteTag=a%2Cb","ENGINE_VERIFIED","known-empty-after-replay")
@@ -187,6 +250,7 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             expected,_=request(baseline,"GET","/api/products"+wanted)
             assert source_header=="DATABASE_FALLBACK" and bad==expected
             views.append({"case":"non-listening-configured-origin","status":200,"source":source_header,"response":bad})
+            suggestions(name_prefix,"DATABASE_FALLBACK","non-listening-configured-origin",unavailable)
         finally:
             try:
                 if live is not None:

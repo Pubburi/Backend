@@ -16,7 +16,16 @@ DB에 설치된 이름 collation의 오름차순, 동률일 때 ID 오름차순�
 누락·중복·추가 query가 있으면400이다. 바인딩한 LIKE의 접두어 뒤에만 와일드카드를 붙이므로
 입력의 `%`, `_`, `!`, 역슬래시는 문자 그대로 처리한다. 이름 안쪽이나 주종은 검색하지 않는다.
 읽기 실패는500이며 성공·오류 응답에는 캐시를 사용하지 않는다. 기존 상품 목록의 q/필터/정렬은
-그대로 유지한다. 자동완성은 OpenSearch·개인화·유사어·오타 허용을 사용하지 않는다.
+그대로 유지한다. 개인화·유사어·오타 허용은 적용하지 않는다.
+
+기존 `PUBBURI_SEARCH_ENABLED=true`를 명시하면 같은 source-bound OpenSearch의 `name.raw`
+[literal prefix](https://docs.opensearch.org/latest/query-dsl/term/prefix/)로 삭제 표식을 제외한 ID 후보만
+읽는다. source/물리 UUID·전체700ms·128KiB·부분 응답 거절은 아래 공개 검색과 공유한다.
+원격 호출 뒤 현재 DB의 같은 접두어/이름·ID 정렬/최대8개를 다시 읽어 **반환 ID순이 모두 같을 때만**
+ENGINE_VERIFIED로 분류한다. 이름 변경·삭제·상위 후보 누락·collation 차이·엔진 장애는
+DATABASE_FALLBACK이며 응답 필드는 항상 현재 DB다. 비활성 또는 조회가 필요 없는 짧은 입력은
+DATABASE다. 이 분류는 성공의 `X-Pubburi-Search-Source` 헤더만 추가하고 JSON은 유지한다.
+최대8개 밖의 전체 색인 일치를 보증하지 않으며 DB 확인을 유지하므로 속도 개선으로 세지 않는다.
 
 ## 조건과 단위
 

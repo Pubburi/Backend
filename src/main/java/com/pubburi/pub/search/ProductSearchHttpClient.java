@@ -38,11 +38,23 @@ public final class ProductSearchHttpClient implements ProductSearchGateway {
         long offset=((long)page.page()-1)*page.size();
         // Existing SQL LIKE '%'/'_'/'\\' and arbitrary query lengths keep their old DB meaning.
         if(offset<0 || offset+page.size()>10000 || q!=null && (q.length()>100 || q.indexOf('%')>=0 || q.indexOf('_')>=0 || q.indexOf('\\')>=0))return Optional.empty();
+        return select(sourceId,query(type,q,sort,filters,page),page);
+    }
+    @Override public Optional<Selection> suggest(String sourceId,String prefix) {
+        if(prefix==null || prefix.isEmpty() || !prefix.equals(ProductNamePrefix.normalize(prefix)))return Optional.empty();
+        var page=PageCriteria.of(1,ProductNamePrefix.LIMIT,ProductNamePrefix.LIMIT);
+        var query=Map.of("from",0,"size",ProductNamePrefix.LIMIT,"_source",false,"track_total_hits",true,
+                "query",Map.of("bool",Map.of("filter",List.of(Map.of("term",Map.of("deleted",false)),
+                    Map.of("prefix",Map.of("name.raw",Map.of("value",prefix,"case_insensitive",true)))))),
+                "sort",List.of(Map.of("name.raw","asc"),Map.of("product_id","asc")));
+        return select(sourceId,query,page);
+    }
+    private Optional<Selection> select(String sourceId,Object query,PageCriteria page) {
         try {
             if(sourceId==null || !UUID.fromString(sourceId).toString().equals(sourceId))return Optional.empty();
             long end=System.nanoTime()+deadline.toNanos();
             String generation=metadata(exchange("GET",metadataPath(),null,end),sourceId);
-            var result=selection(exchange("POST","/"+index+"/_search?allow_partial_search_results=false",query(type,q,sort,filters,page),end),page);
+            var result=selection(exchange("POST","/"+index+"/_search?allow_partial_search_results=false",query,end),page);
             if(!generation.equals(metadata(exchange("GET",metadataPath(),null,end),sourceId)))return Optional.empty();
             return Optional.of(result);
         } catch(InterruptedException interrupted){Thread.currentThread().interrupt();return Optional.empty();}

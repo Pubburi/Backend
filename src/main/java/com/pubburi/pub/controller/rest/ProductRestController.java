@@ -80,6 +80,10 @@ public class ProductRestController {
 	@Operation(summary = "Suggest current products by literal name prefix", parameters = @Parameter(
 		name = "q", in = ParameterIn.QUERY, required = true, schema = @Schema(type = "string"),
 		description = "One name prefix. NFC after edge whitespace removal, 2–100 Unicode code points. Short inputs return an empty list."))
+	@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", headers = {
+		@io.swagger.v3.oas.annotations.headers.Header(name = "X-Pubburi-Search-Source", schema = @Schema(type = "string",
+			allowableValues = {"DATABASE", "ENGINE_VERIFIED", "DATABASE_FALLBACK"}), description = "Current top-eight ordered IDs only; all fields come from the current database."),
+		@io.swagger.v3.oas.annotations.headers.Header(name = "Cache-Control", schema = @Schema(type = "string", allowableValues = {"no-store"})) })
 	public ResponseEntity<ApiResponse<ProductSuggestionsResponse>> suggestions(HttpServletRequest request,
 			HttpServletResponse response) {
 		response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
@@ -87,8 +91,9 @@ public class ProductRestController {
 		if (request.getParameterMap().size() != 1 || query == null || query.length != 1) {
 			throw new IllegalArgumentException("Exactly one q parameter is required");
 		}
-		var data = new ProductSuggestionsResponse(productService.suggestByName(query[0]));
-		return ResponseEntity.ok(ApiResponse.ok(data));
+		var result = publicSearch.suggest(query[0]);
+		var data = new ProductSuggestionsResponse(result.items());
+		return ResponseEntity.ok().header("X-Pubburi-Search-Source", result.source().name()).body(ApiResponse.ok(data));
 	}
 
 	@GetMapping("/products/popular")
