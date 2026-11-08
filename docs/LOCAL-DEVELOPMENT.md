@@ -138,7 +138,9 @@ DB 설치·source import·ID 예약·기본 DB 전환을 수행하지 않는다.
 | `PUBBURI_SERVER_PORT`, `PUBBURI_FRONTEND_PORT`, `PUBBURI_RECOMMENDATION_PORT` | 서로 다른 미점유 loopback 앱 포트 |
 
 선택 키는 `PUBBURI_LOG_LEVEL`, `PUBBURI_RECOMMENDATION_BASE_URL`,
-`PUBBURI_SEARCH_ENABLED`/`ENDPOINT`/`INDEX`, `PUBBURI_CONTENT_CATALOG_PATH`/`SHA256`, `PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED`다.
+`PUBBURI_SEARCH_ENABLED`/`ENDPOINT`/`INDEX`, `PUBBURI_CONTENT_CATALOG_PATH`/`SHA256`, `PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED`,
+별도 로컬 검수 권위의 `PUBBURI_REVIEWED_CATALOG_PATH`/`SHA256`와 `PUBBURI_REVIEWED_MAPPING_PATH`/`SHA256`다.
+검수 권위/매핑 네 값과 기존 DEMO 설정은 [catalog 계약](CONTENT-RECOMMENDATIONS.md#안정-원천과-현재-업무-값의-분리)처럼 분리한다.
 원격 base URL/엔진은 HTTP numeric loopback만 허용한다. catalog 생략은 원래 UNAVAILABLE이며
 임의 bundle/기존80 자동 fit을 만들지 않는다. 공식 fresh container-DEMO 계약은 그대로다.
 PG 모드는 Backend `.env`를 읽지 않고 상속된 PUBBURI/DB/control·JVM 주입 설정을 제거한다.

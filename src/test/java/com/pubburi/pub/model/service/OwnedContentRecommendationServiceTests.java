@@ -9,6 +9,54 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
 class OwnedContentRecommendationServiceTests {
+    @Test void stableNamespaceIsCheckedInsideSnapshotReadsAndNeverAddedToLegacyReads(){
+        var identity=mock(com.pubburi.pub.model.dao.ProductSearchIdentityDao.class);
+        var snapshots=new OwnedContentSnapshotService(mock(UserPreferenceService.class),mock(com.pubburi.pub.model.dao.ProductDao.class),mock(com.pubburi.pub.model.dao.ProductFeatureDao.class),
+            mock(com.pubburi.pub.model.dao.FavoriteDao.class),mock(com.pubburi.pub.model.dao.CommentDao.class),ContentFixtures.JSON,Optional.empty(),identity);
+        assertThat(snapshots.readProducts(List.of())).isEmpty();verifyNoInteractions(identity);
+        when(identity.selectSourceId()).thenReturn(ReviewedLocalFixtures.NAMESPACE);assertThat(snapshots.readProducts(List.of(),ReviewedLocalFixtures.NAMESPACE)).isEmpty();
+        when(identity.selectSourceId()).thenReturn("00000000-0000-4000-8000-000000000002");
+        assertThatThrownBy(()->snapshots.readProducts(List.of(),ReviewedLocalFixtures.NAMESPACE)).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode().value()).isEqualTo(409));
+        when(identity.selectSourceId()).thenThrow(new IllegalStateException("Owned source read failure"));assertThatThrownBy(()->snapshots.readProducts(List.of(),ReviewedLocalFixtures.NAMESPACE)).isInstanceOf(IllegalStateException.class);
+    }
+    @Test void stableAuthorityUsesCurrentPriceAndDeletedRowsWithoutReissuingAnOldBusinessSnapshot()throws Exception{
+        var authority=ReviewedLocalFixtures.catalog();var facts=ReviewedLocalFixtures.current();ReviewedLocalFixtures.price(facts,81,7000);
+        var snapshots=mock(OwnedContentSnapshotService.class);var current=new OwnedContentSnapshotService.Snapshot(ReviewedLocalFixtures.preferences(),facts,null);
+        when(snapshots.read("own","epoch",authority.ids(),List.of(),false,authority.businessSourceId())).thenReturn(current);
+        var service=new OwnedContentRecommendationService(snapshots,()->Optional.of(authority),(c,p,l,a)->{
+            assertThat(c.at("/0/price_krw").intValue()).isEqualTo(7000);assertThat(c.at("/0/taste_tags").isNull()).isTrue();assertThat(c.get(0).has("description")).isFalse();
+            try{return Optional.of(ReviewedLocalFixtures.response(2));}catch(Exception error){throw new AssertionError(error);}
+        },ContentFixtures.JSON);
+        var result=service.recommend("own","epoch",1,false);assertThat(result.catalogScope().name()).isEqualTo("REVIEWED_LOCAL_CATALOG");assertThat(result.products().get(0).price()).isEqualTo(7000);
+        verify(snapshots,times(2)).read("own","epoch",authority.ids(),List.of(),false,authority.businessSourceId());
+        facts=ReviewedLocalFixtures.current();facts.remove(82);current=new OwnedContentSnapshotService.Snapshot(ReviewedLocalFixtures.preferences(),facts,null);
+        when(snapshots.read("own","epoch",authority.ids(),List.of(),false,authority.businessSourceId())).thenReturn(current);
+        var deleted=new OwnedContentRecommendationService(snapshots,()->Optional.of(authority),(c,p,l,a)->{
+            assertThat(c.at("/1/available").booleanValue()).isFalse();assertThat(c.at("/1/price_krw").isNull()).isTrue();
+            try{return Optional.of(ReviewedLocalFixtures.response(1));}catch(Exception error){throw new AssertionError(error);}
+        },ContentFixtures.JSON).recommend("own","epoch",1,false);
+        assertThat(deleted.source().name()).isEqualTo("PROVIDER");assertThat(deleted.products()).extracting(ProductResponse::id).containsExactly(81);
+    }
+    @Test void stableProviderFailureKeepsItsScopeButPriceOrAuthorityChangesAre409()throws Exception{
+        var authority=ReviewedLocalFixtures.catalog();var snapshots=mock(OwnedContentSnapshotService.class);var current=new OwnedContentSnapshotService.Snapshot(ReviewedLocalFixtures.preferences(),ReviewedLocalFixtures.current(),null);
+        when(snapshots.read("own","epoch",authority.ids(),List.of(),false,authority.businessSourceId())).thenReturn(current);
+        var selected=new java.util.concurrent.atomic.AtomicReference<Optional<ReviewedLocalCatalog>>(Optional.of(authority));
+        var service=new OwnedContentRecommendationService(snapshots,selected::get,(c,p,l,a)->Optional.empty(),ContentFixtures.JSON);
+        assertThat(service.recommend("own","epoch",1,false).catalogScope().name()).isEqualTo("REVIEWED_LOCAL_CATALOG");
+        var changed=ReviewedLocalFixtures.current();ReviewedLocalFixtures.price(changed,81,9000);
+        when(snapshots.read("own","epoch",authority.ids(),List.of(),false,authority.businessSourceId())).thenReturn(current,new OwnedContentSnapshotService.Snapshot(current.preferences(),changed,null));
+        assertThatThrownBy(()->service.recommend("own","epoch",1,false)).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode().value()).isEqualTo(409));
+        when(snapshots.read("own","epoch",authority.ids(),List.of(),false,authority.businessSourceId())).thenReturn(current);
+        var broken=new OwnedContentRecommendationService(snapshots,selected::get,(c,p,l,a)->{selected.set(Optional.empty());return Optional.empty();},ContentFixtures.JSON);
+        assertThatThrownBy(()->broken.recommend("own","epoch",1,false)).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode().value()).isEqualTo(409));
+    }
+    @Test void stableScopeStillUsesSavedNegativeFeedbackInsteadOfUnfilteredFallback()throws Exception{
+        var authority=ReviewedLocalFixtures.catalog();var signals=new FeedbackSignals(List.of(),List.of(81));var snapshots=mock(OwnedContentSnapshotService.class);var current=new OwnedContentSnapshotService.Snapshot(ReviewedLocalFixtures.preferences(),ReviewedLocalFixtures.current(),null,signals);
+        when(snapshots.read("own","epoch",authority.ids(),List.of(),true,authority.businessSourceId())).thenReturn(current);var gateway=mock(ContentGateway.class);
+        when(gateway.feedback(any(),eq(current.preferences()),eq(1),isNull(),eq(signals))).thenReturn(Optional.empty());
+        var result=new OwnedContentRecommendationService(snapshots,()->Optional.of(authority),gateway,ContentFixtures.JSON).recommend("own","epoch",1,false,true);
+        assertThat(result.catalogScope().name()).isEqualTo("REVIEWED_LOCAL_CATALOG");verify(gateway).feedback(any(),eq(current.preferences()),eq(1),isNull(),eq(signals));verifyNoMoreInteractions(gateway);
+    }
     static OwnedContentSnapshotService.Snapshot snapshot(ContentCatalogSource.Catalog catalog){var facts=new LinkedHashMap<Integer,OwnedContentSnapshotService.Facts>();catalog.bindings().forEach((id,binding)->{try{facts.put(id,new OwnedContentSnapshotService.Facts(binding.product(),binding.features(),ContentFixtures.JSON.treeToValue(binding.product(),ProductResponse.class)));}catch(Exception invalid){throw new AssertionError(invalid);}});return new OwnedContentSnapshotService.Snapshot(ContentFixtures.preferences(),facts,null);}
     @Test void onlyCheckedCatalogAndCurrentOwnedPreferencesGoUpstreamAndNoWeakerFallbackIsGenerated()throws Exception{
         var catalog=ContentFixtures.catalog();var snapshots=mock(OwnedContentSnapshotService.class);var current=snapshot(catalog);when(snapshots.read("own","epoch",catalog.ids(),List.of())).thenReturn(current);

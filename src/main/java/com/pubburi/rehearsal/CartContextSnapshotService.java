@@ -14,6 +14,11 @@ public class CartContextSnapshotService {
     public CartContextSnapshotService(CartService carts,OwnedContentSnapshotService contents){this.carts=carts;this.contents=contents;}
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Snapshot read(SessionUser owner,List<Integer> ids){
-        return new Snapshot(carts.get(owner),contents.read(owner.id(),owner.authEpoch(),ids,List.of(),true));
+        return read(owner,ids,null);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Snapshot read(SessionUser owner,List<Integer> ids,String businessSourceId){
+        return new Snapshot(carts.get(owner),businessSourceId==null?contents.read(owner.id(),owner.authEpoch(),ids,List.of(),true)
+            :contents.read(owner.id(),owner.authEpoch(),ids,List.of(),true,businessSourceId));
     }
 }

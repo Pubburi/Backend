@@ -35,26 +35,37 @@ public class SimilarProductService {
         }
         var approved = catalogs.current();
         if (approved.isEmpty()) return EMPTY;
-        var catalog = approved.get();
-        if (catalog.scope() != CatalogScope.REVIEWED_DEMO
-                || !SimilarProductContract.hasAvailableReference(catalog.catalog(), referenceId)) return EMPTY;
+        var authority = approved.get();
+        if (authority.scope() == CatalogScope.REVIEWED_FAMILY_BROWSE_DEMO) return EMPTY;
 
         // Each projection has its own short read transaction. The provider call is outside both.
-        var ids = catalog.ids();
-        if (!OwnedContentSnapshotService.matches(catalog, snapshots.readProducts(ids))) return EMPTY;
+        var ids = authority.ids();var namespace=authority.businessSourceId();
+        var resolved=authority.resolve(read(ids,namespace));
+        if(resolved.isEmpty()){if(authority.scope()==CatalogScope.REVIEWED_LOCAL_CATALOG)changed();return EMPTY;}
+        var catalog=resolved.get();
+        if(!SimilarProductContract.hasAvailableReference(catalog.catalog(),referenceId))return EMPTY;
         var response = provider.similar(catalog.catalog(), referenceId, LIMIT);
-        if (response.isEmpty()) return EMPTY;
-        List<Integer> candidates;
-        try {
-            candidates = SimilarProductContract.validate(response.get(), catalog.catalog(), referenceId, LIMIT);
-        } catch (IllegalArgumentException invalid) {
-            return EMPTY;
+        if(response.isEmpty() && catalog.scope()!=CatalogScope.REVIEWED_LOCAL_CATALOG)return EMPTY;
+        List<Integer> candidates=List.of();
+        if(response.isPresent())try{
+            candidates=SimilarProductContract.validate(response.get(),catalog.catalog(),referenceId,LIMIT);
+        }catch(IllegalArgumentException invalid){if(catalog.scope()!=CatalogScope.REVIEWED_LOCAL_CATALOG)return EMPTY;}
+        if(candidates.isEmpty() && catalog.scope()!=CatalogScope.REVIEWED_LOCAL_CATALOG)return EMPTY;
+        var current=read(ids,namespace);
+        if(!OwnedContentSnapshotService.matches(catalog,current)){
+            if(catalog.scope()==CatalogScope.REVIEWED_LOCAL_CATALOG)changed();return EMPTY;
         }
-        if (candidates.isEmpty()) return EMPTY;
-
-        var current = snapshots.readProducts(ids);
-        if (!OwnedContentSnapshotService.matches(catalog, current)) return EMPTY;
-        if (catalogs.current().filter(next -> next.sha256().equals(catalog.sha256())).isEmpty()) return EMPTY;
-        return new SimilarProductsResponse(candidates.stream().map(id -> current.get(id).currentProduct()).toList());
+        if(catalogs.current().filter(next->next.sha256().equals(authority.sha256())).isEmpty()){
+            if(catalog.scope()==CatalogScope.REVIEWED_LOCAL_CATALOG)changed();return EMPTY;
+        }
+        if(response.isEmpty())return result(List.of(),catalog.scope());
+        return result(candidates.stream().map(id -> current.get(id).currentProduct()).toList(),catalog.scope());
     }
+    private java.util.Map<Integer,OwnedContentSnapshotService.Facts> read(List<Integer> ids,String namespace){
+        return namespace==null?snapshots.readProducts(ids):snapshots.readProducts(ids,namespace);
+    }
+    private SimilarProductsResponse result(List<com.pubburi.pub.controller.response.ProductResponse> items,CatalogScope scope){
+        return scope==CatalogScope.REVIEWED_LOCAL_CATALOG?new SimilarProductsResponse(items,scope):new SimilarProductsResponse(items);
+    }
+    private void changed(){throw new ResponseStatusException(HttpStatus.CONFLICT,"Reviewed recommendation inputs changed");}
 }

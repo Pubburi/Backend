@@ -47,7 +47,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         return {"paths": paths, "components": {"schemas": {
             "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}, "includeActivity": {"type": "boolean", "default": False}}},
             "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
-            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]}, "result": {}, "products": {}, "activityEvidence": {"$ref": "#/components/schemas/ActivityEvidence"}, "feedbackEvidence": {"$ref": "#/components/schemas/FeedbackEvidence"}}},
+            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO", "REVIEWED_LOCAL_CATALOG"]}, "result": {}, "products": {}, "activityEvidence": {"$ref": "#/components/schemas/ActivityEvidence"}, "feedbackEvidence": {"$ref": "#/components/schemas/FeedbackEvidence"}}},
             "FeedbackEvidence": {"properties": {"rankingMode": {}, "excludedNotInterestedCount": {}, "positiveReferences": {"items": {"$ref": "#/components/schemas/PositiveReference"}}}},
             "PositiveReference": {"properties": {"productId": {}, "name": {}}},
             "ActivityEvidence": {"properties": {key: {"type": "array", "items": {"type": "string"}}
@@ -57,7 +57,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "SuggestionItem": {"properties": {name: {"type": kind} for name, kind in
                 (("id", "integer"), ("name", "string"), ("type", "string"), ("price", "integer"))}},
             "SimilarEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SimilarProductsResponse"}}},
-            "SimilarProductsResponse": {"properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}}},
+            "SimilarProductsResponse": {"required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}, "catalogScope": {"type": "string", "enum": ["REVIEWED_LOCAL_CATALOG"]}}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
             "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}

@@ -1,4 +1,4 @@
-# 본인 명시취향의 검수 DEMO B1 추천
+# 본인 명시취향의 검수 B1 추천
 
 `POST /api/users/me/recommendations/content`는 로그인한 **현재 본인**의 canonical 저장 취향을
 기존 [B1 content](https://github.com/Pubburi/Recommendation/blob/main/docs/CONTENT-API.md)에 연결한다.
@@ -6,7 +6,7 @@
 limit은 정수1–12, includeActivity는 JSON boolean이며 null·문자열·다른 필드·모든 query를400으로 거절한다.
 
 같은 요청에서 현재 본인 ID를 `encodeURIComponent`한 `X-Pubburi-Feedback-Owner` 헤더를 보내면
-명시 PostgreSQL의 검수 container-DEMO에서 저장한 맞음/관심 없음을 반영한다. 헤더는 계정을
+명시 PostgreSQL의 검수 container-DEMO 또는 로컬 검수 catalog에서 저장한 맞음/관심 없음을 반영한다. 헤더는 계정을
 선택하지 않으며 현재 세션과 다르면401이다. 헤더가 없거나 지원하지 않는 스코프, 매핑된 선택이
 없는 경우에는 기존 취향 추천을 사용한다. 요청 본문에는 선택이나 참조 ID를 받지 않는다.
 
@@ -20,10 +20,11 @@ limit은 정수1–12, includeActivity는 JSON boolean이며 null·문자열·�
 기여했을 때만 제공한다. 양수 근거가 부족한 경우 결과를 0점 후보로 채우지 않는다.
 계정/역할/epoch·profile/preferences·catalog/제외/host는 요청에서 선택하지 않는다.
 
-성공 ApiResponse data에는 source(PROVIDER/UNAVAILABLE), catalogScope(REVIEWED_DEMO / REVIEWED_FAMILY_BROWSE_DEMO),
+성공 ApiResponse data에는 source(PROVIDER/UNAVAILABLE), catalogScope(REVIEWED_DEMO / REVIEWED_FAMILY_BROWSE_DEMO / REVIEWED_LOCAL_CATALOG),
 result, products 네 필드가 기본이다. PROVIDER의 result는 검증한 기존 B1/R04 typed 응답이며
 products는 result.items와 같은 ID순의 **현재 Product7**이다. UNAVAILABLE은 result=null과
-products=[]이며 기존 REVIEWED_DEMO를 유지한다. 새 family scope는 승인된 family PROVIDER에만 표시한다.
+products=[]다. 초기 권위가 없거나 거절되면 기존 REVIEWED_DEMO이며, 유효한 로컬 권위의 제공자 장애는
+REVIEWED_LOCAL_CATALOG를 유지한다. family scope는 승인된 family PROVIDER에만 표시한다.
 제공자의 정상 빈 items/fallback은 PROVIDER로 보존하며 장애와 구분한다. 선택한 활동 주종이 실제
 반환 상품의 양수 `text` 주종 기여에 쓰인 경우에만 `activityEvidence`에 `favoriteCategories`,
 `highlyRatedCategories` 배열을 제공한다. 근거가 없거나 UNAVAILABLE이면 이 필드를 생략한다.
@@ -36,8 +37,11 @@ products=[]이며 기존 REVIEWED_DEMO를 유지한다. 새 family scope는 승�
 
 공개 `GET /api/products/{id}/similar`는 현재 기준 상품에 대해 최대 4개의 `ProductResponse`를
 ApiResponse `data.items`에 반환한다. 존재하지 않는 기준은 404다. 응답 캐시는 `no-store`다.
-호출은 기존 container `REVIEWED_DEMO`의 검수 상품에만 한정한다. family-browse 전용이나 미승인
-상품, 모델 실패, 만료 또는 상품/특성 변경은 200 빈 배열로 처리한다.
+호출은 container `REVIEWED_DEMO` 또는 `REVIEWED_LOCAL_CATALOG`의 검수 상품에 한정한다.
+유효한 로컬 기준에만 선택 필드 `data.catalogScope:"REVIEWED_LOCAL_CATALOG"`가 붙으며 기존
+`items`는 그대로다. family-browse 전용/미매핑 상품에는 이 필드가 없고 빈 배열이다. 모델 실패도
+빈 배열이지만 로컬 기준의 scope는 유지한다. 로컬 원천/현재 사실의 불일치 또는 호출 중 변경은409다.
+기존 DEMO의 만료/상품·특성 변경은 기존대로200 빈 배열이다.
 
 Python의 [유사 후보 계약](https://github.com/Pubburi/Recommendation/blob/main/docs/SIMILAR-API.md)에
 고정 catalog·기준 ID·limit만 전송한다. 응답의 양수 기여와 후보·정렬을 검사해 기준/같은 그룹,
@@ -100,6 +104,36 @@ binding과 다르면409이고 제공자에 보내지 않는다. 원격 대기 �
 취향/상품/특성 변화·삭제도409로 거절한다. 미설정/핀 불일치/만료/historical은 전송하지 않는다.
 유효기한은 원 business capture 종료+5분이며 새 current bundle 발행은 원 소유자의 검증을 요구한다.
 
+### 안정 원천과 현재 업무 값의 분리
+
+비상업 로컬 aT catalog는 위 DEMO와 별도 입력이다. Recommendation이 검수·발행한
+`at-reviewed-local-catalog-v1`의 원문을 `PUBBURI_REVIEWED_CATALOG_PATH`/`SHA256`으로,
+Backend의 명시 매핑을 `PUBBURI_REVIEWED_MAPPING_PATH`/`SHA256`으로 각각 고정한다.
+네 값 중 일부만 설정하거나 기존 CONTENT_CATALOG 입력/family opt-in과 함께 설정하면 거절하며
+DEMO로 되돌려 권위를 약화하지 않는다. 요청에서 설정/상품 매핑을 선택하지 않는다.
+
+매핑의 정확한 최상위 필드는 `schema_version:1`, `algorithm:"reviewed-local-catalog-mapping-v1"`,
+`authority_sha256`, `catalog_version`, `source_version`, `business_source_id`, `records`다.
+`business_source_id`는 현재 승인 import의 불변 source UUID다. records는 원 authority와 같은
+순서의 `{catalog_record_id,backend_product_id,sku_group}`이며 모든 원 record를 정확히 한 번
+매핑한다. 업무 ID 중복/누락·다른 source UUID·원 source_variant_group과 다른 그룹은 거절한다.
+이름/순서 유사도로 다른 업무 상품을 추정하지 않는다. 두 파일은 원문 SHA·정확한 typed shape와
+합계10MiB/1000행 상한을 확인하며, 권위 pin은 두 원 SHA에 함께 결속한다.
+
+안정 원천에는 원 dataset/version·capture·검수 시각·근거 SHA와 이름/제조사·주종·단일 도수/용량만
+있다. 이 원천 사실에는 업무 snapshot의5분 만료를 붙이지 않으며 기존 DEMO 만료는 그대로다.
+원 `약주`는 명시 map으로만 `약 · 청주`에 대응한다. 현재 업무 이름/주종/도수와 feature 용량이
+안정 사실과 같아야 하며, 하나라도 불일치하면 전체를409로 거절한다. 원 authority 자체가 깨진
+경우 초기 UNAVAILABLE이며 요청 중 pin이 바뀌면409다. 원천 재감사/권리 선택은 Recommendation
+소유이며 원자료나 이미지/설명/맛·향을 Backend가 추가 승인하지 않는다.
+
+각 요청의 짧은 RR에서 **현재 시연 가격**과 업무행 존재 여부를 조합한다. 가격은 aT 판매가가
+아니며 `available`은 판매/재고 확인이 아니다. 삭제된 명시 매핑은 알려진 원 사실/그룹을 유지한 채
+available=false·price_krw=null로 전달해 후보에서 제외하고 나머지 유효 후보를 보존한다. DB 태그·
+설명·이미지와 generic UI fallback 이미지는 모델 원천에 넣지 않는다. 호출 전후 전체 원 ID로
+현재 사실/가격/삭제·hard 조건·관심 없음·epoch와 두 원 pin을 다시 대조하며 변화는409/401이다.
+게시된 실제 상품 ID로만 상세/피드백/카트에 연결하며 원 raw행을 자동 서비스 상품으로 승격하지 않는다.
+
 ## 모델·설명과 실패 경계
 
 원래 catalog와 현재 전체 preferences, constraints={}, limit, include_explanations=true를
@@ -128,5 +162,5 @@ null일 때만 같은 RR에서 현재 계정·epoch의 찜과 상품별 최신 �
 원문 파일/계정/응답 오류를 오류 메시지에 반사하지 않는다. 마지막 읽기 이후의 수정까지 잠그는
 보장은 아니며 주문 가격은 원래 주문 시점 스냅샷을 사용한다.
 
-[검증/한계](https://github.com/Pubburi/Backend/blob/6fda9d3c2fb42e7d118e15602e601389f92695dd/docs/plans/2026-11-04-owned-content-recommendations.md)를 따르며 전체 R02/R04·서비스
-SKU 승인/학습 품질·기본 PostgreSQL cutover 완료로 확대하지 않는다.
+[기존 DEMO 검증/한계](https://github.com/Pubburi/Backend/blob/6fda9d3c2fb42e7d118e15602e601389f92695dd/docs/plans/2026-11-04-owned-content-recommendations.md)는 당시 고정 근거로 보존한다.
+로컬 검수 catalog 연결은 실판매/재고·사람의 만족도·딥러닝 우위·기본 PostgreSQL cutover 완료를 뜻하지 않는다.

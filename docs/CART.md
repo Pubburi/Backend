@@ -55,8 +55,10 @@ query·추가/중복 JSON·boolean/문자열/소수/범위 밖 revision 또는 l
 카트 header/행/revision·receipt·주문·금액을 생성하거나 변경하지 않는다.
 
 응답은 정확히 `source,catalogScope,cartVersion,references,unavailableReason,result,products`다.
-`source`는 PROVIDER/UNAVAILABLE, scope는 기존 REVIEWED_DEMO이며 family-browse를 판매 SKU로
-승격하지 않는다. `references`는 기존 GET 행순서 전체의 `{productId,name,quantity,state}`다.
+`source`는 PROVIDER/UNAVAILABLE, scope는 REVIEWED_DEMO 또는 REVIEWED_LOCAL_CATALOG이며
+family-browse를 판매 SKU로 승격하지 않는다. 로컬 권위/현재 시연 가격·삭제의 조합과 두 원 pin은
+[검수 catalog 계약](CONTENT-RECOMMENDATIONS.md#안정-원천과-현재-업무-값의-분리)을 따른다.
+`references`는 기존 GET 행순서 전체의 `{productId,name,quantity,state}`다.
 name은 현재 이름이며 삭제 시 null이다. quantity는 현재1–99 정수로 보존하되 점수에 가중하지 않는다.
 
 | state | 뜻 |
@@ -85,7 +87,7 @@ PROVIDER로 구분한다. matches의 실제 winning reference와 R04 comparison/
 변화는409, 계정/epoch 회수는401이며 원래 카트는 보존한다. provider/strict 응답 실패는 위
 UNAVAILABLE, DB 오류는500이다. 최신 읽기 이후의 수정을 잠그는 보장은 아니며 주문 가격은
 기존 checkout 시점에 확정한다. 연결200ms·원격 전체3초와 요청512KiB/응답256KiB 상한을 재사용한다.
-본인 주문 맥락과 일반 서비스 catalog의 R07 전체 인수는 후속이다.
+본인 주문 맥락의 R07 인수는 후속이다.
 
 ## 병합·주문·재시도
 

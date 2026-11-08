@@ -36,13 +36,45 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
     @Autowired Source source;@Autowired Observed observed;@Autowired OwnedContentSnapshotService snapshots;@Autowired Gate gate;
     @Autowired jakarta.persistence.EntityManagerFactory entityManagerFactory;
     @DynamicPropertySource static void origin(DynamicPropertyRegistry values)throws Exception{remote=new Remote();values.add("pubburi.recommendation.base-url",remote::origin);}
-    @BeforeEach void reset(){source.value.set(Optional.empty());remote.calls.set(0);remote.last.set(null);observed.inside.set(null);gate.armed.set(false);remote.handler.set((exchange,body)->remote.reply(exchange,200,zero(body)));}
+    @BeforeEach void reset(){source.stable.set(null);source.value.set(Optional.empty());remote.calls.set(0);remote.last.set(null);observed.inside.set(null);gate.armed.set(false);remote.handler.set((exchange,body)->remote.reply(exchange,200,zero(body)));}
     @AfterAll static void close(){if(remote!=null)remote.close();}
     class Fixture implements AutoCloseable {
         final java.net.http.HttpClient admin=loggedIn("ADMIN");final String user=join();final java.net.http.HttpClient owner=login(user,password);final List<Integer> ids=new ArrayList<>();
         Fixture()throws Exception{try{for(int i=0;i<2;i++){var body=new HashMap<String,Object>(product(ownName(),1000+i*1000));body.put("type",i==0?"맥주":"증류주");body.put("abv",i*10);var created=request(admin,"POST","/api/admin/products",body);assertEquals(201,created.status());int id=created.body().at("/data/id").intValue();ids.add(id);assertEquals(200,request(admin,"PUT","/api/admin/products/"+id+"/features",Map.of("volumeMl",750-i*250,"tasteTags",i==0?List.of("a,b","line\nx"):List.of(),"aromaTags",List.of(),"sourceName","Authored B1 consumer fixture")).status());}bind(CatalogScope.REVIEWED_DEMO);}catch(Throwable error){close();throw error;}}
         void bind(CatalogScope scope)throws Exception{var catalog=json.createArrayNode();var bindings=new LinkedHashMap<Integer,ContentCatalogSource.Binding>();for(int id:ids){var p=request(owner,"GET","/api/products/"+id,null).body().path("data");var f=request(owner,"GET","/api/products/"+id+"/features",null).body().path("data");var row=catalog.addObject();row.put("product_id",id);row.put("available",true);row.put("sku_group","authored-"+id);row.set("category",p.get("type"));row.set("price_krw",p.get("price"));row.set("abv_percent",p.get("abv"));row.set("volume_ml",f.get("volumeMl"));row.putNull("taste_tags");row.putNull("aroma_tags");bindings.put(id,new ContentCatalogSource.Binding(id,p.deepCopy(),f.deepCopy()));}source.value.set(Optional.of(new ContentCatalogSource.Catalog(catalog,Collections.unmodifiableMap(bindings),Instant.now().plusSeconds(300),"d".repeat(64),scope)));}
-        @Override public void close(){source.value.set(Optional.empty());try{for(int id:ids){var deleted=request(admin,"DELETE","/api/admin/products/"+id,null);assertTrue(deleted.status()==200 || deleted.status()==404);}clean(control(),user,null,List.of());}catch(Exception error){throw new IllegalStateException(error);}}
+        @Override public void close(){source.stable.set(null);source.value.set(Optional.empty());try{for(int id:ids){var deleted=request(admin,"DELETE","/api/admin/products/"+id,null);assertTrue(deleted.status()==200 || deleted.status()==404);}clean(control(),user,null,List.of());}catch(Exception error){throw new IllegalStateException(error);}}
+    }
+    @Test void stableAuthorityReadsCurrentDemoPriceAndDeletedCandidatesWithoutChangingSourceNamespace()throws Exception{
+        try(var f=new Fixture()){
+            // Authored consumer fixture, not source approval or model-quality evidence.
+            var records=new ArrayList<ReviewedLocalCatalog.Product>();
+            for(var binding:source.value.get().orElseThrow().bindings().values()){
+                records.add(new ReviewedLocalCatalog.Product(binding.productId(),"authored-"+binding.productId(),
+                    binding.product().path("name").textValue(),binding.product().path("type").textValue(),
+                    binding.product().path("abv").decimalValue(),binding.features().path("volumeMl").intValue()));
+            }
+            String namespace=control().queryForObject("SELECT source_id::text FROM pubburi.t_product_search_relay_target WHERE singleton_id=1",String.class);
+            source.stable.set(new ReviewedLocalCatalog(records,"d".repeat(64),namespace));
+            var initial=accountState(control(),f.user);var identity=sourceIdentity(control());
+            var updated=json.convertValue(source.value.get().orElseThrow().bindings().get(f.ids.get(0)).product(),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
+            updated.remove("id");updated.put("price",7000);
+            assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+f.ids.get(0),updated).status());
+            var result=request(f.owner,"POST",PATH,Map.of());assertEquals(200,result.status());
+            assertEquals("PROVIDER",result.body().at("/data/source").textValue());
+            assertEquals("REVIEWED_LOCAL_CATALOG",result.body().at("/data/catalogScope").textValue());
+            assertEquals(7000,remote.last.get().at("/catalog/0/price_krw").intValue());
+            assertTrue(remote.last.get().at("/catalog/0/taste_tags").isNull());
+            assertEquals(200,request(f.admin,"DELETE","/api/admin/products/"+f.ids.get(1),null).status());
+            remote.handler.set((exchange,body)->{var available=body.deepCopy();((ArrayNode)available.path("catalog")).remove(1);remote.reply(exchange,200,zero(available));});
+            var deleted=request(f.owner,"POST",PATH,Map.of());assertEquals(200,deleted.status());
+            assertEquals("PROVIDER",deleted.body().at("/data/source").textValue());
+            assertEquals(List.of(f.ids.get(0)),deleted.body().at("/data/products").findValues("id").stream().map(JsonNode::intValue).toList());
+            assertFalse(remote.last.get().at("/catalog/1/available").booleanValue());
+            assertTrue(remote.last.get().at("/catalog/1/price_krw").isNull());
+            source.stable.set(new ReviewedLocalCatalog(records,"d".repeat(64),UUID.randomUUID().toString()));
+            int calls=remote.calls.get();assertEquals(409,request(f.owner,"POST",PATH,Map.of()).status());assertEquals(calls,remote.calls.get());
+            assertEquals(initial,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
+        }
     }
     @Test void strictPrivateInputAndOnlyTheCurrentAccountSnapshotReachTheCheckedCatalog()throws Exception{
         try(var f=new Fixture()){
@@ -465,7 +497,11 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         var mapper=new ObjectMapper();var root=mapper.createObjectNode();root.put("algorithm","b1-tfidf-minmax-v1");root.put("fit_scope","request_catalog");root.put("representation_fitted",true);root.put("model_fingerprint","a".repeat(64));var prefs=request.path("preferences");boolean maxZero=prefs.at("/hardConstraints/maxPriceKrw").isNumber() && prefs.at("/hardConstraints/maxPriceKrw").intValue()==0;boolean numeric=prefs.at("/softPreferences/targetAbvPercent").isNumber();
         root.put("eligible_count",maxZero?0:request.path("catalog").size());root.put("supported_profile_tokens",0);root.put("unknown_profile_tokens",0);root.putArray("active_numeric_preferences");if(numeric)root.withArray("active_numeric_preferences").add("abv_percent");root.put("fallback_reason",maxZero?"no_eligible_products":"no_supported_preferences");var items=root.putArray("items");if(!maxZero)for(var row:request.path("catalog")){var item=items.addObject();item.set("product_id",row.get("product_id"));item.put("score",0);item.putArray("reasons").add("available").add("deterministic_baseline");item.putArray("contributions");var e=item.putObject("explanation");e.put("version","r04-facts-v1");e.put("basis","deterministic_baseline");e.putObject("comparison").put("kind","profile");e.putArray("score_evidence");e.put("total_positive_contributions",0);e.put("score_evidence_truncated",false);e.putArray("filter_evidence").addObject().put("kind","availability_filter").put("label","입력 가용 조건 충족").put("actual_value",true);e.put("fallback_reason","no_supported_preferences");}return root;
     }
-    static class Source implements ContentCatalogSource {final AtomicReference<Optional<Catalog>> value=new AtomicReference<>(Optional.empty());@Override public Optional<Catalog> current(){return value.get();}}
+    static class Source implements ContentCatalogSource {
+        final AtomicReference<Optional<Catalog>> value=new AtomicReference<>(Optional.empty());
+        final AtomicReference<ReviewedLocalCatalog> stable=new AtomicReference<>();
+        @Override public Optional<? extends Authority> current(){return stable.get()==null?value.get():Optional.of(stable.get());}
+    }
     static class Observed implements ContentGateway, SimilarProductGateway, ContextGateway {
         final ContentHttpClient delegate;
         final AtomicReference<Boolean> inside = new AtomicReference<>();

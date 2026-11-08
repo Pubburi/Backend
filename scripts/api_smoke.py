@@ -358,7 +358,7 @@ def verify_content_recommendation_openapi(document):
     reference = schemas[feedback["properties"]["positiveReferences"]["items"]["$ref"].split("/")[-1]]
     assert set(reference["properties"]) == {"productId", "name"}
     assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
-    assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO"]
+    assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO", "REVIEWED_LOCAL_CATALOG"]
 
 
 def verify_product_suggestions_openapi(document):
@@ -391,7 +391,9 @@ def verify_similar_products_openapi(document):
     response = operation["responses"]["200"]["content"]["application/json"]["schema"]
     envelope = schemas[response["$ref"].split("/")[-1]]
     data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    assert set(data["properties"]) == {"items"}
+    assert set(data["properties"]) == {"items", "catalogScope"}
+    assert "catalogScope" not in data.get("required", [])
+    assert set(data["properties"]["catalogScope"]["enum"]) == {"REVIEWED_LOCAL_CATALOG"}
     assert data["properties"]["items"] == {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}
 
 

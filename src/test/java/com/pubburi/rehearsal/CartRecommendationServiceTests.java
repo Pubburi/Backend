@@ -16,6 +16,17 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class CartRecommendationServiceTests {
+    @Test void stableCartKeepsLocalScopeAndOriginalAuthorityIdsAfterCandidateDeletion()throws Exception{
+        var authority=ReviewedLocalFixtures.catalog();var facts=ReviewedLocalFixtures.current();facts.remove(82);
+        var owned=new CartService.Cart(4,List.of(new CartService.Item(81,"Old",facts.get(81).currentProduct(),2)));
+        var before=new CartContextSnapshotService.Snapshot(owned,new OwnedContentSnapshotService.Snapshot(ReviewedLocalFixtures.preferences(),facts,null,FeedbackSignals.EMPTY));
+        when(source.current()).thenAnswer(ignored->Optional.of(authority));when(snapshots.read(CartContractTests.OWNER,authority.ids(),authority.businessSourceId())).thenReturn(before);
+        var response=json.createObjectNode().put("algorithm","b1-tfidf-minmax-v1").put("aggregation_algorithm","r07-max-reference-v1").put("fit_scope","request_catalog").put("profile_source","explicit_context_product_facts").put("reference_group_policy","exclude_all_known_reference_groups").put("representation_fitted",true).put("model_fingerprint","a".repeat(64)).put("min_relevance_score",0).put("evaluated_reference_count",1).put("eligible_count",0).put("excluded_reference_group_count",1).put("fallback_reason","no_eligible_products");
+        response.putArray("items");response.putArray("matches");var ref=response.putArray("references").addObject().put("product_id",81).put("sku_group","authored-group-1").put("state","available").put("supported_profile_tokens",1).put("unknown_profile_tokens",0).put("fallback_reason","no_eligible_products");ref.putArray("active_numeric_preferences").add("abv_percent").add("volume_ml");
+        when(provider.context(any(),eq(List.of(81)),any(),eq(List.of()),eq(4))).thenAnswer(inv->{JsonNode catalog=inv.getArgument(0);assertFalse(catalog.at("/1/available").booleanValue());assertTrue(catalog.at("/1/price_krw").isNull());return Optional.of(response);});
+        var result=service.recommend(CartContractTests.OWNER,new CartInput.Recommendation(4,4));assertEquals(Source.PROVIDER,result.source());assertEquals(CatalogScope.REVIEWED_LOCAL_CATALOG,result.catalogScope());assertTrue(result.products().isEmpty());assertEquals(ReferenceState.READY,result.references().get(0).state());
+        verify(snapshots,times(2)).read(CartContractTests.OWNER,authority.ids(),authority.businessSourceId());
+    }
     final ObjectMapper json=new ObjectMapper();final CartContextSnapshotService snapshots=mock(CartContextSnapshotService.class);
     final ContentCatalogSource source=mock(ContentCatalogSource.class);final ContextGateway provider=mock(ContextGateway.class);
     final CartRecommendationService service=new CartRecommendationService(snapshots,source,provider,json);
@@ -36,7 +47,7 @@ class CartRecommendationServiceTests {
     CartService.Cart cart(long version){return new CartService.Cart(version,List.of(new CartService.Item(10,"Old name",product(10),3),new CartService.Item(20,"Old other",product(20),1)));}
     @Test void quantitiesStayInCurrentReferenceMetadataAndNeverBecomeProviderWeights()throws Exception{
         var data=sample();var catalog=catalog(data.get("catalog"));var before=snapshot(catalog,cart(4),new FeedbackSignals(List.of(),List.of(50)),hard);
-        when(source.current()).thenReturn(Optional.of(catalog));when(snapshots.read(CartContractTests.OWNER,catalog.ids())).thenReturn(before);
+        when(source.current()).thenAnswer(ignored->Optional.of(catalog));when(snapshots.read(CartContractTests.OWNER,catalog.ids())).thenReturn(before);
         when(provider.context(catalog.catalog(),List.of(10,20),hard,List.of(50),4)).thenReturn(Optional.of(data.get("response")));
         var result=service.recommend(CartContractTests.OWNER,new CartInput.Recommendation(4,4));
         assertEquals(Source.PROVIDER,result.source());assertEquals(4,result.cartVersion());assertNull(result.unavailableReason());
@@ -45,7 +56,7 @@ class CartRecommendationServiceTests {
     }
     @Test void everyPostRemoteCartHardNegativeProductOrEpochChangeWinsOverUnavailable()throws Exception{
         var data=sample();var catalog=catalog(data.get("catalog"));var before=snapshot(catalog,cart(4),FeedbackSignals.EMPTY,hard);
-        when(source.current()).thenReturn(Optional.of(catalog));when(provider.context(any(),anyList(),any(),anyList(),anyInt())).thenReturn(Optional.empty());
+        when(source.current()).thenAnswer(ignored->Optional.of(catalog));when(provider.context(any(),anyList(),any(),anyList(),anyInt())).thenReturn(Optional.empty());
         var bounds=new PreferenceHardResponse(null,0,null,null);
         var productChanged=new LinkedHashMap<>(before.content().products());var old=productChanged.get(30);productChanged.put(30,new OwnedContentSnapshotService.Facts(json.createObjectNode().put("id",30),old.features(),old.currentProduct()));
         var contentChanged=new OwnedContentSnapshotService.Snapshot(before.content().preferences(),productChanged,null,FeedbackSignals.EMPTY);
@@ -57,7 +68,7 @@ class CartRecommendationServiceTests {
         assertEquals(HttpStatus.UNAUTHORIZED,assertThrows(ResponseStatusException.class,()->service.recommend(CartContractTests.OWNER,new CartInput.Recommendation(4,4))).getStatusCode());
     }
     @Test void unsupportedReferencesRemainCompleteAndNeverReachTheProvider()throws Exception{
-        var catalog=catalog(sample().get("catalog"));when(source.current()).thenReturn(Optional.of(catalog));
+        var catalog=catalog(sample().get("catalog"));when(source.current()).thenAnswer(ignored->Optional.of(catalog));
         var many=new ArrayList<CartService.Item>();for(int id=1;id<=21;id++)many.add(new CartService.Item(id,"Old",product(id),1));
         for(var entry:Map.of(new CartService.Cart(0,List.of()),UnavailableReason.EMPTY_CART,new CartService.Cart(1,many),UnavailableReason.REFERENCE_LIMIT,
                 new CartService.Cart(2,List.of(new CartService.Item(999,"Deleted",null,2))),UnavailableReason.DELETED_ITEMS,
@@ -72,10 +83,10 @@ class CartRecommendationServiceTests {
     @Test void expiredOrReplacedCatalogCannotKeepOldReadyReferenceClaims()throws Exception{
         var data=sample();var catalog=catalog(data.get("catalog"));var before=snapshot(catalog,cart(4),FeedbackSignals.EMPTY,hard);
         when(snapshots.read(CartContractTests.OWNER,catalog.ids())).thenReturn(before);when(provider.context(any(),anyList(),any(),anyList(),anyInt())).thenReturn(Optional.empty());
-        when(source.current()).thenReturn(Optional.of(catalog),Optional.empty());
+        when(source.current()).thenAnswer(ignored->Optional.of(catalog)).thenAnswer(ignored->Optional.empty());
         var expired=service.recommend(CartContractTests.OWNER,new CartInput.Recommendation(4,4));assertEquals(UnavailableReason.CATALOG_UNAVAILABLE,expired.unavailableReason());assertTrue(expired.references().stream().allMatch(ref->ref.state()==ReferenceState.CATALOG_UNAVAILABLE));
         var replacement=new ContentCatalogSource.Catalog(catalog.catalog(),catalog.bindings(),catalog.validUntil(),"b".repeat(64),catalog.scope());
-        when(source.current()).thenReturn(Optional.of(catalog),Optional.of(replacement));
+        when(source.current()).thenAnswer(ignored->Optional.of(catalog)).thenAnswer(ignored->Optional.of(replacement));
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,()->service.recommend(CartContractTests.OWNER,new CartInput.Recommendation(4,4))).getStatusCode());
     }
 }

@@ -75,6 +75,20 @@ class PostgreSQLLocalTests(unittest.TestCase):
             self.assertNotIn('PGPASSWORD',env);self.assertNotIn('PUBBURI_DB_ROOT_PASSWORD',env)
             self.assertNotIn('PUBBURI_CONTENT_CATALOG_PATH',env)
 
+    def test_reviewed_authority_pins_are_explicit_backend_only_settings(self):
+        reviewed = {'PUBBURI_REVIEWED_CATALOG_PATH':'private-authority.json',
+            'PUBBURI_REVIEWED_CATALOG_SHA256':'a'*64, 'PUBBURI_REVIEWED_MAPPING_PATH':'private-mapping.json',
+            'PUBBURI_REVIEWED_MAPPING_SHA256':'b'*64}
+        with patch.dict(os.environ, dict(PATH='/tools', **reviewed), clear=True):
+            inherited = pg.child_environments(self.env())
+            configured = pg.child_environments(dict(self.env(), **reviewed))
+        for environment in inherited:
+            self.assertFalse(set(reviewed) & environment.keys())
+        for key, value in reviewed.items():
+            self.assertEqual(configured[0][key], value)
+        for environment in configured[1:]:
+            self.assertFalse(set(reviewed) & environment.keys())
+
     def test_pg_destructive_commands_reject_before_env_or_docker(self):
         for name in ('init','install','down','reset-db'):
             with self.subTest(command=name), patch.object(local, 'environment') as environment, patch.object(pg, 'doctor') as doctor:

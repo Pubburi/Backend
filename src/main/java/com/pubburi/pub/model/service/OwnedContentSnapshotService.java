@@ -32,8 +32,9 @@ public class OwnedContentSnapshotService {
     private final CommentDao comments;
     private final ObjectMapper mapper;
     private final Optional<FeedbackSignals.Reader> feedback;
+    private final ProductSearchIdentityDao identity;
     public OwnedContentSnapshotService(UserPreferenceService preferences, ProductDao products, ProductFeatureDao features,
-            FavoriteDao favorites, CommentDao comments, ObjectMapper mapper, Optional<FeedbackSignals.Reader> feedback) {
+            FavoriteDao favorites, CommentDao comments, ObjectMapper mapper, Optional<FeedbackSignals.Reader> feedback,ProductSearchIdentityDao identity) {
         this.preferences = preferences;
         this.products = products;
         this.features = features;
@@ -41,6 +42,7 @@ public class OwnedContentSnapshotService {
         this.comments = comments;
         this.mapper = mapper;
         this.feedback = feedback;
+        this.identity=identity;
     }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Snapshot read(String id,String epoch,List<Integer> ids, List<Integer> activityIds){
@@ -49,6 +51,11 @@ public class OwnedContentSnapshotService {
 
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Snapshot read(String id,String epoch,List<Integer> ids, List<Integer> activityIds, boolean includeFeedback){
+        return read(id,epoch,ids,activityIds,includeFeedback,null);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Snapshot read(String id,String epoch,List<Integer> ids,List<Integer> activityIds,boolean includeFeedback,String businessSourceId){
+        namespace(businessSourceId);
         var owned=preferences.getOwned(id,epoch);
         if(owned==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Account session is no longer current");
         var snapshot = productFacts(ids);
@@ -69,6 +76,13 @@ public class OwnedContentSnapshotService {
     public Map<Integer, Facts> readProducts(List<Integer> ids) {
         return productFacts(ids).facts();
     }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Map<Integer,Facts> readProducts(List<Integer> ids,String businessSourceId){
+        namespace(businessSourceId);return productFacts(ids).facts();
+    }
+    private void namespace(String expected){
+        if(expected!=null && !expected.equals(identity.selectSourceId()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Reviewed catalog business namespace changed");
+    }
 
     private ProductProjection productFacts(List<Integer> ids) {
         if (ids.isEmpty()) return new ProductProjection(Map.of(), Map.of());
@@ -82,6 +96,8 @@ public class OwnedContentSnapshotService {
             header.setAromaTags(header.isAromaKnown()?productTags.stream().filter(tag->tag.kind().equals("AROMA")).map(tag->tag.tag()).sorted().toList():null);
             if(result.put(productId,new Facts(json(product),json(ProductFeaturesResponse.from(header)),product))!=null)throw new IllegalStateException("Duplicate current feature projection");
         }
+        // Missing features differ from a deleted business row: reviewed volume cannot be invented.
+        for(var entry:current.entrySet())result.putIfAbsent(entry.getKey(),new Facts(json(entry.getValue()),mapper.nullNode(),entry.getValue()));
         return new ProductProjection(current, Collections.unmodifiableMap(result));
     }
 
