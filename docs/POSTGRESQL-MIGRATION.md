@@ -136,7 +136,7 @@ python3 scripts/postgresql_schema.py reserve-identities
 
 DB02의 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md)는16표 전체 값/PK·
 7개 고수위·UUID/epoch·원문 JSON/receipt를 검수한다. DB03의 [기본 JPA 제공자](JPA-REHEARSAL.md)는
-43경로/55작업과 거래/계정 수명·취향/찜·기존 추천 caller를 제공한다. [로컬 실행](LOCAL-DEVELOPMENT.md)은
+49경로/63작업과 거래/계정 수명·취향/찜·기존 추천 caller를 제공한다. [로컬 실행](LOCAL-DEVELOPMENT.md)은
 완료 release를 준비된 소유 copied PG에 연결하며 schema/역할을 만들거나 DB를 초기화하지 않는다.
 명시 `activate-pg`는 검증한 복사본을 로컬 명령의 기본 대상으로 고정한다. 이는 기본 JAR의 PG 승격 및 전체
 DB 전환 인수와 별개이며 선택/입력/기동 실패에 MySQL로 자동 복귀하지 않는다.
@@ -152,7 +152,7 @@ DB05의 [Psycopg3 relay](SEARCH-RELAY.md)와 [공개 검색/필수조건 대체]
 않고 원본/과거 검증을 PG 성과로 바꾸지 않는다. UUID/ACK 초기화·재색인을 복구로 자동 실행하지 않는다.
 
 DB06의 [명시 쓰기 정지 백업/새 PG 복구](LOCAL-DEVELOPMENT.md#쓰기-정지-postgresql-복사본의-백업새-대상-복구)는
-import 이후 V5의19업무표(추천 피드백·비공개 notebook 포함)·Flyway/receipt·원문 JSON·epoch/source UUID/claim/ACK와 소비된7개 sequence를
+import 이후 V6의22업무표(추천 피드백·비공개 notebook·계정 cart/receipt 포함)·Flyway/receipt·원문 JSON·epoch/source UUID/claim/ACK와 소비된7개 sequence를
 보존한다. 기존 v1/v2 source artifact와 MySQL 원본은 수정하지 않는다. 복구 TX의 COMMIT 뒤 exact
 검수에 실패하면 이미 commit되었을 수 있는 새 소유 대상을 격리하고 완료 표시를 하지 않는다.
 기본 스택 전환·PG→MySQL 역이관·live/PITR/RPO0 완료로 확대하지 않는다.

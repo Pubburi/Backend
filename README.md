@@ -38,6 +38,7 @@
 | 명시취향 | 본인 전용 조회·전체 교체 API, 설문 상태·미입력/빈 선호·soft 목표/hard 범위 구분 |
 | 계정 찜 | 본인 전용 저장·해제·단건 상태·페이지 API, 반복 요청 멱등성·현재 상품 정보·삭제/재가입 격리 |
 | 비공개 기록 | PG의 본인 전용 TRIED/INTERESTED·선택 평점·맛/향·메모 CRUD, 원문·삭제 상품 기록 보존·동시 수정 충돌 검수 |
+| 계정 카트 | PG의 기기 간 보관·절대 수량/삭제·명시 비회원 병합, revision·UUID receipt로 동시 수정과 중복 합산/주문 방지 |
 | 기본 주류 목록 | 비개인 ID순 B0 연결, 전체 응답 대기·크기 제한, 현재 DB 재조회와 장애 대체 |
 | 본인 B1 DEMO API | 현재 본인 취향·명시 검수 container catalog의 B1/R04 호출, 현재 상품/조건 재확인·제공 불가 구분. 검수 DEMO 웹 연결 제공. 일반 서비스 catalog/최종 인수는 후속 |
 | 검색 문구 API | 본인 현재 취향·별도 검색 선택의 정확 조건 호출, 필수조건/수명 검증과 제공 불가 구분. 검색 화면 연결 제공 |
@@ -191,41 +192,45 @@ synchronized (session) {
 ```
 
 
-### 3. 전환 뒤 생긴 업무 쓰기와 소비된 ID까지 보존하는 복구
+### 3. 응답을 잃어도 장바구니와 주문의 중복 변경 막기
 
 #### 문제
 
-이관 당시의 snapshot을 다시 넣는 것만으로는 전환 뒤 생성한 주문·후기·계정 변경을 복구할 수 없습니다. 기존 복사 도구에서 나아가, 현재 업무 상태를 새 PostgreSQL에 복구하고 실제 API로 다시 읽는 경로를 구현했습니다. 로컬 전환·복구 실험이며 과거 운영 유실 사고를 수정한 사례는 아닙니다.
+로그인 장바구니 병합·주문을 설계하면서 응답 유실 뒤 같은 작업을 다시 시도하는 상황을 재현했습니다. 처리 기록 조회가 404인 직후 원래 요청이 완료되고, 새 요청 번호로 다시 병합하면 수량이 2개에서 4개가 됐습니다. 개발 중 통제한 재현이며 과거 운영 장애는 아닙니다.
 
 #### 원인
 
-행의 최댓값과 rollback에서 이미 소비한 sequence 값은 다릅니다. NOLOGIN도 기존 연결을 종료하지 않으며, 최소 권한 control에서는 다른 역할의 세션 종류가 가려질 수 있습니다. dump 복구의 COMMIT 성공과 그 뒤 값 검수의 성공도 별개여서, 프로세스 종료만으로 완료를 판단할 수 없습니다.
+404는 조회 순간 기록이 없다는 뜻이며 대기 중인 요청까지 취소하지 않습니다. 장바구니 revision만 확인해도 새 요청이 최신 값을 읽으면 중복 합산됩니다. 실제 주문 검증에서는 기존 DAO의 bulk SQL 뒤 `EntityManager.clear()`가 장바구니 엔티티를 분리해, 주문은 저장됐지만 남은 수량·revision이 반영되지 않는 별도 결함도 발견했습니다.
 
 #### 해결
 
-공개되는 DB·PID로 다른 연결을 거절하고 쓰기 역할의 중단을 확인합니다. 같은 읽기 snapshot에서 업무·제어 표를 잠그고 archive와 전체 값·원문·sequence 상태를 고정합니다. 승인한 V1–V3 구조와 정확한 archive 객체만 새 소유 대상에 복구하고, 후행 검수가 끝나야 완료 파일을 남깁니다. 결과 불확실·검수 실패 대상은 덮어쓰거나 자동 삭제하지 않습니다.
+계정 행 잠금 안에서 UUID·요청 내용 hash에 결속한 처리 기록을 revision보다 먼저 확인합니다. 결과가 불확실하면 명시적 확인 요청이 이미 적용된 `APPLIED`를 반환하거나, 미적용 UUID를 `RETIRED`로 영속 폐기해 뒤늦은 실행을 차단합니다. 주문·제출 수량 차감·처리 기록은 같은 트랜잭션에 두고, 주문 SQL 뒤에는 장바구니를 다시 잠금 조회해 관리 상태의 엔티티를 변경합니다.
 
 #### 결과
 
-소유한 PG18.6 검증 환경에서 **19표·7sequence**의 값·원문 JSON·PK·epoch·source UUID·claim/ACK를 독립 SQL로 대조했습니다. 복구 후 JPA 로그인·주문·원문 태그·찜, 새 상품의 API 쓰기와 실제 세 서버·production 웹의 조건 조회를 확인했습니다. rollback에서 소비한 ID는 재사용하지 않았습니다. 구현·실제 검증과 한계를 기록했으며 서비스 성능이나 전체 DB 전환 완료로 해석하지 않습니다.
+소유 PG18.6·실제 HTTP에서 폐기가 먼저 확정된 요청은 나중에 도착해도 409이며 수량·주문을 추가하지 않았습니다. 원래 실행이 먼저 끝나면 저장한 결과를 재사용했습니다. 주문 완료 뒤 응답만 잃는 상황에서도 주문은 하나이고, 3개 중 2개 주문 뒤 잔량은 1개였습니다. 처리 기록 저장에 실패하면 주문·차감·revision이 함께 rollback됐고, 백업 복구·JAR 재시작 뒤에도 폐기 상태가 유지됐습니다. 정확성 결과이며 서비스 성능이나 실사용자 오류율 수치는 아닙니다.
 
 #### 대체안/회고
 
-기존 이관 파일로 되돌리는 방식은 전환 뒤 쓰기를 담지 못하므로, 명시적으로 쓰기를 멈추고 새 대상에 복구하는 방식을 선택했습니다. 대신 중단 시간이 필요하고 다른 backend는 보수적으로 거절합니다. 신뢰한 source/control·고정 버전·소규모 로컬 복사본이 전제이며 hash·객체 목록은 서명이나 SQL sandbox가 아닙니다. 연속 백업·PITR·기본 스택 cutover는 별도 미완료 범위입니다.
+버튼 비활성화는 다른 기기와 재시도를 막지 못하고, 주문과 카트 삭제를 별도 HTTP로 나누면 중간 실패가 남습니다. 명시적 결과 확인과 같은 DB 트랜잭션을 선택했습니다. 대신 한 계정의 쓰기가 직렬화되고 처리 기록은 계정 수명 동안 보관됩니다. 미확정 상태에서 새 UUID로 자동 보상하지 않으며, 비회원 원본은 적용 확인 전까지 보존합니다.
 
 #### 코드
 
-```python
-with connect(env) as connection:
-    guard(connection, env)
-    stopped_roles(connection)
-    connection.execute('BEGIN ISOLATION LEVEL REPEATABLE READ')
-    actual = state(connection)
-    if json.loads(json.dumps(actual)) != manifest['state']:
-        reject('restored_state_mismatch')
-    connection.rollback()
-private.write_json(directory / 'completed.json', {'status': 'verified', 'manifest_sha256': expected,
-    'source_id': actual['source_id'], 'tables': len(actual['tables']), 'sequences': len(actual['sequences'])})
+```java
+@Transactional(isolation=Isolation.READ_COMMITTED)
+public Result resolve(SessionUser owner, UUID operation, CartInput.Resolve input) {
+    lockOwner(owner);
+    String hash = CartInput.intent(input.items(), input.orderType(), input.orderTable());
+    var receipt = matching(owner, operation, input.kind(), hash);
+    if (receipt != null)
+        return new Result(operation, true, receipt.status(),
+            view(owner.id(), carts.findById(owner.id()).orElseThrow()), receipt.orderId());
+    var cart = locked(owner);
+    expected(cart, cart.version());
+    advance(cart);
+    operations.saveAndFlush(JpaCartOperation.retire(owner.id(), operation, input.kind(), hash));
+    return new Result(operation, false, Status.RETIRED, view(owner.id(), cart), null);
+}
 ```
 
 

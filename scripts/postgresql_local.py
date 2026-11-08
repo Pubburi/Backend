@@ -287,7 +287,7 @@ def package(local, destination):
         write_json(directory / 'manifest.json', {'schema_version': 1, 'completed': True,
             'provider': 'JPA_POSTGRESQL_REHEARSAL', 'source_commit': commit,
             'source_files': before, 'jar_sha256': sha(directory / 'runtime.jar'),
-            'java_feature': 17, 'postgresql_version': '18.6', 'api_paths': 43, 'api_operations': 55,
+            'java_feature': 17, 'postgresql_version': '18.6', 'api_paths': 49, 'api_operations': 63,
             'preparation': 'database-independent-maven-verify'})
         print('PostgreSQL release packaged; no database was accessed or prepared.', flush=True)
 
@@ -300,7 +300,7 @@ def release(path, local):
     if (not isinstance(value, dict) or set(value) != keys or value['schema_version'] != 1
             or value['completed'] is not True or value['provider'] != 'JPA_POSTGRESQL_REHEARSAL'
             or value['java_feature'] != 17 or value['postgresql_version'] != '18.6'
-            or value['api_paths'] != 43 or value['api_operations'] != 55
+            or value['api_paths'] != 49 or value['api_operations'] != 63
             or value['preparation'] != 'database-independent-maven-verify'
             or not re.fullmatch(r'[0-9a-f]{40}', value['source_commit'])
             or value['source_files'] != source_files(local)):
@@ -434,7 +434,7 @@ def start(local, args):
                     if pending:
                         time.sleep(0.25)
                 local.probe('backend', 'http://127.0.0.1:' + env['PUBBURI_FRONTEND_PORT'] + '/api/products?page=1&size=1')
-            print('PostgreSQL applications ready (43 paths / 55 operations); database retained on every exit.', flush=True)
+            print('PostgreSQL applications ready (49 paths / 63 operations); database retained on every exit.', flush=True)
             if args.command == 'up':
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)

@@ -19,6 +19,8 @@ final class TargetSchemaContract {
         verifyEmptyFeedback(connection);
         expected.add("t_user_notebook");
         verifyEmptyNotebook(connection);
+        expected.addAll(List.of("t_user_cart","t_user_cart_item","t_user_cart_operation"));
+        verifyEmptyCart(connection);
         if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
         if(version==2 && !reviewTags) throw new IllegalArgumentException("postgresql_v2_review_tags_required");
         if(reviewTags) {expected.add("t_comment_taste_tag");reviewTags(connection,version==1);}
@@ -27,7 +29,8 @@ final class TargetSchemaContract {
         if(!indexes.containsAll(SchemaIndexContract.expected())
                 || !indexes.contains(new SchemaIndexContract.Key("t_user_recommendation_feedback",false,"product_id:A:-"))
                 || !indexes.contains(new SchemaIndexContract.Key("t_user_notebook",true,"user_id:A:-,product_id:A:L"))
-                || !indexes.contains(new SchemaIndexContract.Key("t_user_notebook",false,"product_id:A:L"))) {
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_notebook",false,"product_id:A:L"))
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_cart_item",false,"current_product_id:A:L"))) {
             throw new IllegalArgumentException("postgresql_import_indexes_changed");
         }
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT c.collprovider,c.collisdeterministic,c.colllocale FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace WHERE n.nspname='pubburi' AND c.collname='pubburi_ci'")) {
@@ -86,7 +89,28 @@ final class TargetSchemaContract {
         if(!"id".equals(primary.get("t_user_notebook")))throw new IllegalArgumentException("postgresql_notebook_primary_changed");
         expectedForeign.add("t_user_notebook\tuser_id\tt_user\tid\tCASCADE");
         expectedForeign.add("t_user_notebook\tproduct_id\tt_product\tid\tSET NULL");
+        if(!"user_id".equals(primary.get("t_user_cart")) || !"user_id,product_id".equals(primary.get("t_user_cart_item"))
+                || !"user_id,operation_id".equals(primary.get("t_user_cart_operation")))throw new IllegalArgumentException("postgresql_cart_primary_changed");
+        expectedForeign.add("t_user_cart\tuser_id\tt_user\tid\tCASCADE");
+        expectedForeign.add("t_user_cart_item\tuser_id\tt_user_cart\tuser_id\tCASCADE");
+        expectedForeign.add("t_user_cart_item\tcurrent_product_id\tt_product\tid\tSET NULL");
+        expectedForeign.add("t_user_cart_operation\tuser_id\tt_user_cart\tuser_id\tCASCADE");
         if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("postgresql_import_foreign_changed");
+    }
+    private static void verifyEmptyCart(Connection connection)throws SQLException{
+        var shapes=Map.of(
+            "t_user_cart","user_id:character varying(100):0:false,version:bigint:0:false,updated_at:timestamp(6) with time zone:0:false",
+            "t_user_cart_item","user_id:character varying(100):0:false,product_id:integer:0:false,current_product_id:integer:0:true,product_name:character varying(100):0:false,quantity:integer:0:false",
+            "t_user_cart_operation","user_id:character varying(100):0:false,operation_id:uuid:0:false,kind:character varying(8):0:false,status:character varying(7):0:false,intent_hash:character(64):0:false,order_id:integer:0:true");
+        for(String table:List.of("t_user_cart","t_user_cart_item","t_user_cart_operation")){
+            try(var s=connection.createStatement()){
+                s.execute("LOCK TABLE pubburi."+table+" IN ACCESS SHARE MODE");
+                try(var rows=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi."+table+")")){if(!rows.next() || rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_cart_not_empty");}
+            }
+            try(var s=connection.prepareStatement("SELECT string_agg(a.attname||':'||format_type(a.atttypid,a.atttypmod)||':'||a.attndims::text||':'||(NOT a.attnotnull)::text,',' ORDER BY a.attnum) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relname=? AND a.attnum>0 AND NOT a.attisdropped")){
+                s.setString(1,table);try(var rows=s.executeQuery()){if(!rows.next() || !shapes.get(table).equals(rows.getString(1)))throw new IllegalArgumentException("postgresql_cart_shape_changed");}
+            }
+        }
     }
     private static void verifyEmptyNotebook(Connection connection)throws SQLException{
         try(var s=connection.createStatement()){

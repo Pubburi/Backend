@@ -29,6 +29,8 @@ FEEDBACK_SCHEMA_SHA256 = '89b8239209751866014dcb687c85664628db1c92e9b36d1638972c
 FEEDBACK_PRIMARY = dict(PRIMARY, t_user_recommendation_feedback='user_id,product_id')
 NOTEBOOK_SCHEMA_SHA256 = 'e0cd18858c5c971c0f1ab391707b895d384e58e08642949656338d98e3b46d95'
 NOTEBOOK_PRIMARY = dict(FEEDBACK_PRIMARY, t_user_notebook='id')
+CART_SCHEMA_SHA256 = '959bcbc3487b38d7f63477eb44165968a3200bf673e59707e1a9c36079103db1'
+CART_PRIMARY = dict(NOTEBOOK_PRIMARY, t_user_cart='user_id',t_user_cart_item='user_id,product_id',t_user_cart_operation='user_id,operation_id')
 
 
 def known_check(row):
@@ -38,7 +40,9 @@ def known_check(row):
               ('t_user_preference','ck_preference_status','survey_status',('NOT_STARTED','SKIPPED','COMPLETED')),
               ('t_user_preference_value','ck_preference_value_kind','kind',('CATEGORY','TASTE','AROMA')),
               ('t_user_recommendation_feedback','ck_recommendation_feedback','feedback',('MATCHED','NOT_INTERESTED')),
-              ('t_user_notebook','ck_notebook_experience','experience',('TRIED','INTERESTED')))
+              ('t_user_notebook','ck_notebook_experience','experience',('TRIED','INTERESTED')),
+              ('t_user_cart_operation','ck_cart_operation_kind','kind',('MERGE','CHECKOUT')),
+              ('t_user_cart_operation','ck_cart_operation_status','status',('APPLIED','RETIRED')))
     for table,name,column,values in variants:
         prefix='CHECK ('+column+'::text = ANY (ARRAY['
         original=prefix+', '.join("'"+v+"'::character varying" for v in values)+']::text[]))'
@@ -110,7 +114,7 @@ def stopped_roles(connection):
 def inventory(connection):
     relations = dict(connection.execute("SELECT c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relkind IN ('r','S','v','m','f','p')").fetchall())
     if relations not in tuple(dict({name: 'r' for name in primary}, **{name: 'S' for name in SEQUENCES})
-                              for primary in (PRIMARY, FEEDBACK_PRIMARY, NOTEBOOK_PRIMARY)):
+                              for primary in (PRIMARY, FEEDBACK_PRIMARY, NOTEBOOK_PRIMARY, CART_PRIMARY)):
         reject('schema_inventory_rejected')
     reject_unversioned_objects(connection)
     if connection.execute("""SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -177,6 +181,8 @@ def schema_primary(shape, error):
         return FEEDBACK_PRIMARY
     if fingerprint == NOTEBOOK_SCHEMA_SHA256:
         return NOTEBOOK_PRIMARY
+    if fingerprint == CART_SCHEMA_SHA256:
+        return CART_PRIMARY
     reject(error)
 
 

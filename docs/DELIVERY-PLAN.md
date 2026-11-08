@@ -39,7 +39,7 @@ AWS는 후속 사용자 지시 전까지 연결하지 않고 [로컬 개발](LOC
 Python relay는 Psycopg3다. [DB01–DB06 계약](POSTGRESQL-MIGRATION.md)을 우선 적용하며
 11월22일까지 전환과 보존 재인수를 목표로 한다. 기존 MySQL/MyBatis는 이관 전 기준/복사 검증용으로
 보존하고 기술 선정 대기로 두지 않는다. 현재 [source 추출](SOURCE-SNAPSHOT.md)·[승인 import](SOURCE-IMPORT.md),
-[기본 JPA43경로/55작업](JPA-REHEARSAL.md)과 [소유 PG 로컬 실행](LOCAL-DEVELOPMENT.md)을 제공한다.
+[기본 JPA49경로/63작업](JPA-REHEARSAL.md)과 [소유 PG 로컬 실행](LOCAL-DEVELOPMENT.md)을 제공한다.
 기본 Maven JAR은 PG/JPA다. `tools/mysql-baseline`의 명시 MySQL/MyBatis와 실제 원본은
 이관 전 기준으로 보존하며 전체 전환·쓰기 중단/역이관·rollback·서비스 재인수는
 미완료다. 부분 API·fixture 통과를 DB03–06 전체 완료로 세지 않는다.
