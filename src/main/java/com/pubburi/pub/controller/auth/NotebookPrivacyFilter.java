@@ -18,7 +18,8 @@ public class NotebookPrivacyFilter extends OncePerRequestFilter {
     @Override protected boolean shouldNotFilter(HttpServletRequest request){
         String path=UrlPathHelper.defaultInstance.getPathWithinApplication(request);
         return !path.equals("/api/users/me/notebook") && !path.startsWith("/api/users/me/notebook/")
-            && !path.equals("/api/users/me/cart") && !path.startsWith("/api/users/me/cart/");
+            && !path.equals("/api/users/me/cart") && !path.startsWith("/api/users/me/cart/")
+            && !path.equals("/api/users/me/notifications") && !path.startsWith("/api/users/me/notifications/");
     }
     @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)throws ServletException,IOException{
         response.setHeader("Cache-Control","private, no-store");response.addHeader("Vary","Cookie");

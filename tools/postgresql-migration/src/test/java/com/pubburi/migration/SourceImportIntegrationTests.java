@@ -37,7 +37,7 @@ class SourceImportIntegrationTests {
         for(var t:SourceContract.TABLES)assertEquals(0,number(c,"SELECT count(*) FROM pubburi."+t.name()),"all business rows must roll back");
         assertEquals(0,number(c,"SELECT count(*) FROM pubburi.migration_source_receipt"));
     }
-    static void schema(Map<String,String> env)throws Exception{assertEquals(6,PostgresSchemaTool.run("migrate",env));}
+    static void schema(Map<String,String> env)throws Exception{assertEquals(7,PostgresSchemaTool.run("migrate",env));}
     @Test void realSourceCopiesEveryValueRecordsReceiptAndRejectsReplay() throws Exception {
         var env=env("FRESH");
         var legacy=PostgresSchemaTool.Settings.from(env);PostgresSchemaTool.guard(legacy);
@@ -50,9 +50,15 @@ class SourceImportIntegrationTests {
             assertThrows(org.flywaydb.core.api.exception.FlywayValidateException.class,()->SourceImportTool.run(env));
             empty(c);assertEquals(before,sequences(c));
         }
-        assertEquals(4,PostgresSchemaTool.run("migrate",env));
+        assertEquals(5,PostgresSchemaTool.run("migrate",env));
         assertEquals(source.report(),SourceImportTool.run(env));assertEquals(source.report(),SourceImportTool.verify(env));
         try(Connection c=settings.connect();var sql=c.createStatement()) {
+            sql.execute("INSERT INTO pubburi.t_user_notification(id,user_id,event_type,event_id,order_id) SELECT '00000000-0000-4000-8000-000000000007'::uuid,id,'ORDER_COMPLETED',1,1 FROM pubburi.t_user LIMIT 1");
+            try {
+                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_import_notifications_not_empty",error.getMessage());
+                assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
+                assertEquals(1,number(c,"SELECT count(*) FROM pubburi.t_user_notification"));
+            } finally {sql.execute("DELETE FROM pubburi.t_user_notification WHERE id='00000000-0000-4000-8000-000000000007'::uuid");}
             sql.execute("INSERT INTO pubburi.t_user_cart(user_id) SELECT id FROM pubburi.t_user LIMIT 1");
             sql.execute("INSERT INTO pubburi.t_user_cart_item(user_id,product_id,current_product_id,product_name,quantity) SELECT c.user_id,p.id,p.id,p.name,2 FROM pubburi.t_user_cart c CROSS JOIN pubburi.t_product p LIMIT 1");
             sql.execute("INSERT INTO pubburi.t_user_cart_operation(user_id,operation_id,kind,intent_hash) SELECT user_id,'00000000-0000-4000-8000-000000000006'::uuid,'MERGE',repeat('a',64) FROM pubburi.t_user_cart");

@@ -1,5 +1,9 @@
 package com.pubburi.pub.controller.rest;
 
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.pubburi.pub.model.service.AccountNotificationActions;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -41,10 +45,16 @@ public class CommentRestController {
 
 	private final CommentService commentService;
 	private final AccessGuard accessGuard;
+	private final Optional<AccountNotificationActions> notifications;
 
 	public CommentRestController(CommentService commentService, AccessGuard accessGuard) {
+		this(commentService,accessGuard,Optional.empty());
+	}
+	@Autowired
+	public CommentRestController(CommentService commentService, AccessGuard accessGuard, Optional<AccountNotificationActions> notifications) {
 		this.commentService = commentService;
 		this.accessGuard = accessGuard;
+		this.notifications = notifications;
 	}
 
 	@GetMapping("/products/{productId}/comments")
@@ -107,6 +117,10 @@ public class CommentRestController {
 
 	@DeleteMapping("/comments/{id}")
 	public ResponseEntity<ApiResponse<Boolean>> deleteComment(@PathVariable int id, HttpSession session) {
+		if (notifications.isPresent()) {
+			notifications.get().removeComment(id,accessGuard.requireLogin(session));
+			return ResponseEntity.ok(ApiResponse.ok(true));
+		}
 		Comment existing = findComment(id);
 		accessGuard.requireSelfOrAdmin(session, existing.getUserId());
 		if (commentService.removeComment(id) <= 0) {

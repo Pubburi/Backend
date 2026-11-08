@@ -17,7 +17,7 @@ class SourceImportTypedIntegrationTests {
             assertThrows(org.flywaydb.core.api.exception.FlywayValidateException.class,()->SourceImportTool.run(env));
             SourceImportIntegrationTests.empty(c);assertEquals(before,SourceImportIntegrationTests.sequences(c));
         }
-        assertEquals(4,PostgresSchemaTool.run("migrate",env));
+        assertEquals(5,PostgresSchemaTool.run("migrate",env));
         try(Connection c=settings.connect()) {
             var before=SourceImportIntegrationTests.sequences(c);
             SourceImportIntegrationTests.failure(c,"t_comment_taste_tag","ci_import_review_tag_failure",false);
