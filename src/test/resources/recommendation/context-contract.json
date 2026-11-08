@@ -1,0 +1,248 @@
+{
+  "catalog": [
+    {
+      "product_id": 10,
+      "sku_group": "ref-a",
+      "available": true,
+      "category": "authored-beer",
+      "price_krw": 1000,
+      "abv_percent": 5,
+      "volume_ml": null,
+      "taste_tags": null,
+      "aroma_tags": null
+    },
+    {
+      "product_id": 20,
+      "sku_group": "ref-b",
+      "available": true,
+      "category": "authored-wine",
+      "price_krw": 1500,
+      "abv_percent": 12,
+      "volume_ml": null,
+      "taste_tags": null,
+      "aroma_tags": null
+    },
+    {
+      "product_id": 30,
+      "sku_group": "candidate-a",
+      "available": true,
+      "category": "authored-beer",
+      "price_krw": 1500,
+      "abv_percent": 5,
+      "volume_ml": null,
+      "taste_tags": null,
+      "aroma_tags": null
+    },
+    {
+      "product_id": 40,
+      "sku_group": "candidate-b",
+      "available": true,
+      "category": "authored-wine",
+      "price_krw": 1700,
+      "abv_percent": 12,
+      "volume_ml": null,
+      "taste_tags": null,
+      "aroma_tags": null
+    },
+    {
+      "product_id": 50,
+      "sku_group": "excluded",
+      "available": true,
+      "category": "authored-beer",
+      "price_krw": 1800,
+      "abv_percent": 5,
+      "volume_ml": null,
+      "taste_tags": null,
+      "aroma_tags": null
+    },
+    {
+      "product_id": 60,
+      "sku_group": "expensive",
+      "available": true,
+      "category": "authored-wine",
+      "price_krw": 2500,
+      "abv_percent": 12,
+      "volume_ml": null,
+      "taste_tags": null,
+      "aroma_tags": null
+    }
+  ],
+  "response": {
+    "algorithm": "b1-tfidf-minmax-v1",
+    "aggregation_algorithm": "r07-max-reference-v1",
+    "fit_scope": "request_catalog",
+    "profile_source": "explicit_context_product_facts",
+    "reference_group_policy": "exclude_all_known_reference_groups",
+    "representation_fitted": true,
+    "model_fingerprint": "61f2c11897707b517e3cec148a0e038b6a0fc415309b8db194b77af77de3f4fd",
+    "min_relevance_score": 0.0,
+    "references": [
+      {
+        "product_id": 10,
+        "sku_group": "ref-a",
+        "state": "available",
+        "supported_profile_tokens": 1,
+        "unknown_profile_tokens": 0,
+        "active_numeric_preferences": [
+          "abv_percent"
+        ],
+        "fallback_reason": null
+      },
+      {
+        "product_id": 20,
+        "sku_group": "ref-b",
+        "state": "available",
+        "supported_profile_tokens": 1,
+        "unknown_profile_tokens": 0,
+        "active_numeric_preferences": [
+          "abv_percent"
+        ],
+        "fallback_reason": null
+      }
+    ],
+    "evaluated_reference_count": 2,
+    "eligible_count": 2,
+    "excluded_reference_group_count": 2,
+    "items": [
+      {
+        "product_id": 30,
+        "score": 1.0,
+        "reasons": [
+          "available",
+          "price_within_range",
+          "content_similarity"
+        ],
+        "contributions": [
+          {
+            "component": "abv_percent",
+            "feature": "abv_percent",
+            "contribution": 0.5
+          },
+          {
+            "component": "text",
+            "feature": "category:authored-beer",
+            "contribution": 0.5
+          }
+        ],
+        "explanation": {
+          "version": "r04-facts-v1",
+          "basis": "content_similarity",
+          "comparison": {
+            "kind": "reference_product",
+            "product_id": 10
+          },
+          "score_evidence": [
+            {
+              "kind": "abv_comparison",
+              "label": "도수 비교 근거",
+              "actual_value": 5.0,
+              "target_value": 5.0,
+              "unit": "vol%",
+              "contribution": 0.5
+            },
+            {
+              "kind": "category_match",
+              "label": "주종 일치",
+              "actual_value": "authored-beer",
+              "target_value": "authored-beer",
+              "contribution": 0.5
+            }
+          ],
+          "total_positive_contributions": 2,
+          "score_evidence_truncated": false,
+          "filter_evidence": [
+            {
+              "kind": "availability_filter",
+              "label": "입력 가용 조건 충족",
+              "actual_value": true
+            },
+            {
+              "kind": "price_filter",
+              "label": "입력 가격 조건 충족",
+              "actual_value": 1500,
+              "minimum": 1000,
+              "maximum": 2000,
+              "unit": "KRW"
+            }
+          ],
+          "fallback_reason": null
+        }
+      },
+      {
+        "product_id": 40,
+        "score": 1.0,
+        "reasons": [
+          "available",
+          "price_within_range",
+          "content_similarity"
+        ],
+        "contributions": [
+          {
+            "component": "abv_percent",
+            "feature": "abv_percent",
+            "contribution": 0.5
+          },
+          {
+            "component": "text",
+            "feature": "category:authored-wine",
+            "contribution": 0.5
+          }
+        ],
+        "explanation": {
+          "version": "r04-facts-v1",
+          "basis": "content_similarity",
+          "comparison": {
+            "kind": "reference_product",
+            "product_id": 20
+          },
+          "score_evidence": [
+            {
+              "kind": "abv_comparison",
+              "label": "도수 비교 근거",
+              "actual_value": 12.0,
+              "target_value": 12.0,
+              "unit": "vol%",
+              "contribution": 0.5
+            },
+            {
+              "kind": "category_match",
+              "label": "주종 일치",
+              "actual_value": "authored-wine",
+              "target_value": "authored-wine",
+              "contribution": 0.5
+            }
+          ],
+          "total_positive_contributions": 2,
+          "score_evidence_truncated": false,
+          "filter_evidence": [
+            {
+              "kind": "availability_filter",
+              "label": "입력 가용 조건 충족",
+              "actual_value": true
+            },
+            {
+              "kind": "price_filter",
+              "label": "입력 가격 조건 충족",
+              "actual_value": 1700,
+              "minimum": 1000,
+              "maximum": 2000,
+              "unit": "KRW"
+            }
+          ],
+          "fallback_reason": null
+        }
+      }
+    ],
+    "matches": [
+      {
+        "product_id": 30,
+        "reference_product_id": 10
+      },
+      {
+        "product_id": 40,
+        "reference_product_id": 20
+      }
+    ],
+    "fallback_reason": null
+  }
+}

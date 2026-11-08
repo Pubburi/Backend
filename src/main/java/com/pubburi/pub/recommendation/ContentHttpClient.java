@@ -12,12 +12,12 @@ import com.pubburi.pub.controller.response.UserPreferencesResponse;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse.ActivityEvidence;
 
 /** Fixed B1 routes and bounded transport. Does not fit, score, retry or forward credentials. */
-public final class ContentHttpClient implements ContentGateway, SimilarProductGateway {
+public final class ContentHttpClient implements ContentGateway, SimilarProductGateway, ContextGateway {
     public static final int MAX_REQUEST_BYTES=524288,MAX_RESPONSE_BYTES=262144;
-    private final HttpClient client;private final URI endpoint, similarEndpoint, feedbackEndpoint;private final Duration deadline;private final ObjectMapper mapper;
+    private final HttpClient client;private final URI endpoint, similarEndpoint, feedbackEndpoint,contextEndpoint;private final Duration deadline;private final ObjectMapper mapper;
     public ContentHttpClient(URI origin,Duration connectTimeout,Duration deadline,ObjectMapper mapper){
         if(!Set.of("http","https").contains(origin.getScheme()) || origin.getHost()==null || origin.getUserInfo()!=null || origin.getQuery()!=null || origin.getFragment()!=null || !(origin.getPath().isEmpty() || origin.getPath().equals("/")) || connectTimeout.isNegative() || connectTimeout.isZero() || deadline.isNegative() || deadline.isZero())throw new IllegalArgumentException("Recommendation origin and positive timeouts are required");
-        client=HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER).build();endpoint=origin.resolve("/v1/recommendations/content");similarEndpoint=origin.resolve("/v1/recommendations/similar");feedbackEndpoint=origin.resolve("/v1/recommendations/feedback");this.deadline=deadline;
+        client=HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER).build();endpoint=origin.resolve("/v1/recommendations/content");similarEndpoint=origin.resolve("/v1/recommendations/similar");feedbackEndpoint=origin.resolve("/v1/recommendations/feedback");contextEndpoint=origin.resolve("/v1/recommendations/context");this.deadline=deadline;
         this.mapper=mapper.copy().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.mapper.getFactory().setStreamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(20).maxStringLength(5000).maxNameLength(128).maxDocumentLength(MAX_RESPONSE_BYTES).build());
     }
@@ -51,6 +51,18 @@ public final class ContentHttpClient implements ContentGateway, SimilarProductGa
 
     @Override public Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit) {
         return post(similarEndpoint, Map.of("catalog", catalog, "reference_product_id", referenceId, "limit", limit));
+    }
+
+    @Override public Optional<JsonNode> context(JsonNode catalog,List<Integer> references,
+            UserPreferencesResponse.PreferenceHardResponse hard,List<Integer> excluded,int limit) {
+        var constraints=new LinkedHashMap<String,Object>();
+        constraints.put("exclude_product_ids",excluded);
+        if(hard.minPriceKrw()!=null)constraints.put("min_price_krw",hard.minPriceKrw());
+        if(hard.maxPriceKrw()!=null)constraints.put("max_price_krw",hard.maxPriceKrw());
+        if(hard.minAbvPercent()!=null)constraints.put("min_abv_percent",hard.minAbvPercent());
+        if(hard.maxAbvPercent()!=null)constraints.put("max_abv_percent",hard.maxAbvPercent());
+        return post(contextEndpoint,Map.of("catalog",catalog,"reference_product_ids",references,
+            "constraints",constraints,"limit",limit,"min_relevance_score",0,"include_explanations",true));
     }
 
     private Optional<JsonNode> post(URI endpoint, Map<String, Object> fields) {

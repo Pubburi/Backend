@@ -31,6 +31,9 @@ products=[]이며 기존 REVIEWED_DEMO를 유지한다. 새 family scope는 승�
 
 ## 상품 상세의 유사 상품
 
+현재 계정 카트를 기준으로 한 별도 [맥락 추천 계약](CART.md#현재-카트의-검수-맥락-추천)은
+카트 revision/현재 업무 사실·hard 조건·관심 없음에 결속한다. 이 본인 취향 요청을 카트 ID로 대체하지 않는다.
+
 공개 `GET /api/products/{id}/similar`는 현재 기준 상품에 대해 최대 4개의 `ProductResponse`를
 ApiResponse `data.items`에 반환한다. 존재하지 않는 기준은 404다. 응답 캐시는 `no-store`다.
 호출은 기존 container `REVIEWED_DEMO`의 검수 상품에만 한정한다. family-browse 전용이나 미승인

@@ -76,6 +76,7 @@
     <build>
         <sourceDirectory>../../src/main/java</sourceDirectory>
         <resources><resource><directory>src/main/resources</directory></resource><resource><directory>../../src/main/resources</directory><excludes><exclude>application.properties</exclude></excludes></resource></resources>
+        <testResources><testResource><directory>../../src/test/resources</directory></testResource></testResources>
         <plugins>
             <plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.6.1</version><executions><execution><id>shared-contract-tests</id><phase>generate-test-sources</phase><goals><goal>add-test-source</goal></goals><configuration><sources><source>../../src/test/java</source></sources></configuration></execution></executions></plugin>
             <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><excludes><exclude>com/pubburi/rehearsal/**</exclude></excludes><testExcludes><testExclude>com/pubburi/rehearsal/**</testExclude></testExcludes></configuration></plugin>

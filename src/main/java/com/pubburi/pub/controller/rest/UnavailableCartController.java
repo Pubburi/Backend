@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.*;
 public class UnavailableCartController {
     @GetMapping("/api/users/me/cart")
     public ResponseEntity<ApiResponse<Void>> unsupported(){return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error(ApiError.of("CART_NOT_SUPPORTED","Account cart is not available on this provider")));}
+    @PostMapping("/api/users/me/cart/recommendations")
+    public ResponseEntity<ApiResponse<Void>> recommendationsUnsupported(){return unsupported();}
     @RequestMapping(value={"/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/operations/{operationId}/resolve"},method={RequestMethod.POST,RequestMethod.PUT,RequestMethod.DELETE})
     public ResponseEntity<ApiResponse<Void>> unavailable(){return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error(ApiError.of("NOT_FOUND","Account cart is not available on this provider")));}
 }

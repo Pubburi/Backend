@@ -38,6 +38,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         paths["/api/users/me/cart/items/{productId}"]={"put":{},"delete":{}}
         paths["/api/users/me/cart/merge"]={"post":{}}
         paths["/api/users/me/cart/checkout"]={"post":{}}
+        paths["/api/users/me/cart/recommendations"]={"post":{}}
         paths["/api/users/me/cart/operations/{operationId}"]={"get":{}}
         paths["/api/users/me/cart/operations/{operationId}/resolve"]={"post":{}}
         paths["/api/users/me/notifications"]={"get":{}}
@@ -62,7 +63,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
 
     def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
-        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 52, "api_operations": 66})
+        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 53, "api_operations": 67})
         missing = copy.deepcopy(spec)
         missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
         extra_method = copy.deepcopy(spec)
