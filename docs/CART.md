@@ -60,7 +60,8 @@ fresh CAS409는 입력을 보존한 채 현재 cart를 조회하고 명시적으
 GET은 수량/revision/주문/receipt를 변경하지 않으며 DB 실패를404로 바꾸지 않는다. 부재가 확인돼도
 새 계정 수명에 POST를 자동 재생하거나 새 UUID로 자동 보상하지 않고 명시 실행을 요구한다.
 
-회원→cart 잠금·epoch 재검수 후 작업하며 상품은 ID순으로 잠근다. checkout은 기존 주문 생성의
+GET은 짧은 RR이며 쓰기는 READ_COMMITTED에서 회원→cart 잠금·epoch 재검수 후 작업한다.
+잠금 대기 뒤 receipt/revision의 최신 commit을 확인하며 상품은 ID순으로 잠근다. checkout은 기존 주문 생성의
 서버 가격 snapshot·업무 이벤트/스탬프와 제출한 수량의 카트 소비·receipt를 같은 TX에 묶는다.
 실패하면 전부 rollback하며 전송하지 않은 카트 수량을 지우지 않는다. clear 뒤에도 header/revision과
 receipt를 회원 수명까지 보존해 ACK 유실의 재시도가 비운 카트를 부활시키지 않는다.

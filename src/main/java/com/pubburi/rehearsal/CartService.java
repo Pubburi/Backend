@@ -41,7 +41,7 @@ public class CartService {
         current(owner);var receipt=operations.findById(new JpaCartOperation.Key(owner.id(),operation)).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Cart operation not found"));
         return new Result(operation,true,view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
     }
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Cart put(SessionUser owner,int productId,CartInput.Quantity input){
         lockOwner(owner);var cart=locked(owner);expected(cart,input.expectedVersion());var all=lines.owned(owner.id());
         var product=products.selectByIdForUpdate(productId);if(product==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Product not found");
@@ -50,13 +50,13 @@ public class CartService {
         else{if(line.currentProductId()==null)throw conflict("Cart product is no longer available");line.quantity(input.quantity());}
         lines.saveAndFlush(line);advance(cart);return view(owner.id(),cart);
     }
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Cart remove(SessionUser owner,Integer productId,long version){
         lockOwner(owner);var cart=locked(owner);expected(cart,version);
         if(productId==null)lines.removeAll(owner.id());else lines.findById(new JpaCartItem.Key(owner.id(),productId)).ifPresent(lines::delete);
         lines.flush();advance(cart);return view(owner.id(),cart);
     }
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result merge(SessionUser owner,CartInput.Merge input){
         lockOwner(owner);String hash=CartInput.intent(input.items(),null,null);var replay=replay(owner,input.operationId(),Kind.MERGE,hash);if(replay!=null)return replay;
         var cart=locked(owner);expected(cart,input.expectedVersion());var all=lines.owned(owner.id());var owned=new HashMap<Integer,JpaCartItem>();for(var row:all)owned.put(row.productId(),row);
@@ -74,7 +74,7 @@ public class CartService {
         lines.flush();advance(cart);operations.saveAndFlush(JpaCartOperation.create(owner.id(),input.operationId(),Kind.MERGE,hash,null));
         return new Result(input.operationId(),false,view(owner.id(),cart),null);
     }
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result checkout(SessionUser owner,CartInput.Checkout input){
         lockOwner(owner);String hash=CartInput.intent(input.items(),input.orderType(),input.orderTable());var replay=replay(owner,input.operationId(),Kind.CHECKOUT,hash);if(replay!=null)return replay;
         var cart=locked(owner);expected(cart,input.expectedVersion());var owned=new HashMap<Integer,JpaCartItem>();for(var row:lines.owned(owner.id()))owned.put(row.productId(),row);
