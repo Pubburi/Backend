@@ -1,6 +1,7 @@
 package com.pubburi.rehearsal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.pubburi.pub.controller.api.*;
 import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.model.dao.*;
@@ -17,12 +18,12 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class NotificationService implements AccountNotificationActions {
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    @io.swagger.v3.oas.annotations.media.Schema(name="AccountNotificationEntry")
+    @Schema(name="AccountNotificationEntry")
     public record Entry(UUID id,JpaNotification.Type type,long createdAt,
-            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Long readAt,
-            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Integer orderId,
-            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Integer productId,
-            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) String productName,boolean targetAvailable){ }
+            @Schema(types={"integer","null"}) Long readAt,
+            @Schema(types={"integer","null"}) Integer orderId,
+            @Schema(types={"integer","null"}) Integer productId,
+            @Schema(types={"string","null"}) String productName,boolean targetAvailable){ }
     public record Page(List<Entry> items,int page,int size,int total,int totalPages,boolean hasNext,int unreadCount){ }
     public record ReadItem(UUID id,long readAt){ }
     public record ReadResult(List<ReadItem> items,int unreadCount){ }

@@ -24,6 +24,8 @@ class JpaNotificationOpenApiIntegrationTests extends NotificationTestSupport {
             var retained=request(owner,"GET","/api/users/me/notebook/"+note,null,header);assertEquals(200,retained.status());
             var notebook=retained.body().path("data");var notifications=page(owner,user);assertEquals(2,notifications.path("items").size());
             var response=request(owner,"GET","/v3/api-docs",null);assertEquals(200,response.status());var spec=response.body();
+            java.nio.file.Files.writeString(java.nio.file.Path.of("target/notification-openapi-spec.json"),spec.toPrettyString());
+            assertTrue(spec.path("openapi").textValue().startsWith("3.1."));
             var notificationPage=dataSchema(spec,PATH);assertEquals(Set.of("items","page","size","total","totalPages","hasNext","unreadCount"),keys(notificationPage.path("properties")));
             var notificationEntry=resolve(spec,notificationPage.at("/properties/items/items"));
             var notebookPage=dataSchema(spec,"/api/users/me/notebook");assertEquals(Set.of("items","page","size","total","totalPages","hasNext"),keys(notebookPage.path("properties")));
@@ -38,10 +40,11 @@ class JpaNotificationOpenApiIntegrationTests extends NotificationTestSupport {
             }
             assertEquals(notificationNulls,observedNulls);assertEquals(Set.of("ORDER_COMPLETED","REVIEW_REMOVED"),types);
             assertEquals(types,strings(notificationEntry.at("/properties/type/enum")));
-            assertNullableFields(notificationEntry,notificationNulls);
+            assertTypes(notificationEntry,Map.of("id","string","type","string","createdAt","integer","readAt","integer","orderId","integer","productId","integer","productName","string","targetAvailable","boolean"),notificationNulls);
             var notebookNulls=Set.of("productId","currentProduct","rating","tasteTags","aromaTags","memo");
             for(String key:notebookNulls)assertTrue(notebook.path(key).isNull(),key);
-            assertNullableFields(notebookEntry,notebookNulls);
+            assertTypes(notebookEntry,Map.ofEntries(Map.entry("id","string"),Map.entry("productId","integer"),Map.entry("productName","string"),Map.entry("currentProduct","object"),Map.entry("experience","string"),Map.entry("rating","number"),Map.entry("tasteTags","array"),Map.entry("aromaTags","array"),Map.entry("memo","string"),Map.entry("version","integer"),Map.entry("createdAt","integer"),Map.entry("updatedAt","integer")),notebookNulls);
+            assertEquals(Set.of("id","name","type","price","img","abv","orderCount"),keys(notebookEntry.at("/properties/currentProduct/properties")));
             assertEquals("INTERESTED",notebook.path("experience").textValue());
             assertEquals(Set.of("TRIED","INTERESTED"),strings(notebookEntry.at("/properties/experience/enum")));
         }finally{clean(sql,user,product,List.of());}
@@ -53,7 +56,11 @@ class JpaNotificationOpenApiIntegrationTests extends NotificationTestSupport {
         var visited=new HashSet<String>();while(node.has("$ref")){String ref=node.path("$ref").textValue();assertTrue(ref.startsWith("#/components/schemas/"));assertTrue(visited.add(ref));node=spec.at(ref.substring(1));assertFalse(node.isMissingNode());}return node;
     }
     private Set<String> strings(JsonNode array){assertTrue(array.isArray());var result=new HashSet<String>();array.forEach(value->result.add(value.textValue()));return result;}
-    private void assertNullableFields(JsonNode schema,Set<String> nullable){
-        schema.path("properties").fields().forEachRemaining(field->assertEquals(nullable.contains(field.getKey()),field.getValue().path("nullable").asBoolean(false),field.getKey()));
+    private void assertTypes(JsonNode schema,Map<String,String> base,Set<String> nullable){
+        schema.path("properties").fields().forEachRemaining(field->{
+            var expected=new HashSet<String>();expected.add(base.get(field.getKey()));if(nullable.contains(field.getKey()))expected.add("null");
+            var type=field.getValue().path("type");var actual=type.isArray()?strings(type):Set.of(type.textValue());
+            assertEquals(expected,actual,field.getKey()+": "+field.getValue());
+        });
     }
 }

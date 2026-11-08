@@ -1,6 +1,7 @@
 package com.pubburi.rehearsal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.pubburi.pub.controller.api.*;
 import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.controller.response.*;
@@ -21,12 +22,12 @@ public class NotebookService {
     public NotebookService(UserDao users,ProductDao products,NotebookRepository notes){this.users=users;this.products=products;this.notes=notes;}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Entry(UUID id,
-        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Integer productId,String productName,
-        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) ProductResponse currentProduct,Experience experience,
-        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) BigDecimal rating,
-        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) List<String> tasteTags,
-        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) List<String> aromaTags,
-        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) String memo,long version,long createdAt,long updatedAt){ }
+        @Schema(types={"integer","null"}) Integer productId,String productName,
+        @Schema(types={"object","null"},schemaResolution=Schema.SchemaResolution.INLINE) ProductResponse currentProduct,Experience experience,
+        @Schema(types={"number","null"}) BigDecimal rating,
+        @Schema(types={"array","null"}) List<String> tasteTags,
+        @Schema(types={"array","null"}) List<String> aromaTags,
+        @Schema(types={"string","null"}) String memo,long version,long createdAt,long updatedAt){ }
     private void current(SessionUser owner){if(users.selectSessionIdentity(owner.id(),owner.authEpoch())==null)throw expired();}
     private void lockOwner(SessionUser owner){var user=users.selectByIdForUpdate(owner.id());if(user==null || !owner.authEpoch().equals(user.getAuthEpoch()))throw expired();}
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
