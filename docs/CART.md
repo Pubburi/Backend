@@ -30,6 +30,7 @@ productName은 담을 때의 이름 snapshot이며 currentProduct는 같은 읽�
 | POST | `/api/users/me/cart/merge` | `{operationId,expectedVersion,items:[{productId,quantity}]}` |
 | POST | `/api/users/me/cart/checkout` | merge 필드와 `orderType,orderTable` |
 | GET | `/api/users/me/cart/operations/{operationId}` | 본인 기존 receipt 읽기·기존 Result 반환, 없으면404 |
+| POST | `/api/users/me/cart/operations/{operationId}/resolve` | `{kind,items,orderType,orderTable}`로 원 intent 결과 확인 또는 영속 retirement |
 
 수량은1–99의 정수, 카트와 operation 입력은 최대100행이다. POST items는 비어 있을 수 없다.
 중복 productId·문자열/boolean/소수 정수 강제 변환·추가/생략 body 필드·추가/중복 query는400이다.
@@ -47,7 +48,8 @@ no-op이어도 revision을 한 번 올린다. replay와 실패/rollback은 올�
 
 ## 병합·주문·재시도
 
-두 POST는 `{operationId,replayed,cart,orderId}`를 반환한다. merge의 orderId는 null이며 checkout은
+operation 응답은 `{operationId,replayed,status,cart,orderId}`다. status는 APPLIED 또는 RETIRED이며
+merge/checkout 정상 성공은 APPLIED다. merge의 orderId는 null이며 checkout은
 생성한 주문 ID다. 같은 owner/UUID/kind/intent를 다시 보내면 합산/주문/소비를 반복하지 않고
 `replayed:true`, 저장된 orderId와 현재 cart를 반환한다. receipt 판별이 revision 검수보다 먼저다.
 형식 검증은 재시도에도 유지하며 hash는 정규화한 items·주문 입력에 결속하고 expectedVersion은 제외한다.
@@ -57,8 +59,19 @@ fresh CAS409는 입력을 보존한 채 현재 cart를 조회하고 명시적으
 계정/세션 세대와 cart revision을 확인해 소비하며, 성공 확인 전 비회원 원문을 제거하지 않는다.
 미확정 operation이 남은 채 계정/세션 세대가 바뀌면 같은 ID를 보존하고 위 GET으로 먼저 확인한다.
 본인 receipt가 있으면 `replayed:true`와 저장 orderId·현재 cart를 반환하고, 타계정/재가입의 부재는404다.
-GET은 수량/revision/주문/receipt를 변경하지 않으며 DB 실패를404로 바꾸지 않는다. 부재가 확인돼도
-새 계정 수명에 POST를 자동 재생하거나 새 UUID로 자동 보상하지 않고 명시 실행을 요구한다.
+GET은 수량/revision/주문/receipt를 변경하지 않으며 DB 실패를404로 바꾸지 않는다. 404는 지연된
+원 POST가 이후에도 적용되지 않는다는 증거가 아니므로 descriptor를 버리거나 새 UUID로 자동 보상하지 않는다.
+
+명시 resolve는 kind(MERGE/CHECKOUT)·원 items·orderType/orderTable의 네 body 필드를 검수한다.
+MERGE의 두 order 필드는 null이어야 하고 CHECKOUT은 기존 입력 검수를 유지한다. expectedVersion은
+받지 않는다. 동일 회원 잠금에서 기존 같은 kind/hash가 있으면 현재 상태/저장 orderId/current cart를
+변경 없이 replayed:true로 반환한다. 없으면 원 hash의 RETIRED receipt와 한 번 증가한 cart revision을
+같은 TX에 저장하고 replayed:false/orderId:null을 반환한다. 반복 resolve는 revision을 올리지 않는다.
+
+RETIRED UUID의 늦은 merge/checkout은 revision보다 먼저409/CART_OPERATION_RETIRED로 거절해
+수량/주문을 적용하지 않는다. 다른 kind/intent의 UUID 재사용은409/CONFLICT다. RETIRED는 원 기기
+입력을 소비한 성공이 아니므로 입력을 보존하고 새 작업은 사용자 명시 선택으로만 실행한다.
+계정/세션 세대가 바뀐 후 자동 POST 재생·새 UUID 보상은 하지 않는다.
 
 GET은 짧은 RR이며 쓰기는 READ_COMMITTED에서 회원→cart 잠금·epoch 재검수 후 작업한다.
 잠금 대기 뒤 receipt/revision의 최신 commit을 확인하며 상품은 ID순으로 잠근다. checkout은 기존 주문 생성의

@@ -94,6 +94,10 @@ def run(environ, runtime, recovery_control):
         checkout_intent={'operationId':str(uuid.uuid4()),'expectedVersion':merged['cart']['version'],'items':[{'productId':pid,'quantity':2}],'orderType':'TAKEOUT','orderTable':'  cart 원문  '}
         checked=request(user,base,'POST',cart_path+'/checkout',checkout_intent,headers=notebook_headers)
         if checked['orderId']<=0 or checked['cart']['items'][0]['quantity']!=3:raise ValueError('recovery_ci_cart_checkout_changed')
+        retired_id=str(uuid.uuid4());retire_intent={'kind':'MERGE','items':[{'productId':pid,'quantity':1}],'orderType':None,'orderTable':None}
+        retired_path=cart_path+'/operations/'+retired_id
+        retired=request(user,base,'POST',retired_path+'/resolve',retire_intent,headers=notebook_headers)
+        if retired['status']!='RETIRED' or retired['orderId'] is not None:raise ValueError('recovery_ci_cart_retirement_changed')
         request(user,base,'PUT','/api/users/me/password',{'currentPassword':password,'newPassword':new_password})
         changed={key:product[key] for key in ('name','type','price','img','abv','orderCount')}
         changed.update(name='Recovery changed price',price=9999)
@@ -247,7 +251,12 @@ def run(environ, runtime, recovery_control):
         if request(user,base,'GET',cart_path,headers=notebook_headers)!=retained_cart:raise ValueError('recovery_ci_cart_not_restored')
         for route,intent,order_id in (('/merge',merge_intent,None),('/checkout',checkout_intent,checked['orderId'])):
             replay=request(user,base,'POST',cart_path+route,dict(intent,expectedVersion=0),headers=notebook_headers)
-            if not replay['replayed'] or replay['orderId']!=order_id or replay['cart']!=retained_cart:raise ValueError('recovery_ci_cart_receipt_not_restored')
+            if not replay['replayed'] or replay['status']!='APPLIED' or replay['orderId']!=order_id or replay['cart']!=retained_cart:raise ValueError('recovery_ci_cart_receipt_not_restored')
+        for method,path,body in (('GET',retired_path,None),('POST',retired_path+'/resolve',retire_intent)):
+            result=request(user,base,method,path,body,headers=notebook_headers)
+            if result['status']!='RETIRED' or not result['replayed'] or result['cart']!=retained_cart or result['orderId'] is not None:raise ValueError('recovery_ci_cart_retirement_not_restored')
+        status,error=request_json(user,base,'POST',cart_path+'/merge',{'operationId':retired_id,'expectedVersion':retained_cart['version'],'items':retire_intent['items']},time.monotonic()+12,headers=notebook_headers)
+        if status!=409 or error['error']['code']!='CART_OPERATION_RETIRED':raise ValueError('recovery_ci_retired_operation_reapplied')
         created=request(user,base,'POST','/api/comments',{'productId':pid,'rating':2.5,'comment':'After recovery','tasteTags':[]},201)
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
@@ -255,6 +264,7 @@ def run(environ, runtime, recovery_control):
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'private_notebook_original_arrays_memo_revision_preserved':True,
         'cart_quantities_revision_and_merge_checkout_receipts_preserved':True,
+        'cart_retired_nonce_blocks_late_post_after_restore':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],

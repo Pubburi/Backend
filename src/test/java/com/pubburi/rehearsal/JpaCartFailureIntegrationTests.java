@@ -25,6 +25,15 @@ class JpaCartFailureIntegrationTests extends CartTestSupport {
     }
     @Test void failedCheckoutReceiptRollsBackOrderCartCountersAndRevisionBeforeSameIntentRetry()throws Exception{failed(true);}
     @Test void failedMergeReceiptNeverPartlyCombinesQuantitiesAndCanRetryTheSameOperation()throws Exception{failed(false);}
+    @Test void failedRetirementRollsBackHeaderRevisionAndReceiptBeforeExplicitRetry()throws Exception{
+        var sql=control();var admin=loggedIn("ADMIN");String user=join();int product=create(admin,ownName());UUID operation=UUID.randomUUID();
+        try{
+            var owner=login(user,password);var intent=resolution(false,List.of(item(product,2)));var before=cartState(sql,user);var account=accountState(sql,user);
+            try(var fault=failReceipt(sql,user,operation)){assertEquals(500,cart(owner,user,"POST","/operations/"+operation+"/resolve",intent).status());assertEquals(before,cartState(sql,user));assertEquals(account,accountState(sql,user));assertEquals(404,cart(owner,user,"GET","/operations/"+operation,null).status());}
+            var retry=cart(owner,user,"POST","/operations/"+operation+"/resolve",intent);assertEquals(200,retry.status());assertEquals("RETIRED",retry.body().at("/data/status").textValue());assertFalse(retry.body().at("/data/replayed").booleanValue());assertEquals(1,retry.body().at("/data/cart/version").longValue());assertTrue(retry.body().at("/data/cart/items").isEmpty());
+            assertEquals("CART_OPERATION_RETIRED",cart(owner,user,"POST","/merge",merge(operation,1,List.of(item(product,2)))).body().at("/error/code").textValue());
+        }finally{clean(sql,user,product,List.of());}
+    }
     @Test void operationReadDatabaseFailureIsNeverConvertedToMissingReceipt()throws Exception{
         var sql=control();String user=join();String runtimeRole=required("PUBBURI_PG_USER");assertTrue(runtimeRole.matches("[a-z][a-z0-9_]{0,50}"));
         try{var owner=login(user,password);var before=cartState(sql,user);sql.execute("REVOKE SELECT ON pubburi.t_user_cart_operation FROM "+runtimeRole);

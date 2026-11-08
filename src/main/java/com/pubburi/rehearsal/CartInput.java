@@ -20,6 +20,8 @@ public final class CartInput {
     public record Merge(UUID operationId,long expectedVersion,List<Item> items){ }
     @JsonDeserialize(using=CheckoutDeserializer.class) @Schema(additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
     public record Checkout(UUID operationId,long expectedVersion,List<Item> items,String orderType,String orderTable){ }
+    @JsonDeserialize(using=ResolveDeserializer.class) @Schema(additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
+    public record Resolve(com.pubburi.rehearsal.persistence.JpaCartOperation.Kind kind,List<Item> items,String orderType,String orderTable){ }
     private static IllegalArgumentException invalid(){return new IllegalArgumentException("Invalid cart input");}
     private static JsonNode root(JsonParser parser,String...keys)throws IOException{
         parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);JsonNode node=parser.getCodec().readTree(parser);
@@ -63,6 +65,17 @@ public final class CartInput {
             var n=root(p,"operationId","expectedVersion","items","orderType","orderTable");var type=n.get("orderType");
             if(!type.isTextual() || !Set.of("ONLINE","OFFLINE","TAKEOUT").contains(type.textValue()))throw invalid();
             return new Checkout(operation(n.get("operationId")),NotebookInput.version(n.get("expectedVersion")),items(n.get("items")),type.textValue(),table(n.get("orderTable")));
+        }
+    }
+    public static class ResolveDeserializer extends JsonDeserializer<Resolve>{
+        @Override public Resolve getNullValue(DeserializationContext c)throws JsonMappingException{return c.reportInputMismatch(Resolve.class,"Cart object is required");}
+        @Override public Resolve deserialize(JsonParser p,DeserializationContext c)throws IOException{
+            var n=root(p,"kind","items","orderType","orderTable");var kind=n.get("kind");
+            if(!kind.isTextual())throw invalid();com.pubburi.rehearsal.persistence.JpaCartOperation.Kind value;
+            try{value=com.pubburi.rehearsal.persistence.JpaCartOperation.Kind.valueOf(kind.textValue());}catch(IllegalArgumentException error){throw invalid();}
+            if(value==com.pubburi.rehearsal.persistence.JpaCartOperation.Kind.MERGE){if(!n.get("orderType").isNull() || !n.get("orderTable").isNull())throw invalid();return new Resolve(value,items(n.get("items")),null,null);}
+            var type=n.get("orderType");if(!type.isTextual() || !Set.of("ONLINE","OFFLINE","TAKEOUT").contains(type.textValue()))throw invalid();
+            return new Resolve(value,items(n.get("items")),type.textValue(),table(n.get("orderTable")));
         }
     }
 }

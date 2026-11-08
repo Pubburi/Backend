@@ -101,7 +101,7 @@ final class TargetSchemaContract {
         var shapes=Map.of(
             "t_user_cart","user_id:character varying(100):0:false,version:bigint:0:false,updated_at:timestamp(6) with time zone:0:false",
             "t_user_cart_item","user_id:character varying(100):0:false,product_id:integer:0:false,current_product_id:integer:0:true,product_name:character varying(100):0:false,quantity:integer:0:false",
-            "t_user_cart_operation","user_id:character varying(100):0:false,operation_id:uuid:0:false,kind:character varying(8):0:false,intent_hash:character(64):0:false,order_id:integer:0:true");
+            "t_user_cart_operation","user_id:character varying(100):0:false,operation_id:uuid:0:false,kind:character varying(8):0:false,status:character varying(7):0:false,intent_hash:character(64):0:false,order_id:integer:0:true");
         for(String table:List.of("t_user_cart","t_user_cart_item","t_user_cart_operation")){
             try(var s=connection.createStatement()){
                 s.execute("LOCK TABLE pubburi."+table+" IN ACCESS SHARE MODE");

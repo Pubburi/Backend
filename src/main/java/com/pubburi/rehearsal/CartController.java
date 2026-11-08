@@ -1,6 +1,6 @@
 package com.pubburi.rehearsal;
 
-import com.pubburi.pub.controller.api.ApiResponse;
+import com.pubburi.pub.controller.api.*;
 import com.pubburi.pub.controller.auth.*;
 import io.swagger.v3.oas.annotations.*;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -23,6 +23,10 @@ public class CartController {
     public ApiResponse<CartService.Cart> get(HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.get(owner);current(session,owner);return ApiResponse.ok(result);}
     @GetMapping("/operations/{operationId}") @Operation(summary="Read an existing account-owned operation without replaying any mutation",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
     public ApiResponse<CartService.Result> operation(@PathVariable String operationId,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.operation(owner,operationId(operationId));current(session,owner);return ApiResponse.ok(result);}
+    @PostMapping(value="/operations/{operationId}/resolve",consumes=MediaType.APPLICATION_JSON_VALUE) @Operation(summary="Resolve an unknown operation or durably retire its original intent before any delayed request can apply it",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
+    public ApiResponse<CartService.Result> resolve(@PathVariable String operationId,@RequestBody CartInput.Resolve input,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.resolve(owner,operationId(operationId),input);current(session,owner);return ApiResponse.ok(result);}
+    @ExceptionHandler(CartService.Retired.class)
+    public ResponseEntity<ApiResponse<Void>> retired(){return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error(ApiError.of("CART_OPERATION_RETIRED","Cart operation was retired; confirm a new action")));}
     @PutMapping(value="/items/{productId}",consumes=MediaType.APPLICATION_JSON_VALUE) @Operation(summary="Set an absolute cart quantity at its expected revision",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
     public ApiResponse<CartService.Cart> put(@PathVariable String productId,@RequestBody CartInput.Quantity input,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.put(owner,productId(productId),input);current(session,owner);return ApiResponse.ok(result);}
     @DeleteMapping("/items/{productId}") @Operation(summary="Remove this account's item, including an unavailable product",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))

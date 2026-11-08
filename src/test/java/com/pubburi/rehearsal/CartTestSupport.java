@@ -25,6 +25,7 @@ abstract class CartTestSupport extends JpaAccountTestSupport {
     JsonNode put(HttpClient client,String owner,int product,int quantity,long version)throws Exception{var reply=cart(client,owner,"PUT","/items/"+product,Map.of("quantity",quantity,"expectedVersion",version));assertEquals(200,reply.status());return reply.body().path("data");}
     Map<String,Object> merge(UUID id,long version,List<Map<String,Integer>> items){return new HashMap<>(Map.of("operationId",id.toString(),"expectedVersion",version,"items",items));}
     Map<String,Object> checkout(UUID id,long version,List<Map<String,Integer>> items){var value=merge(id,version,items);value.put("orderType","TAKEOUT");value.put("orderTable",null);return value;}
+    Map<String,Object> resolution(boolean checkout,List<Map<String,Integer>> items){var value=new HashMap<String,Object>();value.put("kind",checkout?"CHECKOUT":"MERGE");value.put("items",items);value.put("orderType",checkout?"TAKEOUT":null);value.put("orderTable",null);return value;}
     Map<String,Integer> item(int product,int quantity){return Map.of("productId",product,"quantity",quantity);}
     Map<String,Object> cartState(JdbcTemplate sql,String owner){return Map.of("header",sql.queryForList("SELECT * FROM pubburi.t_user_cart WHERE user_id=?",owner),"items",sql.queryForList("SELECT * FROM pubburi.t_user_cart_item WHERE user_id=? ORDER BY product_id",owner),"operations",sql.queryForList("SELECT * FROM pubburi.t_user_cart_operation WHERE user_id=? ORDER BY operation_id",owner));}
 }

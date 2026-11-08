@@ -8,6 +8,7 @@ import com.pubburi.pub.model.dto.*;
 import com.pubburi.pub.model.service.OrderService;
 import com.pubburi.rehearsal.persistence.*;
 import com.pubburi.rehearsal.persistence.JpaCartOperation.Kind;
+import com.pubburi.rehearsal.persistence.JpaCartOperation.Status;
 import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,7 +29,7 @@ public class CartService {
     public record Cart(long version,List<Item> items){ }
     @JsonInclude(JsonInclude.Include.ALWAYS)
     @io.swagger.v3.oas.annotations.media.Schema(name="CartOperationResult")
-    public record Result(UUID operationId,boolean replayed,Cart cart,Integer orderId){ }
+    public record Result(UUID operationId,boolean replayed,Status status,Cart cart,Integer orderId){ }
     private void current(SessionUser owner){if(users.selectSessionIdentity(owner.id(),owner.authEpoch())==null)throw expired();}
     private void lockOwner(SessionUser owner){var row=users.selectByIdForUpdate(owner.id());if(row==null || !owner.authEpoch().equals(row.getAuthEpoch()))throw expired();}
     private JpaCart locked(SessionUser owner){return carts.locked(owner.id()).orElseGet(()->carts.saveAndFlush(JpaCart.create(owner.id())));}
@@ -39,7 +40,7 @@ public class CartService {
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Result operation(SessionUser owner,UUID operation){
         current(owner);var receipt=operations.findById(new JpaCartOperation.Key(owner.id(),operation)).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Cart operation not found"));
-        return new Result(operation,true,view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
+        return new Result(operation,true,receipt.status(),view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
     }
     @Transactional(isolation=Isolation.READ_COMMITTED)
     public Cart put(SessionUser owner,int productId,CartInput.Quantity input){
@@ -72,7 +73,7 @@ public class CartService {
             lines.save(row);
         }
         lines.flush();advance(cart);operations.saveAndFlush(JpaCartOperation.create(owner.id(),input.operationId(),Kind.MERGE,hash,null));
-        return new Result(input.operationId(),false,view(owner.id(),cart),null);
+        return new Result(input.operationId(),false,Status.APPLIED,view(owner.id(),cart),null);
     }
     @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result checkout(SessionUser owner,CartInput.Checkout input){
@@ -90,13 +91,22 @@ public class CartService {
         cart=carts.locked(owner.id()).orElseThrow();owned.clear();for(var row:lines.owned(owner.id()))owned.put(row.productId(),row);
         for(var item:input.items()){var row=owned.get(item.productId());int remaining=row.quantity()-item.quantity();if(remaining==0)lines.delete(row);else row.quantity(remaining);}
         lines.flush();advance(cart);operations.saveAndFlush(JpaCartOperation.create(owner.id(),input.operationId(),Kind.CHECKOUT,hash,order.getoId()));
-        return new Result(input.operationId(),false,view(owner.id(),cart),order.getoId());
+        return new Result(input.operationId(),false,Status.APPLIED,view(owner.id(),cart),order.getoId());
+    }
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public Result resolve(SessionUser owner,UUID operation,CartInput.Resolve input){
+        lockOwner(owner);String hash=CartInput.intent(input.items(),input.orderType(),input.orderTable());var receipt=matching(owner,operation,input.kind(),hash);
+        if(receipt!=null)return new Result(operation,true,receipt.status(),view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
+        var cart=locked(owner);expected(cart,cart.version());advance(cart);
+        operations.saveAndFlush(JpaCartOperation.retire(owner.id(),operation,input.kind(),hash));
+        return new Result(operation,false,Status.RETIRED,view(owner.id(),cart),null);
     }
     private Result replay(SessionUser owner,UUID operation,Kind kind,String hash){
-        var receipt=operations.findById(new JpaCartOperation.Key(owner.id(),operation)).orElse(null);if(receipt==null)return null;
-        if(receipt.kind()!=kind || !receipt.intentHash().equals(hash))throw conflict("Operation ID is bound to a different intent");
-        return new Result(operation,true,view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
+        var receipt=matching(owner,operation,kind,hash);if(receipt==null)return null;if(receipt.status()==Status.RETIRED)throw new Retired();
+        return new Result(operation,true,receipt.status(),view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
     }
+    private JpaCartOperation matching(SessionUser owner,UUID operation,Kind kind,String hash){var receipt=operations.findById(new JpaCartOperation.Key(owner.id(),operation)).orElse(null);if(receipt!=null && (receipt.kind()!=kind || !receipt.intentHash().equals(hash)))throw conflict("Operation ID is bound to a different intent");return receipt;}
+    public static final class Retired extends ResponseStatusException {public Retired(){super(HttpStatus.CONFLICT,"Cart operation was retired; confirm a new action");}}
     private Map<Integer,Product> lockProducts(List<CartInput.Item> items){
         var result=new HashMap<Integer,Product>();for(var item:items.stream().sorted(Comparator.comparingInt(CartInput.Item::productId)).toList()){var product=products.selectByIdForUpdate(item.productId());if(product==null)throw conflict("Cart product is no longer available");result.put(item.productId(),product);}return result;
     }

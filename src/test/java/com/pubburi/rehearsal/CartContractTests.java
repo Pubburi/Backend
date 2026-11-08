@@ -26,6 +26,9 @@ class CartContractTests {
         for(String suffix:List.of("","?expectedVersion=0&expectedVersion=1","?expectedVersion=1.0","?expectedVersion=9007199254740992"))mvc.perform(delete(PATH+suffix).header(HEADER,"own")).andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control","private, no-store"));
         mvc.perform(delete(PATH+"?expectedVersion=0").header(HEADER,"own")).andExpect(status().isOk()).andExpect(jsonPath("$.data.version").value(1));
         when(carts.remove(OWNER,null,0)).thenThrow(new ResponseStatusException(HttpStatus.CONFLICT));mvc.perform(delete(PATH+"?expectedVersion=0").header(HEADER,"own")).andExpect(status().isConflict()).andExpect(header().string("Cache-Control","private, no-store"));
+        when(carts.merge(eq(OWNER),any())).thenThrow(new CartService.Retired());
+        mvc.perform(post(PATH+"/merge").header(HEADER,"own").contentType(MediaType.APPLICATION_JSON).content("{\"operationId\":\"00000000-0000-4000-8000-000000000001\",\"expectedVersion\":0,\"items\":[{\"productId\":1,\"quantity\":1}]}"))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("CART_OPERATION_RETIRED")).andExpect(header().string("Cache-Control","private, no-store"));
         when(guard.requireLogin(any())).thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED));mvc.perform(post(PATH+"/merge").contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control","private, no-store"));
     }
     @Test void boundedBodiesCannotReachCartMutationEvenBeforeMvcAuthentication()throws Exception{

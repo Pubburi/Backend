@@ -31,12 +31,12 @@ from api_smoke import verify_search_phrase_openapi, verify_content_recommendatio
 def verify_business_api(spec):
     methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
     operations = sum(method in methods for path in spec["paths"].values() for method in path)
-    assert len(spec["paths"]) == 48 and operations == 62
+    assert len(spec["paths"]) == 49 and operations == 63
     for path, expected in (("/api/users/me/notebook",{"get","post"}),
             ("/api/users/me/notebook/{id}",{"get","put","delete"}),
             ("/api/users/me/notebook/by-product/{productId}",{"get"}),
             ("/api/users/me/cart",{"get","delete"}), ("/api/users/me/cart/items/{productId}",{"put","delete"}),
-            ("/api/users/me/cart/merge",{"post"}), ("/api/users/me/cart/checkout",{"post"}), ("/api/users/me/cart/operations/{operationId}",{"get"})):
+            ("/api/users/me/cart/merge",{"post"}), ("/api/users/me/cart/checkout",{"post"}), ("/api/users/me/cart/operations/{operationId}",{"get"}), ("/api/users/me/cart/operations/{operationId}/resolve",{"post"})):
         assert methods.intersection(spec["paths"].get(path,{}))==expected
     assert methods.intersection(spec["paths"].get("/api/users/me/search-phrases", {})) == {"post"}
     assert methods.intersection(spec["paths"].get("/api/users/me/recommendations/feedback/{productId}", {})) == {"get", "put", "delete"}

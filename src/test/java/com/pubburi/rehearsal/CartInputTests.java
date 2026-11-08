@@ -20,6 +20,8 @@ class CartInputTests {
         assertNotEquals(CartInput.intent(one.items(),"TAKEOUT",null),CartInput.intent(one.items(),"TAKEOUT",""));
         node.put("orderType","TAKEOUT").put("orderTable","🥃".repeat(20));var checkout=json.readValue(node.toString(),CartInput.Checkout.class);assertEquals("🥃".repeat(20),checkout.orderTable());
         node.put("orderTable","  raw\n ");assertEquals("  raw\n ",json.readValue(node.toString(),CartInput.Checkout.class).orderTable());
+        var resolve=node.deepCopy();resolve.remove(List.of("operationId","expectedVersion"));resolve.put("kind","CHECKOUT");var resolved=json.readValue(resolve.toString(),CartInput.Resolve.class);assertEquals(CartInput.intent(one.items(),"TAKEOUT","  raw\n "),CartInput.intent(resolved.items(),resolved.orderType(),resolved.orderTable()));
+        resolve.put("kind","MERGE").putNull("orderType").putNull("orderTable");assertEquals(CartInput.intent(one.items(),null,null),CartInput.intent(json.readValue(resolve.toString(),CartInput.Resolve.class).items(),null,null));
     }
     @Test void malformedCoercedDuplicateOversizedAndAmbiguousIntentIsRejected()throws Exception{
         var invalid=new ArrayList<String>(List.of("null","[]","{}",merge()+" {}",merge().toString().replace("\"expectedVersion\":0","\"expectedVersion\":0,\"expectedVersion\":0")));
@@ -32,5 +34,7 @@ class CartInputTests {
         for(String table:List.of("🥃".repeat(21),"bad\0text","\ud800")){checkout.put("orderTable",table);assertThrows(Exception.class,()->json.readValue(checkout.toString(),CartInput.Checkout.class));}
         checkout.putNull("orderTable").put("orderType","OTHER");assertThrows(Exception.class,()->json.readValue(checkout.toString(),CartInput.Checkout.class));
         for(String input:List.of("null","{\"quantity\":0,\"expectedVersion\":0}","{\"quantity\":1,\"expectedVersion\":1.0}","{\"quantity\":1,\"expectedVersion\":0,\"productId\":1}"))assertThrows(Exception.class,()->json.readValue(input,CartInput.Quantity.class));
+        var resolve=merge();resolve.remove(List.of("operationId","expectedVersion"));resolve.put("kind","MERGE").putNull("orderType").putNull("orderTable");
+        for(var wrong:List.of(resolve.deepCopy().put("expectedVersion",0),resolve.deepCopy().put("orderType","TAKEOUT"),resolve.deepCopy().put("orderTable","raw"),resolve.deepCopy().put("kind","CHECKOUT"),resolve.deepCopy().put("kind","OTHER")))assertThrows(Exception.class,()->json.readValue(wrong.toString(),CartInput.Resolve.class));
     }
 }
