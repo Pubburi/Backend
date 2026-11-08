@@ -32,8 +32,13 @@ public class NotificationService implements AccountNotificationActions {
         this.products=products;this.orderService=orderService;this.commentService=commentService;
     }
     private void current(SessionUser actor){if(users.selectSessionIdentity(actor.id(),actor.authEpoch())==null)throw expired();}
-    private User lockActor(SessionUser actor,String recipient){
-        var ids=new TreeSet<String>();ids.add(actor.id());if(recipient!=null)ids.add(recipient);User live=null;
+    private String canonicalRecipient(String storedId){
+        if(storedId==null)return null;
+        var account=users.selectById(storedId);return account==null?null:account.getId();
+    }
+    private User lockActor(SessionUser actor,String canonicalRecipient){
+        // Resolve FK aliases through the DB before sorting: raw strings can reverse physical lock order.
+        var ids=new TreeSet<String>();ids.add(actor.id());if(canonicalRecipient!=null)ids.add(canonicalRecipient);User live=null;
         for(String id:ids){var user=users.selectByIdForUpdate(id);if(id.equals(actor.id()))live=user;}
         if(live==null || !actor.authEpoch().equals(live.getAuthEpoch()))throw expired();return live;
     }
@@ -56,23 +61,35 @@ public class NotificationService implements AccountNotificationActions {
     @Override @Transactional(isolation=Isolation.READ_COMMITTED)
     public void completeOrder(int id,SessionUser actor){
         var initial=orders.selectById(id);if(initial==null)throw missing();
-        var live=lockActor(actor,initial.getUserId());if(!live.isAdmin())throw forbidden();
+        String expectedRecipient=canonicalRecipient(initial.getUserId());
+        var live=lockActor(actor,expectedRecipient);if(!live.isAdmin())throw forbidden();
         if(!lockResource("t_order","o_id",id))throw missing();
         var order=orders.selectById(id);if(order==null)throw missing();
         if("Y".equals(order.getCompleted()))return;
+        String recipient=canonicalRecipient(order.getUserId());
+        if(order.getUserId()!=null && recipient==null)throw new IllegalStateException("Order recipient is missing");
+        unchangedRecipient(expectedRecipient,recipient);
         order.setCompleted("Y");if(orderService.updateOrder(order)!=1)throw new IllegalStateException("Order completion failed");
-        if(order.getUserId()!=null)notifications.saveAndFlush(JpaNotification.completed(order.getUserId(),id));
+        if(recipient!=null)notifications.saveAndFlush(JpaNotification.completed(recipient,id));
     }
     @Override @Transactional(isolation=Isolation.READ_COMMITTED)
     public void removeComment(int id,SessionUser actor){
         var initial=comments.select(id);if(initial==null)throw missing();
-        var live=lockActor(actor,initial.getUserId());
+        String expectedRecipient=canonicalRecipient(initial.getUserId());
+        var live=lockActor(actor,expectedRecipient);
         if(!lockResource("t_comment","id",id))throw missing();
         var comment=comments.select(id);if(comment==null)throw missing();
-        if(!live.isAdmin() && !live.getId().equals(comment.getUserId()))throw forbidden();
+        String recipient=canonicalRecipient(comment.getUserId());
+        if(recipient==null)throw new IllegalStateException("Review recipient is missing");
+        unchangedRecipient(expectedRecipient,recipient);
+        if(!live.isAdmin() && !live.getId().equals(recipient))throw forbidden();
         var product=products.selectById(comment.getProductId());if(product==null)throw new IllegalStateException("Review product missing");
         if(commentService.removeComment(id)!=1)throw new IllegalStateException("Review removal failed");
-        if(!live.getId().equals(comment.getUserId()))notifications.saveAndFlush(JpaNotification.removed(comment.getUserId(),id,comment.getProductId(),product.getName()));
+        if(!live.getId().equals(recipient))notifications.saveAndFlush(JpaNotification.removed(recipient,id,comment.getProductId(),product.getName()));
+    }
+    private void unchangedRecipient(String expected,String current){
+        // Account deletion may detach an order. A different live recipient was not locked by this action.
+        if(current!=null && !current.equals(expected))throw new ResponseStatusException(HttpStatus.CONFLICT,"Business recipient changed; reload before retrying");
     }
     private boolean lockResource(String table,String column,int id){
         // Identifiers are internal constants from the two explicit callers, never request input.
