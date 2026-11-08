@@ -83,6 +83,7 @@ class JpaHttpIntegrationTests {
         assertEquals(Set.of("operationId","replayed","cart","orderId"),keys(schemas.path("CartOperationResult").path("properties")));
         assertEquals(200,request(admin,"POST","/api/auth/logout",null).status());assertEquals(401,request(admin,"GET","/api/auth/me",null).status());
     }
+    private Set<String> keys(com.fasterxml.jackson.databind.JsonNode node){var keys=new HashSet<String>();node.fieldNames().forEachRemaining(keys::add);return keys;}
     @Test void passwordCasCurrentProjectionAndFullUserLockRespectCredentialIncarnation()throws Exception {
         String id="ci_jpa_cas_"+UUID.randomUUID().toString().replace("-","");String pass="authored-old-password",fresh="authored-new-password";
         User user=new User(id,"Authored CAS",pass,0,"USER");assertEquals(1,users.addUser(user));
