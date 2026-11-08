@@ -81,11 +81,13 @@ class PostgreSQLRecoveryTests(TestCase):
         shape={'indexes':[['t_user','t_user_pkey','index'],['t_user','authored_index','index']],
                'constraints':[['t_user','t_user_pkey','PRIMARY KEY (id)',True],
                               ['t_user','authored_check','CHECK (true)',True]]}
-        for fingerprint, feedback, notebook in ((recovery.KNOWN_SCHEMA_SHA256, False,False), (recovery.FEEDBACK_SCHEMA_SHA256, True,False),(recovery.NOTEBOOK_SCHEMA_SHA256,True,True)):
+        for fingerprint, feedback, notebook, cart in ((recovery.KNOWN_SCHEMA_SHA256, False,False,False), (recovery.FEEDBACK_SCHEMA_SHA256, True,False,False),(recovery.NOTEBOOK_SCHEMA_SHA256,True,True,False),(recovery.CART_SCHEMA_SHA256,True,True,True)):
             with patch.object(recovery,'schema_fingerprint',return_value=fingerprint):
                 expected=recovery.expected_toc(shape)
                 self.assertEqual(feedback, 'TABLE DATA pubburi t_user_recommendation_feedback' in expected)
                 self.assertEqual(notebook, 'TABLE DATA pubburi t_user_notebook' in expected)
+                for table in ('t_user_cart','t_user_cart_item','t_user_cart_operation'):
+                    self.assertEqual(cart, 'TABLE DATA pubburi '+table in expected)
                 lines=[str(i)+'; 0 0 '+item+' owner' for i,item in enumerate(sorted(expected),1)]
                 for listing,valid in ((lines,True),(lines[:-1],False),(lines+lines[:1],False),
                                       (lines[:-1]+lines[:1],False)):

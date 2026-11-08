@@ -252,3 +252,5 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 현재 source UUID/ACK·V1/V2·기본 runtime은 보존하며 전체 DB03–06 cutover/rollback과 거래/웹 인수는 별도다.
 
 비공개 notebook은 [F07 API](NOTEBOOK.md)의 V5·최소 권한·개인 원문/상품 삭제 보존·revision 계약을 따른다. 공개 후기/추천 서버 입력으로 자동 승격하지 않는다.
+
+본인 계정 cart는 [F10 API](CART.md)의 V6·동일 계정 revision·명시 guest 병합·중복 방지 checkout/receipt·상품 삭제 보존을 따른다. 기존 주문 API와 MySQL 원본은 변경하지 않는다.

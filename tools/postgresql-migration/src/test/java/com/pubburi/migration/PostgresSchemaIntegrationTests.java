@@ -65,6 +65,8 @@ class PostgresSchemaIntegrationTests {
         try(var connection=settings.connect()){assertEquals(31,SchemaIndexContract.actual(connection).size());}
         assertEquals(1,PostgresSchemaTool.configuration(settings,PostgresSchemaTool.LOCATION).target("4").load().migrate().migrationsExecuted);
         try(var connection=settings.connect()){assertEquals(33,SchemaIndexContract.actual(connection).size());}
+        assertEquals(1,PostgresSchemaTool.configuration(settings,PostgresSchemaTool.LOCATION).target("5").load().migrate().migrationsExecuted);
+        try(var connection=settings.connect()){assertEquals(37,SchemaIndexContract.actual(connection).size());}
         assertEquals(1, PostgresSchemaTool.run("migrate", env));
         assertEquals(0, PostgresSchemaTool.run("migrate", env));
         assertEquals(0, PostgresSchemaTool.run("validate", env));
@@ -72,8 +74,8 @@ class PostgresSchemaIntegrationTests {
         String source = "0db714c6-ef29-4cda-8020-d3b2eb15bd81";
         String payload = "{\n \"productId\":41, \"sourceVersion\":1, \"deleted\":false, \"document\":{\"name\":\"가\",\"type\":\"탁주\",\"priceKrw\":7500,\"abvPercent\":5.555,\"orderCount\":0,\"tasteTags\":null,\"aromaTags\":[]}}\n";
         try (Connection connection = settings.connect(); Statement statement = connection.createStatement()) {
-            assertEquals(21, number(connection, "SELECT count(*) FROM information_schema.tables WHERE table_schema='pubburi'"));
-            assertEquals(37,SchemaIndexContract.actual(connection).size());
+            assertEquals(24, number(connection, "SELECT count(*) FROM information_schema.tables WHERE table_schema='pubburi'"));
+            assertEquals(41,SchemaIndexContract.actual(connection).size());
             assertTrue(SchemaIndexContract.actual(connection).containsAll(SchemaIndexContract.expected()));
             assertTrue(SchemaIndexContract.actual(connection).contains(new SchemaIndexContract.Key("t_comment_taste_tag",true,"comment_id:A:-,tag:A:-")));
             connection.setAutoCommit(false);
@@ -167,7 +169,7 @@ class PostgresSchemaIntegrationTests {
         try (Connection connection=settings.connect()) {
             assertEquals(0,number(connection,"SELECT count(*) FROM information_schema.tables WHERE table_schema='pubburi' AND table_name LIKE 'transaction_%'"));
         }
-        assertEquals(5,PostgresSchemaTool.run("migrate",env));
+        assertEquals(6,PostgresSchemaTool.run("migrate",env));
         assertEquals(0,PostgresSchemaTool.run("validate",env));
     }
 

@@ -77,6 +77,10 @@ PG 제공자의 본인 비공개 기록은 [Notebook 계약](NOTEBOOK.md)의 목
 명시 계정 guard·기대 revision·개인 원문/삭제 상품 보존을 따른다. MySQL baseline은 명시404이며
 공개 후기·추천 입력으로 자동 전송하지 않는다.
 
+PG 계정 카트는 [Cart 계약](CART.md)의 본인 조회·절대 수량/삭제·명시 guest 병합·원자 checkout과
+UUID receipt 읽기를 제공한다. 기존 주문 API는 유지하고 일반404/DB 오류와 legacy의 명시
+`CART_NOT_SUPPORTED`를 구분한다.
+
 ## Products
 
 - `GET /api/recommendations/default?size=4`: 공개 비개인 기본 주류 목록, 기존 상품 배열과 BASELINE/FALLBACK

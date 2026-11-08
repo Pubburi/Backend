@@ -23,7 +23,7 @@ PR·main·수동 실행의 필수 `backend-ci`는 다음을 유지한다.
 | PG18.6 schema | `PUBBURI_PG_INTEGRATION=1`: 별도3DB의 새 설치/no-op·checksum·실패DDL 복구·타입/ID/인덱스 |
 | source/import | 별도 TLS source의 읽기 전용 snapshot·승인 파일 검증과 import4DB의 v1/16표·태그 포함 v2/17표 전체 typed-cell/PK·7개 고수위·수령증·실패 rollback |
 | JPA | `PUBBURI_JPA_INTEGRATION=1`: normal/failure·빈 카탈로그 scratch의 실제 Repository/HTTP·RR/잠금·수명/실패와 packaged 재시작 |
-| PG local release | import 직후 업무 쓰기 전에 source/target 초기 일치 검수·runtime만의 실제 package-pg·backend-only43경로/55작업 기동/종료·격리 STATE의 PG 선택과 개발 명령 재기동 |
+| PG local release | import 직후 업무 쓰기 전에 source/target 초기 일치 검수·runtime만의 실제 package-pg·backend-only48경로/62작업 기동/종료·격리 STATE의 PG 선택과 개발 명령 재기동 |
 | 검색/relay | 실제 CLI·현재 업무 producer·두 worker·lease/token·DB 시각·중복/삭제·엔진 재시작/물리 교체와 같은 필수조건의 공개 DB fallback |
 
 `PUBBURI_PG_RELAY_CI=1`은 실제 source/JPA 준비와 search/relay 통합 step에만 둔다.
@@ -66,7 +66,7 @@ JPA는 기존 [기동 guard/최소 권한](JPA-REHEARSAL.md)을 사용한다. no
 DDL/소유권을 주지 않는다. `PUBBURI_JPA_EXPECTED_COMMENT_NEXT`는 snapshot의 sourceNext에서 받는다.
 
 `scripts/jpa_smoke.py`와 [local-stack](LOCAL-DEVELOPMENT.md)은 같은 JAR/OpenAPI 검증을 사용한다.
-자기 JVM 기동/PID를 확인하고 실제43/55·업무·재시작/재로그인과 소유 process group 정리를 검사한다.
+자기 JVM 기동/PID를 확인하고 실제48/62·업무·재시작/재로그인과 소유 process group 정리를 검사한다.
 기존 listener를 테스트하거나 종료하지 않으며 PG의 init/down/reset은 제공하지 않는다.
 새 release의 입력 변경/미완료 manifest·비밀 설정 권한·상속 자격·TIME_WAIT/실제 점유를 별도로 검사한다.
 
@@ -74,8 +74,8 @@ DDL/소유권을 주지 않는다. `PUBBURI_JPA_EXPECTED_COMMENT_NEXT`는 snapsh
 태그 후기·찜·추천 피드백·비밀번호 회전과 별도 authored claim fixture/rollback으로 소비한 ID를 만든다.
 다른 역할의 기존 세션(NOLOGIN 후 통계 열 가림)·비상속 SET/CONNECT 전용 LOGIN·추가 함수·
 틀린 artifact pin을 거절한 뒤 새 marker-only PG에 복구하고
-V5의 19업무표+2control표 binary-cell/스키마·7sequence·UUID/원문/receipt 동일성을 대조한다. JPA 재기동의
-기존 주문 금액/후기·새 암호/찜/추천 피드백·개인 notebook 원문/배열/revision과 소비 ID 비재사용을 확인하며 그 뒤 새 쓰기와 frozen 동일 상태를
+V6의 22업무표+2control표 binary-cell/스키마·7sequence·UUID/원문/receipt 동일성을 대조한다. JPA 재기동의
+기존 주문 금액/후기·새 암호/찜/추천 피드백·개인 notebook 원문/배열/revision·cart 수량/revision/멱등 receipt와 소비 ID 비재사용을 확인하며 그 뒤 새 쓰기와 frozen 동일 상태를
 구분한다. COMMIT 불확실/후행 검수 실패의 단위 주입은 실제 서버 crash나 네트워크 ACK 유실을
 재현한 결과가 아니다. 기존 MySQL·PG·JPA 필수 job 안에서 실행하며 별도 파이프라인을 만들지 않는다.
 
