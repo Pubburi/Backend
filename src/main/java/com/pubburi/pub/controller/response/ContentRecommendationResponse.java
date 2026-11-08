@@ -13,8 +13,9 @@ public record ContentRecommendationResponse(Source source, CatalogScope catalogS
         @JsonInclude(JsonInclude.Include.NON_NULL) ActivityEvidence activityEvidence,
         @JsonInclude(JsonInclude.Include.NON_NULL) FeedbackEvidence feedbackEvidence) {
     public enum Source { PROVIDER, UNAVAILABLE }
-    public enum CatalogScope { REVIEWED_DEMO, REVIEWED_FAMILY_BROWSE_DEMO }
+    public enum CatalogScope { REVIEWED_DEMO, REVIEWED_FAMILY_BROWSE_DEMO, REVIEWED_LOCAL_CATALOG }
     public static ContentRecommendationResponse unavailable(){return new ContentRecommendationResponse(Source.UNAVAILABLE,CatalogScope.REVIEWED_DEMO,null,List.of(),null,null);}
+    public static ContentRecommendationResponse unavailable(CatalogScope scope){return new ContentRecommendationResponse(Source.UNAVAILABLE,scope,null,List.of(),null,null);}
     @Schema(requiredProperties={"favoriteCategories","highlyRatedCategories"})
     public record ActivityEvidence(List<String> favoriteCategories, List<String> highlyRatedCategories) {
         public static ActivityEvidence of(List<String> favorites, List<String> highlyRated) {

@@ -35,7 +35,7 @@ public final class PinnedContentCatalog implements ContentCatalogSource {
                 :validate(root,sha256,now,familyBrowseDemoEnabled));
         }catch(java.io.IOException|java.security.NoSuchAlgorithmException|IllegalArgumentException|DateTimeException invalid){return Optional.empty();}
     }
-    private static byte[] read(Path file,String expected,int budget)throws java.io.IOException,java.security.NoSuchAlgorithmException{
+    static byte[] read(Path file,String expected,int budget)throws java.io.IOException,java.security.NoSuchAlgorithmException{
         require(budget>0 && expected!=null && expected.matches("[a-f0-9]{64}") && Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS));
         byte[] bytes;try(var stream=Files.newInputStream(file,LinkOption.NOFOLLOW_LINKS)){bytes=stream.readNBytes(budget+1);}
         require(bytes.length<=budget && HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).equals(expected));

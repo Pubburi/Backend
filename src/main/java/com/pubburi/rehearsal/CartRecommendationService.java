@@ -21,33 +21,40 @@ public class CartRecommendationService {
         this.snapshots=snapshots;this.catalogs=catalogs;this.provider=provider;this.mapper=mapper;contract=new ContextContract(mapper);
     }
     public CartRecommendationResponse recommend(SessionUser owner,CartInput.Recommendation input){
-        var approved=catalogs.current().filter(catalog->catalog.scope()==CatalogScope.REVIEWED_DEMO);
-        var ids=approved.map(ContentCatalogSource.Catalog::ids).orElse(List.of());
-        var before=snapshots.read(owner,ids);
+        var approved=catalogs.current().filter(catalog->Set.of(CatalogScope.REVIEWED_DEMO,CatalogScope.REVIEWED_LOCAL_CATALOG).contains(catalog.scope()));
+        var ids=approved.map(ContentCatalogSource.Authority::ids).orElse(List.of());
+        var namespace=approved.map(ContentCatalogSource.Authority::businessSourceId).orElse(null);
+        var before=read(owner,ids,namespace);
         if(before.cart().version()!=input.expectedVersion())changed();
-        var references=references(before.cart(),approved);
-        var reason=unavailable(references,approved.isPresent());
-        if(reason!=null)return unavailable(before.cart(),references,reason);
+        var selected=approved.map(authority->authority instanceof ContentCatalogSource.Catalog catalog?catalog:
+            authority.resolve(before.content().products()).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Reviewed catalog facts changed")));
+        var scope=selected.map(ContentCatalogSource.Catalog::scope).orElse(CatalogScope.REVIEWED_DEMO);
+        var references=references(before.cart(),selected);
+        var reason=unavailable(references,selected.isPresent());
+        if(reason!=null)return unavailable(before.cart(),references,reason,scope);
 
-        var catalog=approved.orElseThrow();var referenceIds=references.stream().map(Reference::productId).toList();
+        var catalog=selected.orElseThrow();var referenceIds=references.stream().map(Reference::productId).toList();
         requireCurrent(catalog,before);
         var negativeIds=ContextContract.excludedByFeedback(catalog.catalog(),before.content().feedback());
         var response=provider.context(catalog.catalog(),referenceIds,before.content().preferences().hardConstraints(),negativeIds,input.limit());
         // Remote work owns no DB transaction or cart/member lock. Every result is rechecked, including failures.
-        var current=snapshots.read(owner,ids);
+        var current=read(owner,ids,namespace);
         if(!ContentWire.equal(mapper.valueToTree(before.cart()),mapper.valueToTree(current.cart()))
                 || !ContentWire.equal(mapper.valueToTree(before.content().preferences().hardConstraints()),mapper.valueToTree(current.content().preferences().hardConstraints()))
                 || !before.content().feedback().notInterested().equals(current.content().feedback().notInterested()))changed();
         requireCurrent(catalog,current);
-        var after=catalogs.current().filter(value->value.scope()==CatalogScope.REVIEWED_DEMO);
-        if(after.isEmpty())return unavailable(current.cart(),references(current.cart(),Optional.empty()),UnavailableReason.CATALOG_UNAVAILABLE);
+        var after=catalogs.current().filter(value->Set.of(CatalogScope.REVIEWED_DEMO,CatalogScope.REVIEWED_LOCAL_CATALOG).contains(value.scope()));
+        if(after.isEmpty()){
+            if(scope==CatalogScope.REVIEWED_LOCAL_CATALOG)changed();
+            return unavailable(current.cart(),references(current.cart(),Optional.empty()),UnavailableReason.CATALOG_UNAVAILABLE,scope);
+        }
         if(!catalog.sha256().equals(after.get().sha256()))changed();
-        if(response.isEmpty())return unavailable(current.cart(),references,UnavailableReason.PROVIDER_UNAVAILABLE);
+        if(response.isEmpty())return unavailable(current.cart(),references,UnavailableReason.PROVIDER_UNAVAILABLE,scope);
         try{
             var result=contract.validate(response.get(),catalog.catalog(),referenceIds,current.content().preferences().hardConstraints(),negativeIds,input.limit());
-            return new CartRecommendationResponse(Source.PROVIDER,CatalogScope.REVIEWED_DEMO,current.cart().version(),references,null,result.result(),
+            return new CartRecommendationResponse(Source.PROVIDER,scope,current.cart().version(),references,null,result.result(),
                 result.ids().stream().map(id->current.content().products().get(id).currentProduct()).toList());
-        }catch(IllegalArgumentException invalid){return unavailable(current.cart(),references,UnavailableReason.PROVIDER_UNAVAILABLE);}
+        }catch(IllegalArgumentException invalid){return unavailable(current.cart(),references,UnavailableReason.PROVIDER_UNAVAILABLE,scope);}
     }
     private List<Reference> references(CartService.Cart cart,Optional<ContentCatalogSource.Catalog> catalog){
         var byId=new HashMap<Integer,com.fasterxml.jackson.databind.JsonNode>();
@@ -68,8 +75,11 @@ public class CartRecommendationService {
         if(refs.stream().anyMatch(ref->ref.state()==ReferenceState.UNAVAILABLE))return UnavailableReason.UNAVAILABLE_REFERENCES;
         return null;
     }
-    private CartRecommendationResponse unavailable(CartService.Cart cart,List<Reference> refs,UnavailableReason reason){
-        return new CartRecommendationResponse(Source.UNAVAILABLE,CatalogScope.REVIEWED_DEMO,cart.version(),refs,reason,null,List.of());
+    private CartRecommendationResponse unavailable(CartService.Cart cart,List<Reference> refs,UnavailableReason reason,CatalogScope scope){
+        return new CartRecommendationResponse(Source.UNAVAILABLE,scope,cart.version(),refs,reason,null,List.of());
+    }
+    private CartContextSnapshotService.Snapshot read(SessionUser owner,List<Integer> ids,String namespace){
+        return namespace==null?snapshots.read(owner,ids):snapshots.read(owner,ids,namespace);
     }
     private void requireCurrent(ContentCatalogSource.Catalog catalog,CartContextSnapshotService.Snapshot snapshot){
         if(!OwnedContentSnapshotService.matches(catalog,snapshot.content().products()))changed();

@@ -40,28 +40,30 @@ public class OwnedContentRecommendationService {
             boolean includeFeedback) {
         if (limit < 1 || limit > 12) throw new IllegalArgumentException("Recommendation limit must be between 1 and 12");
         var approved = catalogs.current();
-        var ids = approved.map(ContentCatalogSource.Catalog::ids).orElse(List.of());
-        var activityIds = includeActivity && approved.isPresent() ? availableIds(approved.get()) : List.<Integer>of();
-        boolean useFeedback = includeFeedback && approved.map(catalog -> catalog.scope() == CatalogScope.REVIEWED_DEMO).orElse(false);
-        var before = snapshot(id, epoch, ids, activityIds, useFeedback);
+        var ids = approved.map(ContentCatalogSource.Authority::ids).orElse(List.of());
+        var activityIds = includeActivity && approved.isPresent() ? approved.get() instanceof ContentCatalogSource.Catalog catalog
+            ? availableIds(catalog) : ids : List.<Integer>of();
+        boolean useFeedback = includeFeedback && approved.map(catalog -> Set.of(CatalogScope.REVIEWED_DEMO,CatalogScope.REVIEWED_LOCAL_CATALOG).contains(catalog.scope())).orElse(false);
+        var namespace=approved.map(ContentCatalogSource.Authority::businessSourceId).orElse(null);
+        var before = snapshot(id, epoch, ids, activityIds, useFeedback,namespace);
         if (approved.isEmpty()) return ContentRecommendationResponse.unavailable();
 
-        var catalog = approved.get();
-        requireCurrent(catalog, before);
+        var authority = approved.get();
+        var catalog = authority.resolve(before.products()).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Reviewed catalog facts changed"));
         var signals = before.feedback();
-        if (!signals.withinProviderLimit()) return ContentRecommendationResponse.unavailable();
+        if (!signals.withinProviderLimit()) return unavailable(catalog.scope());
         var response = signals.isEmpty()
             ? gateway.recommend(catalog.catalog(), before.preferences(), limit, before.activity())
             : gateway.feedback(catalog.catalog(), before.preferences(), limit, before.activity(), signals);
 
-        var current = snapshot(id, epoch, ids, activityIds, useFeedback);
+        var current = snapshot(id, epoch, ids, activityIds, useFeedback,namespace);
         if (!equal(mapper.valueToTree(before.preferences()), mapper.valueToTree(current.preferences()))
                 || !Objects.equals(before.activity(), current.activity()) || !signals.equals(current.feedback())) changed();
         requireCurrent(catalog, current);
         var after = catalogs.current();
-        if (after.isEmpty()) return ContentRecommendationResponse.unavailable();
+        if (after.isEmpty()) {if(authority.scope()==CatalogScope.REVIEWED_LOCAL_CATALOG)changed();return ContentRecommendationResponse.unavailable();}
         if (!catalog.sha256().equals(after.get().sha256())) changed();
-        if (response.isEmpty()) return ContentRecommendationResponse.unavailable();
+        if (response.isEmpty()) return unavailable(catalog.scope());
 
         try {
             var preferences = effectivePreferences(before);
@@ -81,13 +83,17 @@ public class OwnedContentRecommendationService {
                 usedEvidence(before.activity(), result), feedbackEvidence);
         } catch (IllegalArgumentException invalid) {
             // No unfiltered retry or fabricated fallback after negative feedback.
-            return ContentRecommendationResponse.unavailable();
+            return unavailable(catalog.scope());
         }
     }
 
     private OwnedContentSnapshotService.Snapshot snapshot(String id, String epoch, List<Integer> ids,
-            List<Integer> activityIds, boolean feedback) {
+            List<Integer> activityIds, boolean feedback,String namespace) {
+        if(namespace!=null)return snapshots.read(id,epoch,ids,activityIds,feedback,namespace);
         return feedback ? snapshots.read(id, epoch, ids, activityIds, true) : snapshots.read(id, epoch, ids, activityIds);
+    }
+    private ContentRecommendationResponse unavailable(CatalogScope scope){
+        return scope==CatalogScope.REVIEWED_LOCAL_CATALOG?ContentRecommendationResponse.unavailable(scope):ContentRecommendationResponse.unavailable();
     }
 
     private List<Integer> availableIds(ContentCatalogSource.Catalog catalog) {
