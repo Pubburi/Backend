@@ -31,6 +31,8 @@ NOTEBOOK_SCHEMA_SHA256 = 'e0cd18858c5c971c0f1ab391707b895d384e58e08642949656338d
 NOTEBOOK_PRIMARY = dict(FEEDBACK_PRIMARY, t_user_notebook='id')
 CART_SCHEMA_SHA256 = '959bcbc3487b38d7f63477eb44165968a3200bf673e59707e1a9c36079103db1'
 CART_PRIMARY = dict(NOTEBOOK_PRIMARY, t_user_cart='user_id',t_user_cart_item='user_id,product_id',t_user_cart_operation='user_id,operation_id')
+NOTIFICATION_SCHEMA_SHA256 = '40b46b3abd58ab2bc34bff5c5b239238eaf68af3b866d6557dc3e1792dccb9b7'
+NOTIFICATION_PRIMARY = dict(CART_PRIMARY, t_user_notification='id')
 
 
 def known_check(row):
@@ -114,7 +116,7 @@ def stopped_roles(connection):
 def inventory(connection):
     relations = dict(connection.execute("SELECT c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relkind IN ('r','S','v','m','f','p')").fetchall())
     if relations not in tuple(dict({name: 'r' for name in primary}, **{name: 'S' for name in SEQUENCES})
-                              for primary in (PRIMARY, FEEDBACK_PRIMARY, NOTEBOOK_PRIMARY, CART_PRIMARY)):
+                              for primary in (PRIMARY, FEEDBACK_PRIMARY, NOTEBOOK_PRIMARY, CART_PRIMARY, NOTIFICATION_PRIMARY)):
         reject('schema_inventory_rejected')
     reject_unversioned_objects(connection)
     if connection.execute("""SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -183,6 +185,8 @@ def schema_primary(shape, error):
         return NOTEBOOK_PRIMARY
     if fingerprint == CART_SCHEMA_SHA256:
         return CART_PRIMARY
+    if fingerprint == NOTIFICATION_SCHEMA_SHA256:
+        return NOTIFICATION_PRIMARY
     reject(error)
 
 

@@ -21,6 +21,8 @@ final class TargetSchemaContract {
         verifyEmptyNotebook(connection);
         expected.addAll(List.of("t_user_cart","t_user_cart_item","t_user_cart_operation"));
         verifyEmptyCart(connection);
+        expected.add("t_user_notification");
+        verifyEmptyNotifications(connection);
         if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
         if(version==2 && !reviewTags) throw new IllegalArgumentException("postgresql_v2_review_tags_required");
         if(reviewTags) {expected.add("t_comment_taste_tag");reviewTags(connection,version==1);}
@@ -95,7 +97,24 @@ final class TargetSchemaContract {
         expectedForeign.add("t_user_cart_item\tuser_id\tt_user_cart\tuser_id\tCASCADE");
         expectedForeign.add("t_user_cart_item\tcurrent_product_id\tt_product\tid\tSET NULL");
         expectedForeign.add("t_user_cart_operation\tuser_id\tt_user_cart\tuser_id\tCASCADE");
+        if(!"id".equals(primary.get("t_user_notification")))throw new IllegalArgumentException("postgresql_notification_primary_changed");
+        expectedForeign.add("t_user_notification\tuser_id\tt_user\tid\tCASCADE");
         if(!foreign.equals(expectedForeign)) throw new IllegalArgumentException("postgresql_import_foreign_changed");
+    }
+    private static void verifyEmptyNotifications(Connection connection)throws SQLException{
+        try(var s=connection.createStatement()){
+            s.execute("LOCK TABLE pubburi.t_user_notification IN ACCESS SHARE MODE");
+            try(var rows=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pubburi.t_user_notification)")){
+                if(!rows.next() || rows.getBoolean(1))throw new IllegalArgumentException("postgresql_import_notifications_not_empty");
+            }
+            String shape="id:uuid:0:false,user_id:character varying(100):0:false,event_type:character varying(16):0:false,event_id:integer:0:false,order_id:integer:0:true,product_id:integer:0:true,product_name:character varying(100):0:true,created_at:timestamp(6) with time zone:0:false,read_at:timestamp(6) with time zone:0:true";
+            try(var rows=s.executeQuery("SELECT string_agg(a.attname||':'||format_type(a.atttypid,a.atttypmod)||':'||a.attndims::text||':'||(NOT a.attnotnull)::text,',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid='pubburi.t_user_notification'::regclass AND a.attnum>0 AND NOT a.attisdropped")){
+                if(!rows.next() || !shape.equals(rows.getString(1)))throw new IllegalArgumentException("postgresql_notification_shape_changed");
+            }
+        }
+        var indexes=SchemaIndexContract.actual(connection);
+        if(!indexes.contains(new SchemaIndexContract.Key("t_user_notification",true,"user_id:A:-,event_type:A:-,event_id:A:-"))
+                || !indexes.contains(new SchemaIndexContract.Key("t_user_notification",false,"user_id:A:-,created_at:D:-,id:D:-")))throw new IllegalArgumentException("postgresql_notification_indexes_changed");
     }
     private static void verifyEmptyCart(Connection connection)throws SQLException{
         var shapes=Map.of(

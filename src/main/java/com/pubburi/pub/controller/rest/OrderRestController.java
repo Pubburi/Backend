@@ -1,6 +1,9 @@
 package com.pubburi.pub.controller.rest;
 
 import java.util.List;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.pubburi.pub.model.service.AccountNotificationActions;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,10 +40,16 @@ public class OrderRestController {
 
 	private final OrderService orderService;
 	private final AccessGuard accessGuard;
+	private final Optional<AccountNotificationActions> notifications;
 
 	public OrderRestController(OrderService orderService, AccessGuard accessGuard) {
+		this(orderService,accessGuard,Optional.empty());
+	}
+	@Autowired
+	public OrderRestController(OrderService orderService, AccessGuard accessGuard, Optional<AccountNotificationActions> notifications) {
 		this.orderService = orderService;
 		this.accessGuard = accessGuard;
+		this.notifications = notifications;
 	}
 
 	@PostMapping("/orders")
@@ -100,7 +109,11 @@ public class OrderRestController {
 
 	@PatchMapping("/admin/orders/{id}/complete")
 	public ResponseEntity<ApiResponse<Boolean>> complete(@PathVariable int id, HttpSession session) {
-		accessGuard.requireAdmin(session);
+		SessionUser actor = accessGuard.requireAdmin(session);
+		if (notifications.isPresent()) {
+			notifications.get().completeOrder(id,actor);
+			return ResponseEntity.ok(ApiResponse.ok(true));
+		}
 		Order order = orderService.getOrderById(id);
 		if (order == null) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");

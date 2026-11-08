@@ -83,6 +83,16 @@ def run(environ, runtime, recovery_control):
         feedback_headers={'X-Pubburi-Feedback-Owner':actor}
         retained_feedback=request(user,base,'PUT',feedback_path,{'feedback':'MATCHED'},headers=feedback_headers)
         if retained_feedback!={'productId':pid,'feedback':'MATCHED'}:raise ValueError('recovery_ci_feedback_write_changed')
+        notification_path='/api/users/me/notifications'
+        notification_headers={'X-Pubburi-Account-Owner':actor}
+        request(admin_cookie,base,'PATCH','/api/admin/orders/'+str(order['oId'])+'/complete')
+        removed_review=request(user,base,'POST','/api/comments',{'productId':pid,'rating':3.5,'comment':'Authored explicitly removed review'},201)
+        request(admin_cookie,base,'DELETE','/api/comments/'+str(removed_review['id']))
+        notifications=request(user,base,'GET',notification_path,headers=notification_headers)
+        if notifications['total']!=2 or notifications['unreadCount']!=2:raise ValueError('recovery_ci_notification_production_failed')
+        notification_id=notifications['items'][0]['id']
+        retained_read=request(user,base,'PUT',notification_path+'/'+notification_id+'/read',headers=notification_headers)
+        retained_notifications=request(user,base,'GET',notification_path,headers=notification_headers)
         notebook_headers={'X-Pubburi-Account-Owner':actor}
         notebook=request(user,base,'POST','/api/users/me/notebook',{'productId':pid,'experience':'TRIED','rating':4.25,
             'tasteTags':['  Raw,comma\n🥃  ','🌾'*40],'aromaTags':[],'memo':'  Recovery private\n🥃  '},201,headers=notebook_headers)
@@ -248,6 +258,8 @@ def run(environ, runtime, recovery_control):
         if not request(user,base,'GET','/api/users/me/favorites/'+str(pid))['favorited']:raise ValueError('recovery_ci_favorite_not_restored')
         if request(user,base,'GET',feedback_path,headers=feedback_headers)!=retained_feedback:raise ValueError('recovery_ci_feedback_not_restored')
         if request(user,base,'GET',notebook_path,headers=notebook_headers)!=retained_notebook:raise ValueError('recovery_ci_notebook_not_restored')
+        if request(user,base,'GET',notification_path,headers=notification_headers)!=retained_notifications:raise ValueError('recovery_ci_notifications_not_restored')
+        if request(user,base,'PUT',notification_path+'/'+notification_id+'/read',headers=notification_headers)!=retained_read:raise ValueError('recovery_ci_first_read_time_changed')
         if request(user,base,'GET',cart_path,headers=notebook_headers)!=retained_cart:raise ValueError('recovery_ci_cart_not_restored')
         for route,intent,order_id in (('/merge',merge_intent,None),('/checkout',checkout_intent,checked['orderId'])):
             replay=request(user,base,'POST',cart_path+route,dict(intent,expectedVersion=0),headers=notebook_headers)
@@ -260,11 +272,12 @@ def run(environ, runtime, recovery_control):
         created=request(user,base,'POST','/api/comments',{'productId':pid,'rating':2.5,'comment':'After recovery','tasteTags':[]},201)
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
-    report={'status':'passed','business_tables':22,'control_tables':2,'sequences':7,
+    report={'status':'passed','business_tables':23,'control_tables':2,'sequences':7,
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'private_notebook_original_arrays_memo_revision_preserved':True,
         'cart_quantities_revision_and_merge_checkout_receipts_preserved':True,
         'cart_retired_nonce_blocks_late_post_after_restore':True,
+        'internal_notifications_snapshots_and_first_read_time_preserved':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],

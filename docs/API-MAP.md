@@ -203,3 +203,7 @@ nullable을 표시한다. [삭제 이력·전환 계약](ORDER-HISTORY-PRESERVAT
   UNAVAILABLE은 result=null/products=[]이며 기본 B0 추천으로 꾸미지 않는다.
 - private/no-store·query/owner/catalog/profile 주입400·수명401·현재 취향/승인 상품 변화409·DB500을
   구분한다. 원본80 자동 전송/fit·서비스 SKU 승인·전체 R02/R04는 아니다. [공급 계약](CONTENT-RECOMMENDATIONS.md)을 따른다.
+
+## 서비스 내부 알림
+
+[본인 F12 계약](NOTIFICATIONS.md)은 PG의 관리자 주문 완료/타인 후기 명시 삭제와 원자 저장하는 알림이다. 본인 GET 목록·개별 PUT 읽음·페이지 ID POST 읽음만 제공하며 임의 생성/외부 push는 없다. 기존 주문·후기 경로/응답과 MySQL baseline은 보존한다.

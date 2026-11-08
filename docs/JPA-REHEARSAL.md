@@ -68,7 +68,7 @@
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 API와 [계정 카트](CART.md)를 포함한49개/63작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 API와 [계정 카트](CART.md)·[내부 알림](NOTIFICATIONS.md)을 포함한52개/66작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 추천 피드백은 Flyway V4와 최소 권한을 적용한 명시 PostgreSQL 런타임에서 쓴다. 세 메서드는
 세션에서 본인을 정하고 URL 인코딩한 현재 ID와 `X-Pubburi-Feedback-Owner`를 비교한다. 다른
@@ -254,3 +254,5 @@ Tomcat10.1.61/Jackson BOM2.21.8/JDBC42.7.14/Flyway13.12.0을 명시하고 기존
 비공개 notebook은 [F07 API](NOTEBOOK.md)의 V5·최소 권한·개인 원문/상품 삭제 보존·revision 계약을 따른다. 공개 후기/추천 서버 입력으로 자동 승격하지 않는다.
 
 본인 계정 cart는 [F10 API](CART.md)의 V6·동일 계정 revision·명시 guest 병합·중복 방지 checkout/receipt·상품 삭제 보존을 따른다. 기존 주문 API와 MySQL 원본은 변경하지 않는다.
+
+본인 내부 알림은 [F12 API](NOTIFICATIONS.md)의 V7·업무 변경과 원자 생성·사건 중복 방지·목록/읽음·계정 수명을 따른다.
