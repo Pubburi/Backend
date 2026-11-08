@@ -1,4 +1,5 @@
 import unittest
+from contextlib import contextmanager
 import io
 import errno
 import subprocess
@@ -155,17 +156,78 @@ class JpaOwnedCommandTests(unittest.TestCase):
                     with self.assertRaises(ValueError):jpa_rehearsal_ci.command(args,dict(os.environ),self.root/(outcome+".log"))
                 self.assert_stopped(status)
             finally:self.emergency_cleanup(status)
-    def test_parent_sigterm_also_cleans_its_unreaped_owned_session(self):
-        status,args=self.launcher("waiting")
+    @contextmanager
+    def parent_driver(self,args):
         code="import os,sys;from pathlib import Path;sys.path.insert(0,"+repr(str(Path(jpa_rehearsal_ci.__file__).parent))+");import jpa_rehearsal_ci;jpa_rehearsal_ci.command("+repr(args)+",dict(os.environ),Path("+repr(str(self.root/'parent.log'))+"))"
         driver=subprocess.Popen([sys.executable,"-c",code])
-        try:
-            end=time.monotonic()+5
-            while not status.exists() and time.monotonic()<end:time.sleep(.01)
-            self.assertTrue(status.exists());driver.terminate();self.assertEqual(driver.wait(timeout=5),143);self.assert_stopped(status)
+        try:yield driver
         finally:
-            if driver.poll() is None:driver.kill();driver.wait(timeout=5)
-            self.emergency_cleanup(status)
+            if driver.poll() is None:
+                driver.terminate()
+                try:driver.wait(timeout=5)
+                except subprocess.TimeoutExpired:driver.kill();driver.wait(timeout=5)
+
+    def test_parent_sigterm_also_cleans_its_unreaped_owned_session(self):
+        status,args=self.launcher("waiting")
+        try:
+            with self.parent_driver(args) as driver:
+                end=time.monotonic()+5
+                while not status.exists() and time.monotonic()<end:time.sleep(.01)
+                self.assertTrue(status.exists());driver.terminate();self.assertEqual(driver.wait(timeout=5),143);self.assert_stopped(status)
+        finally:self.emergency_cleanup(status)
+
+    def test_preparation_failure_before_ready_leaves_no_live_owned_group_members(self):
+        owned=self.root/"before-ready-owned.json";status=self.root/"never-ready.json"
+        # This witness records ownership before readiness; it is not the missing ready status.
+        code="import json,os,time;from pathlib import Path;Path("+repr(str(owned))+").write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp()}));time.sleep(60)"
+        try:
+            with self.assertRaisesRegex(ValueError,"authored preparation failure"):
+                with self.parent_driver([sys.executable,"-c",code]):
+                    end=time.monotonic()+5
+                    while not owned.exists() and time.monotonic()<end:time.sleep(.01)
+                    self.assertTrue(owned.exists());self.assertFalse(status.exists())
+                    raise ValueError("authored preparation failure")
+            self.assert_no_live_group_members(owned)
+        finally:
+            # A failed regression must not leave its own fixture behind. Verify argv/group first.
+            if owned.exists():
+                value=json.loads(owned.read_text())
+                try:
+                    args=subprocess.check_output(["ps","-p",str(value["pid"]),"-o","args="],text=True,stderr=subprocess.DEVNULL)
+                    if str(owned) in args and os.getpgid(value["pid"])==value["pgid"]:
+                        os.killpg(value["pgid"],signal.SIGTERM)
+                except (ProcessLookupError,subprocess.CalledProcessError):pass
+                self.assert_no_live_group_members(owned)
+
+    def assert_no_live_group_members(self,owned,budget=2):
+        value=json.loads(owned.read_text());group=value["pgid"]
+        self.assertGreater(group,1);self.assertNotEqual(group,os.getpgrp());end=time.monotonic()+budget
+        while True:
+            rows=subprocess.check_output(["ps","-axo","pid=,pgid=,stat="],text=True).splitlines()
+            members=[row for row in rows if len(row.split())==3 and int(row.split()[1])==group
+                     and not row.split()[2].startswith("Z")]
+            if not members:return
+            if time.monotonic()>=end:self.fail("Owned command group still has live members after parent cleanup")
+            time.sleep(.01)
+
+    def test_group_observation_rejects_live_members_but_accepts_an_unreaped_zombie(self):
+        owned=self.root/"zombie-owned.json"
+        child=subprocess.Popen([sys.executable,"-c","import sys;sys.stdin.buffer.read(1)"],
+                               stdin=subprocess.PIPE,start_new_session=True)
+        try:
+            owned.write_text(json.dumps({"pid":child.pid,"pgid":child.pid}))
+            with self.assertRaisesRegex(AssertionError,"still has live members"):
+                self.assert_no_live_group_members(owned,budget=.05)
+            child.stdin.close();end=time.monotonic()+5;state=""
+            # Keep the Popen handle without poll/wait until ps observes the terminated child.
+            while time.monotonic()<end:
+                state=subprocess.check_output(["ps","-p",str(child.pid),"-o","stat="],text=True).strip()
+                if state.startswith("Z"):break
+                time.sleep(.01)
+            self.assertTrue(state.startswith("Z"),state)
+            self.assert_no_live_group_members(owned)
+        finally:
+            child.stdin.close();child.wait(timeout=5)
 
     def test_absolute_command_deadline_cleans_a_live_child_before_reaping_the_supervisor(self):
         status,args=self.launcher("waiting")
