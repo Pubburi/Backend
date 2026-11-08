@@ -85,6 +85,9 @@ public class CartService {
         var order=new Order();order.setUserId(owner.id());order.setOrderType(input.orderType());order.setOrderTable(input.orderTable());
         var details=input.items().stream().map(item->{var row=new OrderDetail();row.setProductId(item.productId());row.setQuantity(item.quantity());return row;}).toList();
         if(orders.makeOrder(order,details)!=1)throw new IllegalStateException("Cart order could not be created");
+        // Existing order DAOs clear the persistence context after bulk SQL. The DB owner lock
+        // still serializes this cart, but its earlier Java entities are now detached.
+        cart=carts.locked(owner.id()).orElseThrow();owned.clear();for(var row:lines.owned(owner.id()))owned.put(row.productId(),row);
         for(var item:input.items()){var row=owned.get(item.productId());int remaining=row.quantity()-item.quantity();if(remaining==0)lines.delete(row);else row.quantity(remaining);}
         lines.flush();advance(cart);operations.saveAndFlush(JpaCartOperation.create(owner.id(),input.operationId(),Kind.CHECKOUT,hash,order.getoId()));
         return new Result(input.operationId(),false,view(owner.id(),cart),order.getoId());
