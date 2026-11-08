@@ -107,7 +107,8 @@ name은 현재 상품명이고 삭제된 productId/name은 null·DELETED다. 과
 
 모든 행이 READY일 때만 고유 현재 상품 ID를 기존 context 제공자에 전달한다. 같은 상품의 여러
 상세 행과 수량은 원 응답에 보존하지만 모델 가중치로 합산하지 않는다. state와 scope는 위 카트
-계약을 재사용하며 사유 순서는 `EMPTY_ORDER → REFERENCE_LIMIT → DELETED_ITEMS →
+계약을 재사용한다. 제공자에 전달하는 고유 ID/진단은 숫자 오름차순이며 원 상세 행순서와 별개다.
+사유 순서는 `EMPTY_ORDER → REFERENCE_LIMIT → DELETED_ITEMS →
 CATALOG_UNAVAILABLE → UNREVIEWED_ITEMS → UNAVAILABLE_REFERENCES → PROVIDER_UNAVAILABLE`다.
 현재 hard 조건·관심 없음 상품군·모든 기준 상품군 제외, 실제 winning reference/R04 검수도 같다.
 

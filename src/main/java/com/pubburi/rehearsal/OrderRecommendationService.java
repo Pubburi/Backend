@@ -27,7 +27,7 @@ public class OrderRecommendationService {
         var selected=approved.map(authority->authority instanceof ContentCatalogSource.Catalog catalog?catalog:authority.resolve(before.content().products()).orElseThrow(()->new ResponseStatusException(HttpStatus.CONFLICT,"Reviewed catalog facts changed")));
         var references=references(before,selected);var reason=unavailable(references,selected.isPresent());
         if(reason!=null)return unavailable(before,references,reason,scope);
-        var catalog=selected.orElseThrow();var referenceIds=references.stream().map(Reference::productId).distinct().toList();
+        var catalog=selected.orElseThrow();var referenceIds=references.stream().map(Reference::productId).distinct().sorted().toList();
         if(!OwnedContentSnapshotService.matches(catalog,before.content().products()))throw changed();
         var excluded=ContextContract.excludedByFeedback(catalog.catalog(),before.content().feedback());
         // Reuse the cart's provider and factual contract; no order price/name/quantity is a model feature.

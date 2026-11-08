@@ -35,12 +35,12 @@ class OrderRecommendationServiceTests {
         return new OrderContextSnapshotService.Snapshot(order,count,current,new OwnedContentSnapshotService.Snapshot(new UserPreferencesResponse("COMPLETED",new PreferenceSoftResponse(null,null,null,null),bounds),facts,null,signals));
     }
     @Test void completeOriginalRowsKeepQuantitiesButTheProviderSeesOnlyUniqueCurrentIdsAndFacts()throws Exception{
-        var data=sample();var catalog=catalog(data.get("catalog"));var order=order(List.of(row(101,10,Integer.MAX_VALUE),row(102,20,1),row(103,10,2)));
+        var data=sample();var catalog=catalog(data.get("catalog"));var order=order(List.of(row(101,20,Integer.MAX_VALUE),row(102,10,1),row(103,20,2)));
         var before=snapshot(catalog,order,3,new FeedbackSignals(List.of(),List.of(50)),hard);
         when(source.current()).thenAnswer(ignored->Optional.of(catalog));when(snapshots.read(NotebookContractTests.OWNER,7,catalog.ids(),null)).thenReturn(before);
         when(provider.context(catalog.catalog(),List.of(10,20),hard,List.of(50),4)).thenReturn(Optional.of(data.get("response")));
         var result=service.recommend(NotebookContractTests.OWNER,7,new OrderRecommendationInput(4));assertEquals(Source.PROVIDER,result.source());assertEquals(3,result.referenceCount());assertEquals(7,result.orderId());
-        assertEquals(List.of(101,102,103),result.references().stream().map(OrderRecommendationResponse.Reference::detailId).toList());assertEquals(Integer.MAX_VALUE,result.references().get(0).quantity());assertEquals("Current 10",result.references().get(0).name());
+        assertEquals(List.of(101,102,103),result.references().stream().map(OrderRecommendationResponse.Reference::detailId).toList());assertEquals(List.of(20,10,20),result.references().stream().map(OrderRecommendationResponse.Reference::productId).toList());assertEquals(Integer.MAX_VALUE,result.references().get(0).quantity());assertEquals("Current 20",result.references().get(0).name());
         assertEquals(List.of(30,40),result.products().stream().map(ProductResponse::id).toList());assertNull(result.unavailableReason());
         verify(provider).context(catalog.catalog(),List.of(10,20),hard,List.of(50),4);verify(snapshots,times(2)).read(NotebookContractTests.OWNER,7,catalog.ids(),null);
     }
