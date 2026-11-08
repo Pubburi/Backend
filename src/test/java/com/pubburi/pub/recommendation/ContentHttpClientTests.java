@@ -10,6 +10,19 @@ import java.util.concurrent.atomic.*;
 import org.junit.jupiter.api.Test;
 
 class ContentHttpClientTests {
+    @Test void similarExplanationOptInAddsOnlyOneBooleanAndRetainsTheUncredentialedFixedRoute()throws Exception{
+        var sent=new AtomicReference<com.fasterxml.jackson.databind.JsonNode>();var failure=new AtomicReference<Throwable>();
+        var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/",exchange->{try{
+            assertThat(exchange.getRequestURI().toString()).isEqualTo("/v1/recommendations/similar");assertThat(exchange.getRequestHeaders().getFirst("Cookie")).isNull();assertThat(exchange.getRequestHeaders().getFirst("Authorization")).isNull();
+            sent.set(ContentFixtures.JSON.readTree(exchange.getRequestBody().readAllBytes()));exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,2);exchange.getResponseBody().write("{}".getBytes(StandardCharsets.UTF_8));
+        }catch(Throwable error){failure.set(error);}finally{exchange.close();}});server.start();
+        try{
+            var client=new ContentHttpClient(URI.create("http://127.0.0.1:"+server.getAddress().getPort()),Duration.ofMillis(200),Duration.ofSeconds(1),ContentFixtures.JSON);
+            assertThat(client.similar(ContentFixtures.catalog().catalog(),81,4)).isPresent();assertThat(sent.get().size()).isEqualTo(3);assertThat(sent.get().has("include_explanations")).isFalse();
+            assertThat(client.similarExplained(ContentFixtures.catalog().catalog(),81,4)).isPresent();assertThat(sent.get().size()).isEqualTo(4);assertThat(sent.get().path("include_explanations").booleanValue()).isTrue();assertThat(sent.get().path("reference_product_id").intValue()).isEqualTo(81);assertThat(failure.get()).isNull();
+        }finally{server.stop(0);}
+    }
     @Test void contextUsesOnlyTheFixedProviderRouteUniqueServerReferencesAndLiteralHardBounds()throws Exception{
         var sent=new AtomicReference<com.fasterxml.jackson.databind.JsonNode>();var failure=new AtomicReference<Throwable>();
         var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);

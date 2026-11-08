@@ -1,0 +1,123 @@
+{
+  "request": {
+    "catalog": [
+      {
+        "product_id": 81,
+        "sku_group": "authored-reference",
+        "available": true,
+        "category": null,
+        "price_krw": null,
+        "abv_percent": null,
+        "volume_ml": null,
+        "taste_tags": [
+          "\ue000",
+          "\ud83d\ude00"
+        ],
+        "aroma_tags": null
+      },
+      {
+        "product_id": 83,
+        "sku_group": "authored-candidate",
+        "available": true,
+        "category": null,
+        "price_krw": null,
+        "abv_percent": null,
+        "volume_ml": null,
+        "taste_tags": [
+          "\ue000",
+          "\ud83d\ude00"
+        ],
+        "aroma_tags": null
+      },
+      {
+        "product_id": 84,
+        "sku_group": "authored-unavailable",
+        "available": false,
+        "category": null,
+        "price_krw": null,
+        "abv_percent": null,
+        "volume_ml": null,
+        "taste_tags": [
+          "other"
+        ],
+        "aroma_tags": null
+      }
+    ],
+    "reference_product_id": 81,
+    "limit": 4,
+    "include_explanations": true
+  },
+  "response": {
+    "algorithm": "b1-tfidf-minmax-v1",
+    "model_fingerprint": "60920af05ebde8d85edbef4586ba76e8d7916db74b135f5396874b8ad5ac3709",
+    "items": [
+      {
+        "product_id": 83,
+        "score": 1.0,
+        "reasons": [
+          "available",
+          "content_similarity"
+        ],
+        "contributions": [
+          {
+            "component": "text",
+            "feature": "taste:\ue000",
+            "contribution": 0.5000000000000001
+          },
+          {
+            "component": "text",
+            "feature": "taste:\ud83d\ude00",
+            "contribution": 0.5000000000000001
+          }
+        ],
+        "explanation": {
+          "version": "r04-facts-v1",
+          "basis": "content_similarity",
+          "comparison": {
+            "kind": "reference_product",
+            "product_id": 81
+          },
+          "score_evidence": [
+            {
+              "kind": "taste_match",
+              "label": "\ub9db \ud0dc\uadf8 \uc77c\uce58",
+              "actual_value": "\ue000",
+              "target_value": "\ue000",
+              "contribution": 0.5000000000000001
+            },
+            {
+              "kind": "taste_match",
+              "label": "\ub9db \ud0dc\uadf8 \uc77c\uce58",
+              "actual_value": "\ud83d\ude00",
+              "target_value": "\ud83d\ude00",
+              "contribution": 0.5000000000000001
+            }
+          ],
+          "total_positive_contributions": 2,
+          "score_evidence_truncated": false,
+          "filter_evidence": [
+            {
+              "kind": "availability_filter",
+              "label": "\uc785\ub825 \uac00\uc6a9 \uc870\uac74 \ucda9\uc871",
+              "actual_value": true
+            }
+          ],
+          "fallback_reason": null
+        }
+      }
+    ],
+    "eligible_count": 1,
+    "supported_profile_tokens": 2,
+    "unknown_profile_tokens": 0,
+    "active_numeric_preferences": [],
+    "fallback_reason": null,
+    "fit_scope": "request_catalog",
+    "representation_fitted": true,
+    "reference_product_id": 81,
+    "reference_sku_group": "authored-reference",
+    "reference_state": "available",
+    "profile_source": "reference_product_facts",
+    "reference_group_policy": "exclude_reference_group",
+    "excluded_reference_group_count": 1
+  }
+}
