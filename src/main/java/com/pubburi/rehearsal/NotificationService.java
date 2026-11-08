@@ -17,8 +17,12 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class NotificationService implements AccountNotificationActions {
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    public record Entry(UUID id,JpaNotification.Type type,long createdAt,Long readAt,Integer orderId,
-            Integer productId,String productName,boolean targetAvailable){ }
+    @io.swagger.v3.oas.annotations.media.Schema(name="AccountNotificationEntry")
+    public record Entry(UUID id,JpaNotification.Type type,long createdAt,
+            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Long readAt,
+            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Integer orderId,
+            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Integer productId,
+            @io.swagger.v3.oas.annotations.media.Schema(nullable=true) String productName,boolean targetAvailable){ }
     public record Page(List<Entry> items,int page,int size,int total,int totalPages,boolean hasNext,int unreadCount){ }
     public record ReadItem(UUID id,long readAt){ }
     public record ReadResult(List<ReadItem> items,int unreadCount){ }

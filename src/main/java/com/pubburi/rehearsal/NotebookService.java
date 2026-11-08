@@ -20,8 +20,13 @@ public class NotebookService {
     private final UserDao users;private final ProductDao products;private final NotebookRepository notes;
     public NotebookService(UserDao users,ProductDao products,NotebookRepository notes){this.users=users;this.products=products;this.notes=notes;}
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    public record Entry(UUID id,Integer productId,String productName,ProductResponse currentProduct,Experience experience,
-        BigDecimal rating,List<String> tasteTags,List<String> aromaTags,String memo,long version,long createdAt,long updatedAt){ }
+    public record Entry(UUID id,
+        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) Integer productId,String productName,
+        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) ProductResponse currentProduct,Experience experience,
+        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) BigDecimal rating,
+        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) List<String> tasteTags,
+        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) List<String> aromaTags,
+        @io.swagger.v3.oas.annotations.media.Schema(nullable=true) String memo,long version,long createdAt,long updatedAt){ }
     private void current(SessionUser owner){if(users.selectSessionIdentity(owner.id(),owner.authEpoch())==null)throw expired();}
     private void lockOwner(SessionUser owner){var user=users.selectByIdForUpdate(owner.id());if(user==null || !owner.authEpoch().equals(user.getAuthEpoch()))throw expired();}
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
