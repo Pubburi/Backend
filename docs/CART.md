@@ -9,7 +9,7 @@ F10은 PG/JPA에서 계정별 카트를 보관한다. 비회원 기기 카트는
 
 ## API와 값
 
-모든 성공은 HTTP200의 `ApiResponse.data`이며 일반 응답은 아래 cart다.
+모든 성공은 HTTP200의 `ApiResponse.data`이며 카트 조회/단일 행 변경의 응답은 아래 cart다.
 
 ```json
 {"version":0,"items":[]}
@@ -31,6 +31,7 @@ productName은 담을 때의 이름 snapshot이며 currentProduct는 같은 읽�
 | POST | `/api/users/me/cart/checkout` | merge 필드와 `orderType,orderTable` |
 | GET | `/api/users/me/cart/operations/{operationId}` | 본인 기존 receipt 읽기·기존 Result 반환, 없으면404 |
 | POST | `/api/users/me/cart/operations/{operationId}/resolve` | `{kind,items,orderType,orderTable}`로 원 intent 결과 확인 또는 영속 retirement |
+| POST | `/api/users/me/cart/recommendations` | `{expectedVersion,limit?}`로 현재 카트의 검수 맥락 추천 조회·아래 별도 응답 |
 
 수량은1–99의 정수, 카트와 operation 입력은 최대100행이다. POST items는 비어 있을 수 없다.
 중복 productId·문자열/boolean/소수 정수 강제 변환·추가/생략 body 필드·추가/중복 query는400이다.
@@ -45,6 +46,46 @@ POST/PUT body는64KiB 이내다. 선언 길이 초과413, 길이 없는 stream �
 빈 계정의 첫 성공 변이는 version1부터 시작하며 모든 성공 PUT/DELETE/clear/새 operation은
 no-op이어도 revision을 한 번 올린다. replay와 실패/rollback은 올리지 않는다. revision은 카트
 행의 변경 token이며 별도로 바뀌는 현재 상품 DTO의 ETag가 아니다.
+
+## 현재 카트의 검수 맥락 추천
+
+추천 POST는 현재 계정 헤더와 필수 `expectedVersion`, 선택 `limit`(정수1–12, 기본4)을 받는다.
+query·추가/중복 JSON·boolean/문자열/소수/범위 밖 revision 또는 limit은400이다.
+클라이언트의 상품 ID·수량·계정·취향·카탈로그는 받지 않는다. 서버의 현재 카트를 읽기만 하며
+카트 header/행/revision·receipt·주문·금액을 생성하거나 변경하지 않는다.
+
+응답은 정확히 `source,catalogScope,cartVersion,references,unavailableReason,result,products`다.
+`source`는 PROVIDER/UNAVAILABLE, scope는 기존 REVIEWED_DEMO이며 family-browse를 판매 SKU로
+승격하지 않는다. `references`는 기존 GET 행순서 전체의 `{productId,name,quantity,state}`다.
+name은 현재 이름이며 삭제 시 null이다. quantity는 현재1–99 정수로 보존하되 점수에 가중하지 않는다.
+
+| state | 뜻 |
+|---|---|
+| READY | 현재 검수 container catalog에 있고 available인 기준 |
+| DELETED | 현재 상품이 삭제됨; name=null |
+| UNREVIEWED | 현재 상품은 있으나 승인 catalog에 매핑되지 않음 |
+| UNAVAILABLE | 매핑된 catalog의 available=false |
+| CATALOG_UNAVAILABLE | 승인 container catalog가 미설정/만료/거절됨 |
+
+빈 카트·20행 초과·삭제/미검수/불가 기준을 잘라내거나 일부만 성공시키지 않는다. 모든 행이 READY인
+1–20개일 때만 기존 [R07 제공자](https://github.com/Pubburi/Recommendation/blob/main/docs/CONTEXT-API.md)에
+고유 기준 ID를 전송한다. 수량·계정·cookie·취향/후기 원문을 보내지 않는다. 저장 hard 가격/도수
+조건과 현재 본인의 관심 없음에 속한 검수 SKU 그룹은 후보 제외로 유지한다. 관심 없음 기준도
+맥락 사실로 읽을 수 있지만 해당 그룹을 결과로 반환하지 않는다. 모든 알려진 카트 기준 그룹도 제외한다.
+
+UNAVAILABLE의 result는 null, products는[]이며 B0를 자동 삽입하지 않는다. 사유 우선순위는
+`EMPTY_CART → REFERENCE_LIMIT → DELETED_ITEMS → CATALOG_UNAVAILABLE → UNREVIEWED_ITEMS →
+UNAVAILABLE_REFERENCES → PROVIDER_UNAVAILABLE`다. 정상 PROVIDER는 unavailableReason=null이며
+원래 R07 result와 items 같은 순서의 현재 Product7을 반환한다. 정상 빈 items/fallback_reason도
+PROVIDER로 구분한다. matches의 실제 winning reference와 R04 comparison/기여·필수조건을 검수한다.
+이 결과는 한 기준과 사실이 비슷한 대안이며 전체 카트의 조합 적합성·공동구매 통계가 아니다.
+
+호출 전후 별도 짧은 RR로 현재 cart·저장 hard 조건·관심 없음·전체 검수 상품 binding을 확인한다.
+원격 호출 중 DB TX/회원 잠금을 유지하지 않는다. revision/수량·상품/가격/특성·조건/관심 없음·bundle
+변화는409, 계정/epoch 회수는401이며 원래 카트는 보존한다. provider/strict 응답 실패는 위
+UNAVAILABLE, DB 오류는500이다. 최신 읽기 이후의 수정을 잠그는 보장은 아니며 주문 가격은
+기존 checkout 시점에 확정한다. 연결200ms·원격 전체3초와 요청512KiB/응답256KiB 상한을 재사용한다.
+본인 주문 맥락과 일반 서비스 catalog의 R07 전체 인수는 후속이다.
 
 ## 병합·주문·재시도
 
@@ -81,6 +122,6 @@ receipt를 회원 수명까지 보존해 ACK 유실의 재시도가 비운 카�
 
 회원 삭제는 카트/receipt를 CASCADE하고 재가입에 상속하지 않는다. V6은 새 sequence 없이3표를
 추가하며 runtime은 필요한 열만 갱신한다. 초기 source import/cutover는 PG-only cart3표가 비어 있어야
-한다. MySQL 원본·v1/v2 source는 바꾸지 않고 MySQL baseline의 GET base만404/CART_NOT_SUPPORTED로 기기 카트 지원을 명시하며 다른404/503/401은 대체 모드를 허용하지 않는다. V3–V5 백업은 원형 복구를
+한다. MySQL 원본·v1/v2 source는 바꾸지 않고 MySQL baseline의 GET base와 추천 POST는404/CART_NOT_SUPPORTED로 미지원을 명시한다. 기기 카트 대체는 기존 GET base의 marker로만 선택하며 다른404/503/401이나 추천 UNAVAILABLE은 대체 모드를 허용하지 않는다. V3–V5 백업은 원형 복구를
 유지하며 V6 runtime 시작 전 명시 migration/grant가 필요하다. PG 쓰기 뒤 복구는 cart/receipt까지
 전체 보존해야 하며 자동 초기화·원본 덮어쓰기·자동 DB 선택을 제공하지 않는다.

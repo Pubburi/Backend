@@ -22,6 +22,9 @@ public final class CartInput {
     public record Checkout(UUID operationId,long expectedVersion,List<Item> items,String orderType,String orderTable){ }
     @JsonDeserialize(using=ResolveDeserializer.class) @Schema(additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
     public record Resolve(com.pubburi.rehearsal.persistence.JpaCartOperation.Kind kind,List<Item> items,String orderType,String orderTable){ }
+    @JsonDeserialize(using=RecommendationDeserializer.class)
+    @Schema(name="CartRecommendationInput",requiredProperties={"expectedVersion"},additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
+    public record Recommendation(long expectedVersion,@Schema(minimum="1",maximum="12",defaultValue="4") int limit){ }
     private static IllegalArgumentException invalid(){return new IllegalArgumentException("Invalid cart input");}
     private static JsonNode root(JsonParser parser,String...keys)throws IOException{
         parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);JsonNode node=parser.getCodec().readTree(parser);
@@ -76,6 +79,14 @@ public final class CartInput {
             if(value==com.pubburi.rehearsal.persistence.JpaCartOperation.Kind.MERGE){if(!n.get("orderType").isNull() || !n.get("orderTable").isNull())throw invalid();return new Resolve(value,items(n.get("items")),null,null);}
             var type=n.get("orderType");if(!type.isTextual() || !Set.of("ONLINE","OFFLINE","TAKEOUT").contains(type.textValue()))throw invalid();
             return new Resolve(value,items(n.get("items")),type.textValue(),table(n.get("orderTable")));
+        }
+    }
+    public static class RecommendationDeserializer extends JsonDeserializer<Recommendation>{
+        @Override public Recommendation getNullValue(DeserializationContext c)throws JsonMappingException{return c.reportInputMismatch(Recommendation.class,"Cart object is required");}
+        @Override public Recommendation deserialize(JsonParser p,DeserializationContext c)throws IOException{
+            p.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);JsonNode n=p.getCodec().readTree(p);
+            if(n==null || !n.isObject() || !n.has("expectedVersion") || n.size()!=(n.has("limit")?2:1) || p.nextToken()!=null)throw invalid();
+            return new Recommendation(NotebookInput.version(n.get("expectedVersion")),n.has("limit")?integer(n.get("limit"),12):4);
         }
     }
 }

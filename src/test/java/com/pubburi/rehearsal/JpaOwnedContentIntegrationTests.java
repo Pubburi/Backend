@@ -348,6 +348,68 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             .put("contribution", 1.0 / 3);
         return root;
     }
+    @Test void cartContextReadsCurrentOwnedRowsWithoutCartReceiptsOrOrdersAndDoesNotWeightQuantity()throws Exception{
+        try(var f=new Fixture()){
+            int anchor=f.ids.get(0),candidate=f.ids.get(1);var replacement=new HashMap<String,Object>(product(ownName(),2000));replacement.put("type","맥주");replacement.put("abv",10);
+            assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+candidate,replacement).status());f.bind(CatalogScope.REVIEWED_DEMO);
+            String base="/api/users/me/cart";var empty=cartRows(f.user);
+            var none=ownedRequest(f.owner,f.user,"POST",base+"/recommendations",Map.of("expectedVersion",0));assertEquals(200,none.status());assertEquals("EMPTY_CART",none.body().at("/data/unavailableReason").textValue());assertEquals(empty,cartRows(f.user));
+            assertEquals(200,ownedRequest(f.owner,f.user,"PUT",base+"/items/"+anchor,Map.of("expectedVersion",0,"quantity",3)).status());
+            remote.handler.set((exchange,body)->remote.reply(exchange,200,contextReply(body,candidate)));
+            var state=cartRows(f.user);var account=accountState(control(),f.user);var identity=sourceIdentity(control());
+            var first=ownedRequest(f.owner,f.user,"POST",base+"/recommendations",Map.of("expectedVersion",1));assertEquals(200,first.status());
+            assertEquals(Set.of("source","catalogScope","cartVersion","references","unavailableReason","result","products"),keys(first.body().path("data")));
+            assertEquals("PROVIDER",first.body().at("/data/source").textValue());assertEquals(candidate,first.body().at("/data/products/0/id").intValue());assertEquals(3,first.body().at("/data/references/0/quantity").intValue());
+            assertEquals(anchor,first.body().at("/data/result/matches/0/reference_product_id").intValue());assertEquals(Boolean.FALSE,observed.inside.get());
+            assertEquals(Set.of("catalog","reference_product_ids","constraints","min_relevance_score","include_explanations","limit"),keys(remote.last.get()));assertEquals(json.valueToTree(List.of(anchor)),remote.last.get().path("reference_product_ids"));assertNull(remote.cookie.get());assertNull(remote.authorization.get());
+            assertEquals(state,cartRows(f.user));assertEquals(account,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
+            assertEquals(200,ownedRequest(f.owner,f.user,"PUT",base+"/items/"+anchor,Map.of("expectedVersion",1,"quantity",1)).status());state=cartRows(f.user);
+            var second=ownedRequest(f.owner,f.user,"POST",base+"/recommendations",Map.of("expectedVersion",2));assertEquals(first.body().at("/data/result"),second.body().at("/data/result"));assertEquals(1,second.body().at("/data/references/0/quantity").intValue());assertEquals(state,cartRows(f.user));
+            assertEquals(200,ownedRequest(f.owner,f.user,"PUT","/api/users/me/recommendations/feedback/"+candidate,Map.of("feedback","NOT_INTERESTED")).status());state=cartRows(f.user);
+            var excluded=ownedRequest(f.owner,f.user,"POST",base+"/recommendations",Map.of("expectedVersion",2));assertEquals("PROVIDER",excluded.body().at("/data/source").textValue());assertEquals("no_eligible_products",excluded.body().at("/data/result/fallback_reason").textValue());assertEquals(json.valueToTree(List.of(candidate)),remote.last.get().at("/constraints/exclude_product_ids"));assertEquals(state,cartRows(f.user));
+            assertEquals(401,ownedRequest(client(),f.user,"POST",base+"/recommendations",Map.of("expectedVersion",2)).status());assertEquals(401,ownedRequest(f.owner,"other","POST",base+"/recommendations",Map.of("expectedVersion",2)).status());
+            int calls=remote.calls.get();assertEquals(409,ownedRequest(f.owner,f.user,"POST",base+"/recommendations",Map.of("expectedVersion",1)).status());assertEquals(calls,remote.calls.get());
+            assertEquals(200,request(f.admin,"DELETE","/api/admin/products/"+anchor,null).status());var deleted=ownedRequest(f.owner,f.user,"POST",base+"/recommendations",Map.of("expectedVersion",2));assertEquals("DELETED_ITEMS",deleted.body().at("/data/unavailableReason").textValue());assertTrue(deleted.body().at("/data/references/0/name").isNull());assertEquals(calls,remote.calls.get());
+        }
+    }
+    @Test void cartContextRemoteWaitRechecksQuantityHardBoundsNegativeGroupsPriceAndEpoch()throws Exception{
+        var executor=Executors.newSingleThreadExecutor();
+        try{for(String mode:List.of("quantity","hard","negative","price","epoch"))try(var f=new Fixture()){
+            int anchor=f.ids.get(0),candidate=f.ids.get(1);assertEquals(200,ownedRequest(f.owner,f.user,"PUT","/api/users/me/cart/items/"+anchor,Map.of("expectedVersion",0,"quantity",1)).status());
+            var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
+            try{
+                remote.handler.set((exchange,body)->{entered.countDown();assertTrue(release.await(4,TimeUnit.SECONDS));remote.reply(exchange,503,json.createObjectNode());});
+                var pending=executor.submit(()->ownedRequest(f.owner,f.user,"POST","/api/users/me/cart/recommendations",Map.of("expectedVersion",1)));assertTrue(entered.await(3,TimeUnit.SECONDS));
+                switch(mode){
+                    case "quantity"->assertEquals(200,ownedRequest(login(f.user,password),f.user,"PUT","/api/users/me/cart/items/"+anchor,Map.of("expectedVersion",1,"quantity",2)).status());
+                    case "hard"->assertEquals(200,request(login(f.user,password),"PUT",PREFS,Map.of("surveyStatus","COMPLETED","hardConstraints",Map.of("maxPriceKrw",0))).status());
+                    case "negative"->assertEquals(200,ownedRequest(login(f.user,password),f.user,"PUT","/api/users/me/recommendations/feedback/"+candidate,Map.of("feedback","NOT_INTERESTED")).status());
+                    case "price"->{var value=new HashMap<String,Object>(product(ownName(),3000));value.put("type","맥주");value.put("abv",0);assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+anchor,value).status());}
+                    case "epoch"->assertEquals(200,request(login(f.user,password),"PUT","/api/users/me/password",Map.of("currentPassword",password,"newPassword","Authored-context-rotated-42")).status());
+                }
+                release.countDown();assertEquals(mode.equals("epoch")?401:409,pending.get(6,TimeUnit.SECONDS).status(),mode);assertEquals(Boolean.FALSE,observed.inside.get());
+            }finally{release.countDown();}
+        }}finally{executor.shutdownNow();assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));}
+    }
+    private Map<String,Object> cartRows(String owner){return Map.of("cart",control().queryForList("SELECT * FROM pubburi.t_user_cart WHERE user_id=?",owner),"items",control().queryForList("SELECT * FROM pubburi.t_user_cart_item WHERE user_id=? ORDER BY product_id",owner),"receipts",control().queryForList("SELECT * FROM pubburi.t_user_cart_operation WHERE user_id=? ORDER BY operation_id",owner));}
+    private Reply ownedRequest(java.net.http.HttpClient client,String owner,String method,String path,Object input)throws Exception{
+        var request=java.net.http.HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).timeout(java.time.Duration.ofSeconds(10)).header("Content-Type","application/json")
+            .header(path.contains("/feedback/")?com.pubburi.pub.controller.auth.FeedbackOwner.HEADER:NotebookController.OWNER_HEADER,URLEncoder.encode(owner,StandardCharsets.UTF_8).replace("+","%20"));
+        request.method(method,java.net.http.HttpRequest.BodyPublishers.ofString(json.writeValueAsString(input)));
+        var response=client.send(request.build(),java.net.http.HttpResponse.BodyHandlers.ofString());assertEquals("private, no-store",response.headers().firstValue("Cache-Control").orElseThrow());assertTrue(response.headers().allValues("Vary").stream().anyMatch(value->value.contains("Cookie")));return new Reply(response.statusCode(),json.readTree(response.body()));
+    }
+    private ObjectNode contextReply(JsonNode request,int candidate){
+        int reference=request.path("reference_product_ids").get(0).intValue();boolean excluded=false;
+        for(var id:request.at("/constraints/exclude_product_ids"))excluded|=id.intValue()==candidate;
+        var root=json.createObjectNode().put("algorithm","b1-tfidf-minmax-v1").put("aggregation_algorithm","r07-max-reference-v1").put("fit_scope","request_catalog").put("profile_source","explicit_context_product_facts").put("reference_group_policy","exclude_all_known_reference_groups").put("representation_fitted",true).put("model_fingerprint","a".repeat(64)).put("min_relevance_score",0).put("evaluated_reference_count",1).put("eligible_count",excluded?0:1).put("excluded_reference_group_count",1);
+        var ref=root.putArray("references").addObject().put("product_id",reference).put("sku_group","authored-"+reference).put("state","available").put("supported_profile_tokens",1).put("unknown_profile_tokens",0);ref.putArray("active_numeric_preferences").add("abv_percent").add("volume_ml");
+        root.putArray("items");root.putArray("matches");
+        if(excluded){root.put("fallback_reason","no_eligible_products");ref.put("fallback_reason","no_eligible_products");}
+        else{
+            root.putNull("fallback_reason");ref.putNull("fallback_reason");var item=positiveCategory(request,candidate).withObject("/items/0");item.withObject("/explanation/comparison").put("kind","reference_product").put("product_id",reference);root.withArray("items").add(item);root.withArray("matches").addObject().put("product_id",candidate).put("reference_product_id",reference);
+        }
+        return root;
+    }
     @Test void storedZeroUnknownAndHardBoundsRemainExactAndTamperedFactsNeverBecomeRecommendations()throws Exception{
         try(var f=new Fixture()){
             assertEquals(200,request(f.owner,"PUT",PREFS,"{\"surveyStatus\":\"COMPLETED\",\"softPreferences\":{\"tasteTags\":[],\"aromaTags\":null,\"targetAbvPercent\":0.00},\"hardConstraints\":{\"minPriceKrw\":0,\"maxPriceKrw\":0,\"minAbvPercent\":0.00,\"maxAbvPercent\":10.00}}").status());
@@ -404,7 +466,7 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         root.put("eligible_count",maxZero?0:request.path("catalog").size());root.put("supported_profile_tokens",0);root.put("unknown_profile_tokens",0);root.putArray("active_numeric_preferences");if(numeric)root.withArray("active_numeric_preferences").add("abv_percent");root.put("fallback_reason",maxZero?"no_eligible_products":"no_supported_preferences");var items=root.putArray("items");if(!maxZero)for(var row:request.path("catalog")){var item=items.addObject();item.set("product_id",row.get("product_id"));item.put("score",0);item.putArray("reasons").add("available").add("deterministic_baseline");item.putArray("contributions");var e=item.putObject("explanation");e.put("version","r04-facts-v1");e.put("basis","deterministic_baseline");e.putObject("comparison").put("kind","profile");e.putArray("score_evidence");e.put("total_positive_contributions",0);e.put("score_evidence_truncated",false);e.putArray("filter_evidence").addObject().put("kind","availability_filter").put("label","입력 가용 조건 충족").put("actual_value",true);e.put("fallback_reason","no_supported_preferences");}return root;
     }
     static class Source implements ContentCatalogSource {final AtomicReference<Optional<Catalog>> value=new AtomicReference<>(Optional.empty());@Override public Optional<Catalog> current(){return value.get();}}
-    static class Observed implements ContentGateway, SimilarProductGateway {
+    static class Observed implements ContentGateway, SimilarProductGateway, ContextGateway {
         final ContentHttpClient delegate;
         final AtomicReference<Boolean> inside = new AtomicReference<>();
         Observed(ContentHttpClient delegate) { this.delegate = delegate; }
@@ -421,13 +483,18 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             inside.set(TransactionSynchronizationManager.isActualTransactionActive());
             return delegate.similar(catalog, referenceId, limit);
         }
+        @Override public Optional<JsonNode> context(JsonNode catalog,List<Integer> references,
+                UserPreferencesResponse.PreferenceHardResponse hard,List<Integer> excluded,int limit){
+            inside.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return delegate.context(catalog,references,hard,excluded,limit);
+        }
     }
     static class Gate implements StatementInspector {final AtomicBoolean armed=new AtomicBoolean();volatile CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);@Override public String inspect(String sql){if(sql.contains("left join") && sql.contains("t_product_feature") && armed.compareAndSet(true,false)){entered.countDown();try{if(!release.await(4,TimeUnit.SECONDS))throw new IllegalStateException("Owned RR test gate deadline");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}}return sql;}}
     @TestConfiguration(proxyBeanMethods=false) static class Probes {@Bean @Primary Source source(){return new Source();}@Bean @Primary Observed observed(@Qualifier("contentGateway")ContentHttpClient gateway){return new Observed(gateway);}@Bean Gate gate(){return new Gate();}@Bean HibernatePropertiesCustomizer gates(Gate gate){return properties->properties.put("hibernate.session_factory.statement_inspector",gate);}}
     @FunctionalInterface interface Handler {void handle(HttpExchange exchange,JsonNode body)throws Exception;}
     static class Remote implements AutoCloseable {
         final HttpServer server;final ExecutorService executor=Executors.newCachedThreadPool();final AtomicReference<Handler> handler=new AtomicReference<>();final AtomicInteger calls=new AtomicInteger();final AtomicReference<JsonNode> last=new AtomicReference<>();final AtomicReference<String> cookie=new AtomicReference<>(),authorization=new AtomicReference<>();
-        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_id")?"/v1/recommendations/similar":body.has("feedback")?"/v1/recommendations/feedback":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
+        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_ids")?"/v1/recommendations/context":body.has("reference_product_id")?"/v1/recommendations/similar":body.has("feedback")?"/v1/recommendations/feedback":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
         String origin(){return "http://127.0.0.1:"+server.getAddress().getPort();}void reply(HttpExchange exchange,int status,JsonNode body)throws Exception{reply(exchange,status,new ObjectMapper().writeValueAsString(body));}void reply(HttpExchange exchange,int status,String body)throws Exception{byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(status,bytes.length);try(var output=exchange.getResponseBody()){output.write(bytes);}}@Override public void close(){server.stop(0);executor.shutdownNow();try{assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));}catch(InterruptedException error){Thread.currentThread().interrupt();throw new IllegalStateException(error);}}
     }
 }

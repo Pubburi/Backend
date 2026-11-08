@@ -8,6 +8,14 @@ import org.junit.jupiter.api.Test;
 
 class CartInputTests {
     final ObjectMapper json=new ObjectMapper();
+    @Test void recommendationRequiresAnExactRevisionAndBoundedOptionalLimit()throws Exception{
+        assertEquals(new CartInput.Recommendation(0,4),json.readValue("{\"expectedVersion\":0}",CartInput.Recommendation.class));
+        assertEquals(new CartInput.Recommendation(NotebookInput.MAX_VERSION,12),json.readValue("{\"expectedVersion\":9007199254740991,\"limit\":12}",CartInput.Recommendation.class));
+        for(String value:List.of("null","[]","{}","{\"expectedVersion\":0,\"owner\":\"other\"}","{\"expectedVersion\":0,\"expectedVersion\":0}","{\"expectedVersion\":0} {}",
+                "{\"expectedVersion\":true}","{\"expectedVersion\":\"0\"}","{\"expectedVersion\":1.0}","{\"expectedVersion\":-1}","{\"expectedVersion\":9007199254740992}",
+                "{\"expectedVersion\":0,\"limit\":null}","{\"expectedVersion\":0,\"limit\":true}","{\"expectedVersion\":0,\"limit\":1.0}","{\"expectedVersion\":0,\"limit\":0}","{\"expectedVersion\":0,\"limit\":13}"))
+            assertThrows(Exception.class,()->json.readValue(value,CartInput.Recommendation.class),value);
+    }
     static final String ID="00000000-0000-4000-8000-000000000001";
     ObjectNode merge(){var n=json.createObjectNode().put("operationId",ID).put("expectedVersion",0);n.putArray("items").addObject().put("productId",2).put("quantity",1);return n;}
     @Test void onlyIntentIsBoundAcrossRevisionAndArrayOrderWhileLiteralOrderFieldsStayDistinct()throws Exception{

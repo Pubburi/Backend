@@ -75,12 +75,16 @@ class JpaHttpIntegrationTests {
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
+            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
         var schemas=docs.body().at("/components/schemas");
         assertEquals(Set.of("productId","quantity"),keys(schemas.path("CartInputItem").path("properties")));
         assertEquals(Set.of("productId","productName","currentProduct","quantity"),keys(schemas.path("CartItem").path("properties")));
         assertEquals(Set.of("version","items"),keys(schemas.path("AccountCart").path("properties")));
         assertEquals(Set.of("operationId","replayed","status","cart","orderId"),keys(schemas.path("CartOperationResult").path("properties")));
+        assertEquals(Set.of("expectedVersion","limit"),keys(schemas.path("CartRecommendationInput").path("properties")));
+        assertEquals(Set.of("source","catalogScope","cartVersion","references","unavailableReason","result","products"),keys(schemas.path("CartRecommendationResponse").path("properties")));
+        assertEquals(Set.of("productId","name","quantity","state"),keys(schemas.path("CartRecommendationReference").path("properties")));
+        assertEquals(Set.of("post"),keys(docs.body().at("/paths/~1api~1users~1me~1cart~1recommendations")));
         assertEquals(200,request(admin,"POST","/api/auth/logout",null).status());assertEquals(401,request(admin,"GET","/api/auth/me",null).status());
     }
     private Set<String> keys(com.fasterxml.jackson.databind.JsonNode node){var keys=new HashSet<String>();node.fieldNames().forEachRemaining(keys::add);return keys;}

@@ -85,7 +85,7 @@ public class OwnedContentSnapshotService {
         return new ProductProjection(current, Collections.unmodifiableMap(result));
     }
 
-    static boolean matches(Catalog catalog, Map<Integer, Facts> current) {
+    public static boolean matches(Catalog catalog, Map<Integer, Facts> current) {
         if (!current.keySet().equals(catalog.bindings().keySet())) return false;
         for (var binding : catalog.bindings().values()) {
             var facts = current.get(binding.productId());

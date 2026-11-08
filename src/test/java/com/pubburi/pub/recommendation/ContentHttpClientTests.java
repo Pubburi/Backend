@@ -10,6 +10,21 @@ import java.util.concurrent.atomic.*;
 import org.junit.jupiter.api.Test;
 
 class ContentHttpClientTests {
+    @Test void contextUsesOnlyTheFixedProviderRouteUniqueServerReferencesAndLiteralHardBounds()throws Exception{
+        var sent=new AtomicReference<com.fasterxml.jackson.databind.JsonNode>();var failure=new AtomicReference<Throwable>();
+        var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/",exchange->{try{
+            assertThat(exchange.getRequestURI().toString()).isEqualTo("/v1/recommendations/context");assertThat(exchange.getRequestHeaders().getFirst("Cookie")).isNull();assertThat(exchange.getRequestHeaders().getFirst("Authorization")).isNull();sent.set(ContentFixtures.JSON.readTree(exchange.getRequestBody().readAllBytes()));
+            exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,2);exchange.getResponseBody().write("{}".getBytes(StandardCharsets.UTF_8));
+        }catch(Throwable error){failure.set(error);}finally{exchange.close();}});server.start();
+        try{
+            var client=new ContentHttpClient(URI.create("http://127.0.0.1:"+server.getAddress().getPort()),Duration.ofMillis(200),Duration.ofSeconds(1),ContentFixtures.JSON);
+            var bounds=new com.pubburi.pub.controller.response.UserPreferencesResponse.PreferenceHardResponse(0,2000,new java.math.BigDecimal("0.00"),new java.math.BigDecimal("40.00"));
+            assertThat(client.context(ContentFixtures.catalog().catalog(),java.util.List.of(81),bounds,java.util.List.of(82),4)).isPresent();
+            var fields=new java.util.HashSet<String>();sent.get().fieldNames().forEachRemaining(fields::add);assertThat(fields).containsExactlyInAnyOrder("catalog","reference_product_ids","constraints","limit","min_relevance_score","include_explanations");
+            assertThat(sent.get().path("reference_product_ids")).isEqualTo(ContentFixtures.JSON.valueToTree(java.util.List.of(81)));assertThat(sent.get().at("/constraints/min_price_krw").intValue()).isZero();assertThat(sent.get().at("/constraints/max_abv_percent").decimalValue()).isEqualByComparingTo("40");assertThat(sent.get().at("/constraints/exclude_product_ids")).isEqualTo(ContentFixtures.JSON.valueToTree(java.util.List.of(82)));assertThat(failure.get()).isNull();
+        }finally{server.stop(0);}
+    }
     @Test void fixedRouteOnlyCatalogPreferencesAndNoCredentialsAreSentWithExactRequestResponseBounds()throws Exception{
         var calls=new AtomicInteger();var mode=new AtomicReference<>("normal");var sent=new AtomicReference<com.fasterxml.jackson.databind.JsonNode>();var failure=new AtomicReference<Throwable>();
         var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
