@@ -31,7 +31,14 @@ public class JpaOrderDao implements OrderDao {
     }
     @Override public List<Order> selectByUserId(String userId) { return userId == null ? List.of() : page(userId, Integer.MAX_VALUE, 0).stream().map(OrderView::dto).toList(); }
     @Override public Order selectById(int id) { var row = find(id); return row == null ? null : row.dto(); }
-    @Override public OrderInfo selectOrderInfo(int id) { var row = find(id); return row == null ? null : row.info(); }
+    @Override public OrderInfo selectOrderInfo(int id) {
+        // Return the DB's canonical owner identity while preserving the stored FK text/history.
+        var rows=entityManager.createQuery("""
+            select new com.pubburi.rehearsal.persistence.OrderView(o.id,u.id,o.orderType,o.orderTable,o.orderTime,o.completed,o.totalPrice,o.priceBasis)
+            from RehearsalOrder o left join RehearsalUser u on u.id=o.userId where o.id=:id
+            """,OrderView.class).setParameter("id",id).setMaxResults(1).getResultList();
+        return rows.isEmpty()?null:rows.get(0).info();
+    }
     @Override @Transactional public int insert(Order order) {
         var row = orders.saveAndFlush(JpaOrder.from(order)); order.setoId(row.id); return 1;
     }

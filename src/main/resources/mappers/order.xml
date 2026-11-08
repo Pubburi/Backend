@@ -39,9 +39,9 @@
     </select>
 
     <select id="selectOrderInfo" parameterType="int" resultMap="orderInfoMap">
-        SELECT o_id, user_id, order_type, order_table, order_time, completed, total_price, price_basis
-        FROM t_order
-        WHERE o_id = #{oId}
+        SELECT o.o_id, u.id AS user_id, o.order_type, o.order_table, o.order_time, o.completed, o.total_price, o.price_basis
+        FROM t_order o LEFT JOIN t_user u ON u.id = o.user_id
+        WHERE o.o_id = #{oId}
     </select>
 
     <select id="getOrderDetailInfo" parameterType="int" resultType="OrderDetailInfo">
