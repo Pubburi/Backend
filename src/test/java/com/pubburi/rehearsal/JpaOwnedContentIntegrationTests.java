@@ -458,6 +458,40 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         }
         return root;
     }
+    @Test void ownedOrderContextReadsCurrentFactsAndKeepsMoneyAndQuantitiesUnchanged()throws Exception{
+        try(var f=new Fixture()){
+            int anchor=f.ids.get(0),candidate=f.ids.get(1);var replacement=new HashMap<String,Object>(product(ownName(),2000));replacement.put("type","맥주");replacement.put("abv",10);
+            assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+candidate,replacement).status());
+            var made=request(f.admin,"POST","/api/orders",Map.of("userId",f.user.toUpperCase(Locale.ROOT),"orderType","TAKEOUT","details",List.of(Map.of("productId",anchor,"quantity",101))));assertEquals(201,made.status());assertEquals(f.user,made.body().at("/data/userId").textValue());
+            int orderId=made.body().at("/data/oId").intValue();String path="/api/users/me/orders/"+orderId+"/recommendations";f.bind(CatalogScope.REVIEWED_DEMO);
+            var visible=request(f.owner,"GET","/api/orders/"+orderId,null);assertEquals(200,visible.status());assertEquals(f.user,visible.body().at("/data/userId").textValue());
+            assertEquals(f.user.toUpperCase(Locale.ROOT),control().queryForObject("SELECT user_id FROM pubburi.t_order WHERE o_id=?",String.class,orderId));
+            remote.handler.set((exchange,body)->remote.reply(exchange,200,contextReply(body,candidate)));
+            var state=accountState(control(),f.user);var cart=cartRows(f.user);var identity=sourceIdentity(control());
+            var reply=ownedRequest(f.owner,f.user,"POST",path,Map.of());assertEquals(200,reply.status());assertEquals("PROVIDER",reply.body().at("/data/source").textValue());
+            assertEquals(orderId,reply.body().at("/data/orderId").intValue());assertEquals(1,reply.body().at("/data/referenceCount").intValue());assertEquals(101,reply.body().at("/data/references/0/quantity").intValue());
+            assertEquals(made.body().at("/data/details/0/id"),reply.body().at("/data/references/0/detailId"));assertEquals(candidate,reply.body().at("/data/products/0/id").intValue());
+            assertEquals(json.valueToTree(List.of(anchor)),remote.last.get().path("reference_product_ids"));
+            assertEquals(Boolean.FALSE,observed.inside.get());assertEquals(state,accountState(control(),f.user));assertEquals(cart,cartRows(f.user));assertEquals(identity,sourceIdentity(control()));
+            String other=join();try{
+                assertEquals(404,ownedRequest(login(other,password),other,"POST",path,Map.of()).status());
+                String admin=request(f.admin,"GET","/api/auth/me",null).body().at("/data/id").textValue();assertEquals(404,ownedRequest(f.admin,admin,"POST",path,Map.of()).status());
+                assertEquals(400,request(f.owner,"POST",path,Map.of()).status());assertEquals(401,request(client(),"POST",path,Map.of()).status());
+            }finally{clean(control(),other,null,List.of());}
+            assertEquals(200,request(f.admin,"DELETE","/api/admin/products/"+anchor,null).status());
+            var deleted=ownedRequest(f.owner,f.user,"POST",path,Map.of());assertEquals(200,deleted.status());assertEquals("DELETED_ITEMS",deleted.body().at("/data/unavailableReason").textValue());assertTrue(deleted.body().at("/data/references/0/productId").isNull());assertTrue(deleted.body().at("/data/references/0/name").isNull());
+        }
+    }
+    @Test void remoteOrderCompletionAndDeletionAreRecheckedBeforeAnyResultIsReturned()throws Exception{
+        try(var f=new Fixture()){
+            int anchor=f.ids.get(0),candidate=f.ids.get(1);var replacement=new HashMap<String,Object>(product(ownName(),2000));replacement.put("type","맥주");replacement.put("abv",10);assertEquals(200,request(f.admin,"PUT","/api/admin/products/"+candidate,replacement).status());
+            var made=request(f.owner,"POST","/api/orders",Map.of("details",List.of(Map.of("productId",anchor,"quantity",1))));assertEquals(201,made.status());int id=made.body().at("/data/oId").intValue();String path="/api/users/me/orders/"+id+"/recommendations";f.bind(CatalogScope.REVIEWED_DEMO);
+            remote.handler.set((exchange,body)->{assertEquals(200,request(f.admin,"PATCH","/api/admin/orders/"+id+"/complete",null).status());remote.reply(exchange,200,contextReply(body,candidate));});
+            assertEquals(409,ownedRequest(f.owner,f.user,"POST",path,Map.of()).status());
+            remote.handler.set((exchange,body)->{assertEquals(200,request(f.admin,"DELETE","/api/admin/orders/"+id,null).status());remote.reply(exchange,503,json.createObjectNode());});
+            assertEquals(409,ownedRequest(f.owner,f.user,"POST",path,Map.of()).status());
+        }
+    }
     @Test void storedZeroUnknownAndHardBoundsRemainExactAndTamperedFactsNeverBecomeRecommendations()throws Exception{
         try(var f=new Fixture()){
             assertEquals(200,request(f.owner,"PUT",PREFS,"{\"surveyStatus\":\"COMPLETED\",\"softPreferences\":{\"tasteTags\":[],\"aromaTags\":null,\"targetAbvPercent\":0.00},\"hardConstraints\":{\"minPriceKrw\":0,\"maxPriceKrw\":0,\"minAbvPercent\":0.00,\"maxAbvPercent\":10.00}}").status());

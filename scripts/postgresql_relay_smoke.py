@@ -25,13 +25,13 @@ from search_index import Engine, Http, SearchError, document, decode
 from search_relay import PostgresStore, Relay, connect_database, database_settings, target_identity, relay_status, claim_document
 from relay_smoke import event
 from jpa_smoke import child_environment, request_json, verify_jar, cleanup_on_termination, defer_termination
-from api_smoke import verify_search_phrase_openapi, verify_content_recommendation_openapi, verify_similar_products_openapi, verify_product_suggestions_openapi
+from api_smoke import verify_search_phrase_openapi, verify_content_recommendation_openapi, verify_similar_products_openapi, verify_product_suggestions_openapi, verify_order_recommendation_openapi
 
 
 def verify_business_api(spec):
     methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
     operations = sum(method in methods for path in spec["paths"].values() for method in path)
-    assert len(spec["paths"]) == 53 and operations == 67
+    assert len(spec["paths"]) == 54 and operations == 68
     for path, expected in (("/api/users/me/notebook",{"get","post"}),
             ("/api/users/me/notebook/{id}",{"get","put","delete"}),
             ("/api/users/me/notebook/by-product/{productId}",{"get"}),
@@ -44,6 +44,7 @@ def verify_business_api(spec):
     verify_content_recommendation_openapi(spec)
     verify_similar_products_openapi(spec)
     verify_product_suggestions_openapi(spec)
+    verify_order_recommendation_openapi(spec)
     return {"api_paths": len(spec["paths"]), "api_operations": operations}
 
 

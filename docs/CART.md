@@ -87,7 +87,36 @@ PROVIDER로 구분한다. matches의 실제 winning reference와 R04 comparison/
 변화는409, 계정/epoch 회수는401이며 원래 카트는 보존한다. provider/strict 응답 실패는 위
 UNAVAILABLE, DB 오류는500이다. 최신 읽기 이후의 수정을 잠그는 보장은 아니며 주문 가격은
 기존 checkout 시점에 확정한다. 연결200ms·원격 전체3초와 요청512KiB/응답256KiB 상한을 재사용한다.
-본인 주문 맥락의 R07 인수는 후속이다.
+본인 주문 맥락은 아래의 별도 조회로 제공한다.
+
+## 현재 본인 데모 주문의 맥락 추천
+
+`POST /api/users/me/orders/{id}/recommendations`는 같은 본인 헤더와 `{limit?}`만 받는다.
+limit은 정수1–12/기본4이며 추가·중복 body/query·강제 타입 변환은400이다. 클라이언트가 주문
+상품/수량·계정·snapshot을 선택하지 않는다. 본인 현재 epoch와 DB가 해석한 canonical 소유자를
+확인하며 다른 계정/삭제된 소유자의 주문은 관리자에게도404다. 기존 일반 관리자 주문 조회는 유지한다.
+기존 단건 주문 상세도 DB canonical 소유 ID를 반환해 본인 상세의 정확한 ID 검수를 통과시킨다.
+case/accent alias인 원 FK와 과거 금액/이력은 DB에 그대로 보존한다.
+
+정확한 응답은 `source,catalogScope,orderId,referenceCount,references,unavailableReason,result,products`다.
+referenceCount는 전체 주문 상세 행 수다. 20행을 넘으면 상세를 일부 읽거나 잘라내지 않고 정확한
+전체 수·references=[]·REFERENCE_LIMIT를 반환한다. 0행은 EMPTY_ORDER다. 1–20행의 references는
+원 상세 ID순 `{detailId,productId,name,quantity,state}`이며 quantity는 원 양의 정수다(99로 줄이지 않음).
+name은 현재 상품명이고 삭제된 productId/name은 null·DELETED다. 과거 주문 이름/가격/금액은
+기존 주문 상세에 보존하며 현재 사실이나 모델 입력으로 복구하지 않는다.
+
+모든 행이 READY일 때만 고유 현재 상품 ID를 기존 context 제공자에 전달한다. 같은 상품의 여러
+상세 행과 수량은 원 응답에 보존하지만 모델 가중치로 합산하지 않는다. state와 scope는 위 카트
+계약을 재사용하며 사유 순서는 `EMPTY_ORDER → REFERENCE_LIMIT → DELETED_ITEMS →
+CATALOG_UNAVAILABLE → UNREVIEWED_ITEMS → UNAVAILABLE_REFERENCES → PROVIDER_UNAVAILABLE`다.
+현재 hard 조건·관심 없음 상품군·모든 기준 상품군 제외, 실제 winning reference/R04 검수도 같다.
+
+원격 호출 앞뒤의 별도 짧은 RR에서 소유/epoch·주문/상세·현재 상품/가격/특성·hard/negative와
+원문 pin을 대조한다. 호출 중 완료/삭제를 포함한 주문 변화는409, 세션 회수는401이며 DB 오류를
+정상 빈 추천으로 바꾸지 않는다. 주문·가격·카트·stamp·receipt·업무 사건은 전혀 쓰지 않는다.
+정상 빈 provider 결과와 UNAVAILABLE를 구분하고 B0로 꾸미지 않는다. 모든 성공/오류는
+private, no-store·Vary Cookie이며 body64KiB와 기존 원격 예산을 유지한다.
+명시 MySQL baseline은404/ORDER_CONTEXT_NOT_SUPPORTED로 미지원을 알리며 업무/DB를 바꾸지 않는다.
 
 ## 병합·주문·재시도
 

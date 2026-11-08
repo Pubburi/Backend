@@ -19,6 +19,7 @@ public class NotebookPrivacyFilter extends OncePerRequestFilter {
         String path=UrlPathHelper.defaultInstance.getPathWithinApplication(request);
         return !path.equals("/api/users/me/notebook") && !path.startsWith("/api/users/me/notebook/")
             && !path.equals("/api/users/me/cart") && !path.startsWith("/api/users/me/cart/")
+            && !path.startsWith("/api/users/me/orders/")
             && !path.equals("/api/users/me/notifications") && !path.startsWith("/api/users/me/notifications/");
     }
     @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)throws ServletException,IOException{

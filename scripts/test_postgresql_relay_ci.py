@@ -39,6 +39,10 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         paths["/api/users/me/cart/merge"]={"post":{}}
         paths["/api/users/me/cart/checkout"]={"post":{}}
         paths["/api/users/me/cart/recommendations"]={"post":{}}
+        paths["/api/users/me/orders/{id}/recommendations"]={"post":{
+            "parameters":[{"name":"id","in":"path"},{"name":"X-Pubburi-Account-Owner","in":"header","required":True}],
+            "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/OrderInput"}}}},
+            "responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/OrderEnvelope"}}}}}}}
         paths["/api/users/me/cart/operations/{operationId}"]={"get":{}}
         paths["/api/users/me/cart/operations/{operationId}/resolve"]={"post":{}}
         paths["/api/users/me/notifications"]={"get":{}}
@@ -59,12 +63,17 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "SimilarEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SimilarProductsResponse"}}},
             "SimilarProductsResponse": {"required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}, "catalogScope": {"type": "string", "enum": ["REVIEWED_LOCAL_CATALOG"]}, "explanations": {"type": "array", "items": {"$ref": "#/components/schemas/SimilarProductExplanation"}}}},
             "SimilarProductExplanation": {"required": ["productId", "explanation"], "properties": {"productId": {"type": "integer"}, "explanation": {"type": "object"}}},
+            "OrderInput":{"additionalProperties":False,"properties":{"limit":{"type":"integer","minimum":1,"maximum":12}}},
+            "OrderEnvelope":{"properties":{"data":{"$ref":"#/components/schemas/OrderContext"}}},
+            "OrderContext":{"required":["source","catalogScope","orderId","referenceCount","references","unavailableReason","result","products"],"properties":{
+                "source":{},"catalogScope":{"enum":["REVIEWED_DEMO","REVIEWED_LOCAL_CATALOG"]},"orderId":{},"referenceCount":{},"references":{"items":{"$ref":"#/components/schemas/OrderRef"}},"unavailableReason":{},"result":{},"products":{}}},
+            "OrderRef":{"required":["detailId","productId","name","quantity","state"],"properties":{"detailId":{},"productId":{"type":["integer","null"]},"name":{"type":["string","null"]},"quantity":{"maximum":2147483647},"state":{}}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
             "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
 
     def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
-        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 53, "api_operations": 67})
+        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 54, "api_operations": 68})
         missing = copy.deepcopy(spec)
         missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
         extra_method = copy.deepcopy(spec)

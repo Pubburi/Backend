@@ -478,7 +478,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
             jar.chmod(0o600)
             value={'schema_version':1,'completed':True,'provider':'JPA_POSTGRESQL_REHEARSAL','source_commit':first,
                 'source_files':pg.source_files(scope),'jar_sha256':pg.sha(jar),'java_feature':17,'postgresql_version':'18.6',
-                'api_paths':53,'api_operations':67,'preparation':'database-independent-maven-verify'}
+                'api_paths':54,'api_operations':68,'preparation':'database-independent-maven-verify'}
             def manifest(commit):
                 (directory/'manifest.json').unlink(missing_ok=True)
                 pg.write_json(directory/'manifest.json',dict(value,source_commit=commit))

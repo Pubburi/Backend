@@ -92,6 +92,7 @@ UUID receipt 읽기를 제공한다. 기존 주문 API는 유지하고 일반404
 - `GET /api/products/{id}`: 상품 상세
 - `GET /api/products/{id}/features`: 출처가 기록된 상품 특성. 미확인 필드는 null
 - `GET /api/products/{id}/similar`: 검수된 기준 상품의 유사 상품 최대 4개, 선택 `includeExplanations=true`의 실제 비교 이유. [추천 계약](CONTENT-RECOMMENDATIONS.md#상품-상세의-유사-상품)
+- `POST /api/users/me/orders/{id}/recommendations`: 현재 본인 데모 주문의 고유 상품 사실에 기반한 대안. 과거 금액/수량을 모델 가중치로 쓰지 않는다. [소유·한계](CART.md#현재-본인-데모-주문의-맥락-추천)
 - `POST /api/admin/products`: 관리자 상품 등록
 - `PUT /api/admin/products/{id}`: 관리자 상품 수정
 - `PUT /api/admin/products/{id}/features`: 관리자 특성 전체 교체. 누락/null은 unknown, {}는 초기화

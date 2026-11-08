@@ -407,6 +407,33 @@ def verify_similar_products_openapi(document):
     assert set(explanation["required"]) == {"productId", "explanation"}
 
 
+def verify_order_recommendation_openapi(document):
+    path = document["paths"]["/api/users/me/orders/{id}/recommendations"]
+    assert set(path) == {"post"}
+    operation = path["post"]
+    parameters = {(value["name"], value["in"]): value for value in operation["parameters"]}
+    assert set(parameters) == {("id", "path"), ("X-Pubburi-Account-Owner", "header")}
+    assert parameters[("X-Pubburi-Account-Owner", "header")]["required"] is True
+    schemas = document["components"]["schemas"]
+    request = operation["requestBody"]["content"]["application/json"]["schema"]
+    request = schemas[request["$ref"].split("/")[-1]]
+    assert request["additionalProperties"] is False and set(request["properties"]) == {"limit"}
+    assert "limit" not in request.get("required", [])
+    assert request["properties"]["limit"]["minimum"] == 1 and request["properties"]["limit"]["maximum"] == 12
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    envelope = schemas[response["$ref"].split("/")[-1]]
+    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
+    fields = {"source", "catalogScope", "orderId", "referenceCount", "references", "unavailableReason", "result", "products"}
+    assert set(data["properties"]) == fields and set(data["required"]) == fields
+    assert set(data["properties"]["catalogScope"]["enum"]) == {"REVIEWED_DEMO", "REVIEWED_LOCAL_CATALOG"}
+    reference = schemas[data["properties"]["references"]["items"]["$ref"].split("/")[-1]]
+    assert set(reference["properties"]) == {"detailId", "productId", "name", "quantity", "state"}
+    assert set(reference["required"]) == set(reference["properties"])
+    for field, kind in (("productId", "integer"), ("name", "string")):
+        assert set(reference["properties"][field]["type"]) == {kind, "null"}
+    assert reference["properties"]["quantity"]["maximum"] == 2147483647
+
+
 def default_recommendation_contract(client, expected_source=None):
     total = client.request("GET", "/products?size=1", 200)["data"]["total"]
     for query, size in (("", 4), ("?size=1", 1), ("?size=12", 12)):
@@ -591,11 +618,14 @@ def history_preservation_contract(environ):
     buyer_id, buyer_password = "ci_history_" + uuid.uuid4().hex, uuid.uuid4().hex
     buyer.request("POST", "/users", 201, {"id": buyer_id, "name": "CI buyer", "pass": buyer_password})
     buyer.request("POST", "/auth/login", 200, {"id": buyer_id, "pass": buyer_password})
-    created = buyer.request("POST", "/orders", 201, {
+    created = admin.request("POST", "/orders", 201, {
+        "userId": buyer_id.upper(),
         "orderType": "TAKEOUT", "orderTable": "CI private note",
         "details": [{"productId": product["id"], "quantity": 2}],
     })["data"]
+    assert created["userId"] == buyer_id, "Order detail must expose the DB-canonical owner, without rewriting its FK"
     order_path = f"/orders/{created['oId']}"
+    assert buyer.request("GET", order_path, 200)["data"] == created
     before_total = admin.request("GET", "/admin/orders?page=1&size=100", 200)["data"]["total"]
     admin.request("DELETE", f"/admin/products/{product['id']}", 200)
     buyer.request("GET", f"/products/{product['id']}", 404, error_code="NOT_FOUND")
