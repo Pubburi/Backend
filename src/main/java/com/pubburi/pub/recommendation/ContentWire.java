@@ -19,6 +19,15 @@ public final class ContentWire {
         }
         return values;
     }
+    // Python's provider sorts literal features by Unicode code point, not UTF-16 code unit.
+    static int compareCodePoints(String left,String right){
+        int i=0,j=0;
+        while(i<left.length() && j<right.length()){
+            int a=left.codePointAt(i),b=right.codePointAt(j);if(a!=b)return Integer.compare(a,b);
+            i+=Character.charCount(a);j+=Character.charCount(b);
+        }
+        return Integer.compare(left.length()-i,right.length()-j);
+    }
     public static boolean equal(JsonNode a,JsonNode b){
         if(a==null || b==null)return a==b;
         if(a.isNumber() && b.isNumber())return a.decimalValue().compareTo(b.decimalValue())==0;

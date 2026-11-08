@@ -349,6 +349,15 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             assertNull(remote.authorization.get());
             assertEquals(Boolean.FALSE, observed.inside.get());
 
+            var explained=request(client(),"GET",path+"?includeExplanations=true",null);
+            assertEquals(200,explained.status());assertEquals(Set.of("items","explanations"),keys(explained.body().path("data")));
+            assertEquals(candidate,explained.body().at("/data/explanations/0/productId").intValue());
+            assertEquals(anchor,explained.body().at("/data/explanations/0/explanation/comparison/product_id").intValue());
+            assertEquals(explained.body().at("/data/items").size(),explained.body().at("/data/explanations").size());
+            assertTrue(remote.last.get().path("include_explanations").booleanValue());assertEquals(Boolean.FALSE,observed.inside.get());
+            remote.handler.set((exchange,body)->{var wrong=similarPositive(body,candidate);wrong.withObject("/items/0/explanation/comparison").put("product_id",candidate);remote.reply(exchange,200,wrong);});
+            assertEquals(json.valueToTree(Map.of("items",List.of(),"explanations",List.of())),request(client(),"GET",path+"?includeExplanations=true",null).body().path("data"));
+
             remote.handler.set((exchange, body) -> {
                 assertEquals(200, request(f.admin, "PUT", "/api/admin/products/" + candidate + "/features",
                     Map.of("volumeMl", 500, "sourceName", "Current authored change")).status());
@@ -378,6 +387,13 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         item.putArray("reasons").add("available").add("content_similarity");
         item.putArray("contributions").addObject().put("component", "text").put("feature", "category:맥주")
             .put("contribution", 1.0 / 3);
+        if(request.path("include_explanations").booleanValue()){
+            var e=item.putObject("explanation");e.put("version","r04-facts-v1").put("basis","content_similarity");
+            e.putObject("comparison").put("kind","reference_product").put("product_id",reference);
+            e.putArray("score_evidence").addObject().put("kind","category_match").put("label","주종 일치").put("actual_value","맥주").put("target_value","맥주").put("contribution",1.0/3);
+            e.put("total_positive_contributions",1).put("score_evidence_truncated",false).putNull("fallback_reason");
+            e.putArray("filter_evidence").addObject().put("kind","availability_filter").put("label","입력 가용 조건 충족").put("actual_value",true);
+        }
         return root;
     }
     @Test void cartContextReadsCurrentOwnedRowsWithoutCartReceiptsOrOrdersAndDoesNotWeightQuantity()throws Exception{
@@ -518,6 +534,9 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         @Override public Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit) {
             inside.set(TransactionSynchronizationManager.isActualTransactionActive());
             return delegate.similar(catalog, referenceId, limit);
+        }
+        @Override public Optional<JsonNode> similarExplained(JsonNode catalog,int referenceId,int limit){
+            inside.set(TransactionSynchronizationManager.isActualTransactionActive());return delegate.similarExplained(catalog,referenceId,limit);
         }
         @Override public Optional<JsonNode> context(JsonNode catalog,List<Integer> references,
                 UserPreferencesResponse.PreferenceHardResponse hard,List<Integer> excluded,int limit){

@@ -119,14 +119,15 @@ public final class ContentContract {
                     && part.path("component").isTextual() && part.path("feature").isTextual());
                 number(part.get("contribution"), true);
                 String key = part.path("component").textValue() + "\u0000" + part.path("feature").textValue();
-                require(key.compareTo(last) > 0);
+                require(compareCodePoints(key,last) > 0);
                 last = key;
                 sum += part.path("contribution").doubleValue();
                 positive.add(part);
             }
             require((score.signum() > 0) == !positive.isEmpty() && Double.isFinite(sum) && Math.abs(score.doubleValue() - sum) <= 1e-9);
             positive.sort(Comparator.<JsonNode, BigDecimal>comparing(part -> part.path("contribution").decimalValue())
-                .reversed().thenComparing(part -> part.path("component").textValue()).thenComparing(part -> part.path("feature").textValue()));
+                .reversed().thenComparing(part -> part.path("component").textValue(),ContentWire::compareCodePoints)
+                .thenComparing(part -> part.path("feature").textValue(),ContentWire::compareCodePoints));
             var expectedEvidence = mapper.createArrayNode();
             for (var part : positive) {
                 var fact = evidence(part, product, actualTokens, selectedTokens, targets, reference == null ? Map.of() : spans);

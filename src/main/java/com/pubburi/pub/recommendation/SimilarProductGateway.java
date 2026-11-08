@@ -6,4 +6,5 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 public interface SimilarProductGateway {
     Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit);
+    Optional<JsonNode> similarExplained(JsonNode catalog, int referenceId, int limit);
 }

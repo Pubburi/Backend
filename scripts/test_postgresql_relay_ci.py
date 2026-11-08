@@ -25,7 +25,7 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentInput"}}}},
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentEnvelope"}}}}}}}
         paths["/api/products/{id}/similar"] = {"get": {
-            "parameters": [{"name": "id", "in": "path"}],
+            "parameters": [{"name": "id", "in": "path"}, {"name": "includeExplanations", "in": "query", "schema": {"type": "boolean", "default": False}}],
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SimilarEnvelope"}}}}}}}
         paths["/api/products/suggestions"] = {"get": {
             "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}],
@@ -57,7 +57,8 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
             "SuggestionItem": {"properties": {name: {"type": kind} for name, kind in
                 (("id", "integer"), ("name", "string"), ("type", "string"), ("price", "integer"))}},
             "SimilarEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SimilarProductsResponse"}}},
-            "SimilarProductsResponse": {"required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}, "catalogScope": {"type": "string", "enum": ["REVIEWED_LOCAL_CATALOG"]}}},
+            "SimilarProductsResponse": {"required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}, "catalogScope": {"type": "string", "enum": ["REVIEWED_LOCAL_CATALOG"]}, "explanations": {"type": "array", "items": {"$ref": "#/components/schemas/SimilarProductExplanation"}}}},
+            "SimilarProductExplanation": {"required": ["productId", "explanation"], "properties": {"productId": {"type": "integer"}, "explanation": {"type": "object"}}},
             "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
             "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
             "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}

@@ -11,6 +11,9 @@ import java.util.Map;
 import java.util.Set;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pubburi.pub.controller.response.SimilarProductsResponse.Explanation;
+import com.pubburi.pub.controller.response.UserPreferencesResponse;
 
 /** Checks the provider's public link candidates without rebuilding model scores. */
 public final class SimilarProductContract {
@@ -24,13 +27,34 @@ public final class SimilarProductContract {
     }
 
     public static List<Integer> validate(JsonNode root, JsonNode catalog, int referenceId, int limit) {
+        return validate(root,catalog,referenceId,limit,false);
+    }
+
+    public static List<Explanation> validateExplained(JsonNode root,JsonNode catalog,int referenceId,int limit,ObjectMapper mapper){
+        var ids=validate(root,catalog,referenceId,limit,true);
+        var reference=findReference(catalog,referenceId);var excluded=new java.util.HashSet<Integer>();
+        for(var row:catalog)if(text(row.get("sku_group"),reference.path("sku_group").textValue()))excluded.add(row.path("product_id").intValue());
+        var references=new HashMap<Integer,JsonNode>();for(int id:ids)references.put(id,reference);
+        // Share the existing typed fact/top-three/units boundary without inferring a user profile or score.
+        var base=mapper.createObjectNode();
+        for(String field:List.of("algorithm","fit_scope","representation_fitted","model_fingerprint","items","eligible_count"))base.set(field,root.get(field));
+        base.put("supported_profile_tokens",0).put("unknown_profile_tokens",0).putArray("active_numeric_preferences");
+        if(root.path("eligible_count").intValue()==0)base.put("fallback_reason","no_eligible_products");
+        else if(ids.isEmpty())base.put("fallback_reason","no_matching_features");else base.putNull("fallback_reason");
+        var preferences=new UserPreferencesResponse("NOT_STARTED",new UserPreferencesResponse.PreferenceSoftResponse(null,null,null,null),
+            new UserPreferencesResponse.PreferenceHardResponse(null,null,null,null));
+        return new ContentContract(mapper).validate(base,catalog,preferences,limit,excluded,references,true).items().stream()
+            .map(item->new Explanation(item.productId(),item.explanation())).toList();
+    }
+
+    private static List<Integer> validate(JsonNode root,JsonNode catalog,int referenceId,int limit,boolean explained){
         require(fields(root, "algorithm", "fit_scope", "representation_fitted", "model_fingerprint", "items",
             "eligible_count", "supported_profile_tokens", "unknown_profile_tokens", "active_numeric_preferences",
             "fallback_reason", "reference_product_id", "reference_sku_group", "reference_state", "profile_source",
             "reference_group_policy", "excluded_reference_group_count"));
         var items = root.get("items");
         require(items.isArray() && items.size() <= limit);
-        if (items.isEmpty()) return List.of();
+        if (items.isEmpty() && !explained) return List.of();
 
         var reference = findReference(catalog, referenceId);
         require(reference != null && reference.path("available").booleanValue());
@@ -43,10 +67,12 @@ public final class SimilarProductContract {
         }
         var referenceTokens = tokens(reference);
         var spans = numericSpans(catalog, reference);
+        boolean fitted=!ContentContract.numericSpans(catalog).isEmpty();
+        for(var row:catalog)fitted|=!tokens(row).isEmpty();
+        String fallback=items.isEmpty()?eligible.isEmpty()?"no_eligible_products":referenceTokens.isEmpty() && spans.isEmpty()?"no_supported_preferences":"no_matching_features":null;
         require(text(root.get("algorithm"), "b1-tfidf-minmax-v1") && text(root.get("fit_scope"), "request_catalog")
-            && root.path("representation_fitted").isBoolean() && root.path("representation_fitted").booleanValue()
-            && root.path("model_fingerprint").isTextual()
-            && root.path("model_fingerprint").textValue().matches("[0-9a-f]{64}")
+            && root.path("representation_fitted").isBoolean() && root.path("representation_fitted").booleanValue()==fitted
+            && (fitted?root.path("model_fingerprint").isTextual() && root.path("model_fingerprint").textValue().matches("[0-9a-f]{64}"):root.path("model_fingerprint").isNull())
             && integer(root.get("reference_product_id"), 1, Integer.MAX_VALUE) == referenceId
             && text(root.get("reference_sku_group"), group) && text(root.get("reference_state"), "available")
             && text(root.get("profile_source"), "reference_product_facts")
@@ -56,13 +82,14 @@ public final class SimilarProductContract {
             && integer(root.get("supported_profile_tokens"), 0, 41) == referenceTokens.size()
             && integer(root.get("unknown_profile_tokens"), 0, 41) == 0
             && textList(root.get("active_numeric_preferences"), List.copyOf(spans.keySet()))
-            && root.path("fallback_reason").isNull());
+            && equal(root.get("fallback_reason"),fallback==null?com.fasterxml.jackson.databind.node.NullNode.instance:com.fasterxml.jackson.databind.node.TextNode.valueOf(fallback)));
 
         var result = new ArrayList<Integer>();
         BigDecimal previous = BigDecimal.valueOf(2);
         int previousId = 0;
         for (var item : items) {
-            require(fields(item, "product_id", "score", "reasons", "contributions"));
+            require(explained?fields(item,"product_id","score","reasons","contributions","explanation")
+                :fields(item, "product_id", "score", "reasons", "contributions"));
             int id = integer(item.get("product_id"), 1, Integer.MAX_VALUE);
             // Removing the ID also rejects duplicates and never admits the reference group.
             var candidate = eligible.remove(id);
@@ -113,7 +140,7 @@ public final class SimilarProductContract {
             String component = part.path("component").textValue();
             String feature = part.path("feature").textValue();
             String key = component + "\0" + feature;
-            require(key.compareTo(previous) > 0);
+            require(compareCodePoints(key,previous) > 0);
             previous = key;
             if (component.equals("text")) {
                 require(referenceTokens.contains(feature) && candidateTokens.contains(feature));

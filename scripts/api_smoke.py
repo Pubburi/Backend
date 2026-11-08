@@ -385,16 +385,26 @@ def verify_similar_products_openapi(document):
     path = document["paths"]["/api/products/{id}/similar"]
     assert {key for key in path if key in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"get"}
     operation = path["get"]
-    assert [(parameter["name"], parameter["in"]) for parameter in operation["parameters"]] == [("id", "path")]
+    parameters = {(parameter["name"], parameter["in"]): parameter for parameter in operation["parameters"]}
+    assert len(operation["parameters"]) == 2 and set(parameters) == {("id", "path"), ("includeExplanations", "query")}
+    selector = parameters[("includeExplanations", "query")]
+    assert selector.get("required", False) is False
+    assert selector["schema"]["type"] == "boolean" and selector["schema"]["default"] is False
     assert "requestBody" not in operation
     schemas = document["components"]["schemas"]
     response = operation["responses"]["200"]["content"]["application/json"]["schema"]
     envelope = schemas[response["$ref"].split("/")[-1]]
     data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    assert set(data["properties"]) == {"items", "catalogScope"}
+    assert set(data["properties"]) == {"items", "catalogScope", "explanations"}
     assert "catalogScope" not in data.get("required", [])
+    assert "explanations" not in data.get("required", [])
     assert set(data["properties"]["catalogScope"]["enum"]) == {"REVIEWED_LOCAL_CATALOG"}
     assert data["properties"]["items"] == {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}
+    reasons = data["properties"]["explanations"]
+    assert reasons["type"] == "array"
+    explanation = schemas[reasons["items"]["$ref"].split("/")[-1]]
+    assert set(explanation["properties"]) == {"productId", "explanation"}
+    assert set(explanation["required"]) == {"productId", "explanation"}
 
 
 def default_recommendation_contract(client, expected_source=None):

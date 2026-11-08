@@ -37,6 +37,15 @@ REVIEWED_LOCAL_CATALOG를 유지한다. family scope는 승인된 family PROVIDE
 
 공개 `GET /api/products/{id}/similar`는 현재 기준 상품에 대해 최대 4개의 `ProductResponse`를
 ApiResponse `data.items`에 반환한다. 존재하지 않는 기준은 404다. 응답 캐시는 `no-store`다.
+선택 query `includeExplanations=true`는 같은 순서의 `data.explanations:[{productId,explanation}]`를
+함께 반환한다. 생략/false는 기존 wire와 제공자 입력을 보존하며 explanations 필드를 보내지 않는다.
+query는 단일 true/false 리터럴만 허용하고 중복·추가·다른 값은400이다. true의 정상 성공에는 빈 결과나
+모델 장애/미매핑이어도 explanations=[]가 존재한다. 설명은 기존 R04의 정확한 실제 기준 ID,
+주종/확보 태그·도수/용량과 단위·양수 기여/상위3·생략 수를 대조한다. 잘못된 설명을 붙인 상품은
+링크만 남겨 부분 성공시키지 않고 items/explanations를 함께 비운다. 설명은 원문 텍스트이며 HTML이 아니다.
+설명에 보이는 상위3 기여의 합이 전체 점수나 만족 확률을 뜻하지 않으며 새 점수 필드는 제공하지 않는다.
+기여와 같은 기여값의 상위 근거 순서는 제공자와 같은 Unicode code point 순서다. 원문 태그를
+UTF-16 순서로 재배치하거나 표시를 위해 정규화하지 않는다.
 호출은 container `REVIEWED_DEMO` 또는 `REVIEWED_LOCAL_CATALOG`의 검수 상품에 한정한다.
 유효한 로컬 기준에만 선택 필드 `data.catalogScope:"REVIEWED_LOCAL_CATALOG"`가 붙으며 기존
 `items`는 그대로다. family-browse 전용/미매핑 상품에는 이 필드가 없고 빈 배열이다. 모델 실패도

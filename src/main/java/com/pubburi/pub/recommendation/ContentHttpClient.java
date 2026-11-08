@@ -52,6 +52,9 @@ public final class ContentHttpClient implements ContentGateway, SimilarProductGa
     @Override public Optional<JsonNode> similar(JsonNode catalog, int referenceId, int limit) {
         return post(similarEndpoint, Map.of("catalog", catalog, "reference_product_id", referenceId, "limit", limit));
     }
+    @Override public Optional<JsonNode> similarExplained(JsonNode catalog,int referenceId,int limit){
+        return post(similarEndpoint,Map.of("catalog",catalog,"reference_product_id",referenceId,"limit",limit,"include_explanations",true));
+    }
 
     @Override public Optional<JsonNode> context(JsonNode catalog,List<Integer> references,
             UserPreferencesResponse.PreferenceHardResponse hard,List<Integer> excluded,int limit) {
