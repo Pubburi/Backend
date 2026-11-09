@@ -112,14 +112,14 @@ def verify_jar(path):
 
 def verify_openapi_scope(docs):
     if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
+            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/themes","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
             "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
             "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/exploration","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/orders/{id}/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"}:raise ValueError("jpa_runtime_route_scope_changed")
     operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-    if operations!=69:raise ValueError("jpa_runtime_operation_scope_changed")
+    if operations!=70:raise ValueError("jpa_runtime_operation_scope_changed")
     verify_content_recommendation_openapi(docs)
     verify_similar_products_openapi(docs)
     verify_product_suggestions_openapi(docs)
@@ -433,7 +433,7 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":55,"registered_api_operations":operations,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":56,"registered_api_operations":operations,
             "public_default_current_fallback":True,
             "self_profile_password_and_session_rotation":True,
             "private_preferences_and_lifecycle":True,

@@ -27,6 +27,7 @@
 | GET | `/api/products/{id}` | 기존 ProductResponse 일곱 필드·없는 ID404 |
 | GET | `/api/products/{id}/features` | 기존 특성 여덟 필드·unknown/검수[]·없는 상품404 |
 | GET | `/api/products/{id}/similar` | 검수 container DEMO 유사 후보와 현재 상품 재검증 |
+| GET | `/api/products/themes` | 로컬 검수 도수·용량을 기준으로 현재 상품을 공개 조회 |
 | POST | `/api/admin/products` | 현재 관리자만 생성·201·같은 TX의 최초 이벤트 |
 | PUT | `/api/admin/products/{id}` | 현재 관리자만 전체 수정·boolean·후속 버전 |
 | DELETE | `/api/admin/products/{id}` | 현재 관리자만 삭제·이력 FK null·tombstone |
@@ -69,7 +70,7 @@
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 API와 [계정 카트/주문 맥락](CART.md)·[내부 알림](NOTIFICATIONS.md)을 포함한55개/69작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 API와 [계정 카트/주문 맥락](CART.md)·[내부 알림](NOTIFICATIONS.md)을 포함한56개/70작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 추천 피드백은 Flyway V4와 최소 권한을 적용한 명시 PostgreSQL 런타임에서 쓴다. 세 메서드는
 세션에서 본인을 정하고 URL 인코딩한 현재 ID와 `X-Pubburi-Feedback-Owner`를 비교한다. 다른

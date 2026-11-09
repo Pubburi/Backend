@@ -70,13 +70,20 @@ class JpaHttpIntegrationTests {
         assertEquals(200,request(admin,"DELETE","/api/admin/markets/"+id,null).status());assertEquals(404,request(admin,"GET","/api/markets/"+id,null).status());
         var docs=request(admin,"GET","/v3/api-docs",null);assertEquals(200,docs.status());var paths=new HashSet<String>();docs.body().path("paths").fieldNames().forEachRemaining(paths::add);
         assertEquals(Set.of("/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
+            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/themes","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
             "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
             "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/exploration","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/orders/{id}/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
         var schemas=docs.body().at("/components/schemas");
+        var themeOperation = docs.body().at("/paths/~1api~1products~1themes/get");
+        assertTrue(themeOperation.isObject());
+        assertTrue(themeOperation.path("parameters").isEmpty());
+        assertEquals(Set.of("source", "themes"), keys(schemas.at("/ProductThemesResponse/properties")));
+        assertEquals(Set.of("id", "items"), keys(schemas.at("/ReviewedProductTheme/properties")));
+        assertEquals(6, schemas.at("/ReviewedProductTheme/properties/items/maxItems").intValue());
+        assertEquals(Set.of("product", "volumeMl"), keys(schemas.at("/ReviewedProductThemeItem/properties")));
         var exploration = docs.body().at("/paths/~1api~1users~1me~1recommendations~1exploration/post");
         var ownerHeader = exploration.path("parameters");
         assertEquals(1, ownerHeader.size());
