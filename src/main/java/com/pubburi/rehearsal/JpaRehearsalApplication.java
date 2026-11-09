@@ -5,6 +5,7 @@ import com.pubburi.pub.controller.api.GlobalExceptionHandler;
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.rest.MarketRestController;
 import com.pubburi.pub.controller.rest.ProductRestController;
+import com.pubburi.pub.controller.rest.ProductThemesController;
 import com.pubburi.pub.controller.rest.ProductFeatureRestController;
 import com.pubburi.pub.controller.rest.OrderRestController;
 import com.pubburi.pub.controller.rest.UserRestController;
@@ -25,6 +26,7 @@ import org.springframework.context.annotation.Import;
 @SpringBootApplication
 @Import({CorsConfig.class,GlobalExceptionHandler.class,AccessGuard.class,com.pubburi.pub.controller.auth.NotebookPrivacyFilter.class,MarketRestController.class,
     ProductRestController.class,ProductFeatureRestController.class,ProductServiceImpl.class,ProductSearchOutbox.class,
+    ProductThemesController.class,ProductThemeService.class,
     UserServiceImpl.class,PasswordHasher.class,MarketServiceImpl.class,OrderRestController.class,OrderServiceImpl.class,
     UserRestController.class,GradeService.class,CommentRestController.class,CommentServiceImpl.class,
     FavoriteRestController.class,FavoriteServiceImpl.class,UserPreferenceRestController.class,UserPreferenceServiceImpl.class,

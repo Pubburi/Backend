@@ -44,10 +44,7 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
         Fixture()throws Exception{try{for(int i=0;i<2;i++){var body=new HashMap<String,Object>(product(ownName(),1000+i*1000));body.put("type",i==0?"맥주":"증류주");body.put("abv",i*10);var created=request(admin,"POST","/api/admin/products",body);assertEquals(201,created.status());int id=created.body().at("/data/id").intValue();ids.add(id);assertEquals(200,request(admin,"PUT","/api/admin/products/"+id+"/features",Map.of("volumeMl",750-i*250,"tasteTags",i==0?List.of("a,b","line\nx"):List.of(),"aromaTags",List.of(),"sourceName","Authored B1 consumer fixture")).status());}bind(CatalogScope.REVIEWED_DEMO);}catch(Throwable error){close();throw error;}}
         void bind(CatalogScope scope)throws Exception{var catalog=json.createArrayNode();var bindings=new LinkedHashMap<Integer,ContentCatalogSource.Binding>();for(int id:ids){var p=request(owner,"GET","/api/products/"+id,null).body().path("data");var f=request(owner,"GET","/api/products/"+id+"/features",null).body().path("data");var row=catalog.addObject();row.put("product_id",id);row.put("available",true);row.put("sku_group","authored-"+id);row.set("category",p.get("type"));row.set("price_krw",p.get("price"));row.set("abv_percent",p.get("abv"));row.set("volume_ml",f.get("volumeMl"));row.putNull("taste_tags");row.putNull("aroma_tags");bindings.put(id,new ContentCatalogSource.Binding(id,p.deepCopy(),f.deepCopy()));}source.value.set(Optional.of(new ContentCatalogSource.Catalog(catalog,Collections.unmodifiableMap(bindings),Instant.now().plusSeconds(300),"d".repeat(64),scope)));}
         @Override public void close(){source.stable.set(null);source.value.set(Optional.empty());try{for(int id:ids){var deleted=request(admin,"DELETE","/api/admin/products/"+id,null);assertTrue(deleted.status()==200 || deleted.status()==404);}clean(control(),user,null,List.of());}catch(Exception error){throw new IllegalStateException(error);}}
-    }
-    @Test void stableAuthorityReadsCurrentDemoPriceAndDeletedCandidatesWithoutChangingSourceNamespace()throws Exception{
-        try(var f=new Fixture()){
-            // Authored consumer fixture, not source approval or model-quality evidence.
+        ReviewedLocalCatalog enableStableCatalog() {
             var records=new ArrayList<ReviewedLocalCatalog.Product>();
             for(var binding:source.value.get().orElseThrow().bindings().values()){
                 records.add(new ReviewedLocalCatalog.Product(binding.productId(),"authored-"+binding.productId(),
@@ -55,7 +52,15 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
                     binding.product().path("abv").decimalValue(),binding.features().path("volumeMl").intValue()));
             }
             String namespace=control().queryForObject("SELECT source_id::text FROM pubburi.t_product_search_relay_target WHERE singleton_id=1",String.class);
-            source.stable.set(new ReviewedLocalCatalog(records,"d".repeat(64),namespace));
+            var authority = new ReviewedLocalCatalog(records, "d".repeat(64), namespace);
+            source.stable.set(authority);
+            return authority;
+        }
+    }
+    @Test void stableAuthorityReadsCurrentDemoPriceAndDeletedCandidatesWithoutChangingSourceNamespace()throws Exception{
+        try(var f=new Fixture()){
+            // Authored consumer fixture, not source approval or model-quality evidence.
+            var authority = f.enableStableCatalog();
             var initial=accountState(control(),f.user);var identity=sourceIdentity(control());
             var updated=json.convertValue(source.value.get().orElseThrow().bindings().get(f.ids.get(0)).product(),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
             updated.remove("id");updated.put("price",7000);
@@ -72,9 +77,50 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             assertEquals(List.of(f.ids.get(0)),deleted.body().at("/data/products").findValues("id").stream().map(JsonNode::intValue).toList());
             assertFalse(remote.last.get().at("/catalog/1/available").booleanValue());
             assertTrue(remote.last.get().at("/catalog/1/price_krw").isNull());
-            source.stable.set(new ReviewedLocalCatalog(records,"d".repeat(64),UUID.randomUUID().toString()));
+            source.stable.set(new ReviewedLocalCatalog(authority.records(),authority.sha256(),UUID.randomUUID().toString()));
             int calls=remote.calls.get();assertEquals(409,request(f.owner,"POST",PATH,Map.of()).status());assertEquals(calls,remote.calls.get());
             assertEquals(initial,accountState(control(),f.user));assertEquals(identity,sourceIdentity(control()));
+        }
+    }
+
+    @Test void publicThemesUseCurrentApprovedProductsWithoutAccountOrProviderAndRejectDrift() throws Exception {
+        try (var f = new Fixture()) {
+            String path = "/api/products/themes";
+            var guest = client();
+            var unavailable = request(guest, "GET", path, null);
+            assertEquals(200, unavailable.status());
+            assertEquals(json.readTree("{\"source\":\"UNAVAILABLE\",\"themes\":[]}"), unavailable.body().path("data"));
+            assertEquals(400, request(guest, "GET", path + "?theme=TABLE", null).status());
+            var authority = f.enableStableCatalog();
+            var original = request(guest, "GET", path, null);
+            assertEquals(200, original.status());
+            var themes = original.body().at("/data/themes");
+            assertEquals("REVIEWED_LOCAL_CATALOG", original.body().at("/data/source").textValue());
+            assertEquals(List.of("BEGINNER", "GIFT", "TABLE"), themes.findValues("id").stream()
+                .filter(JsonNode::isTextual).map(JsonNode::textValue).toList());
+            assertEquals(List.of(f.ids.get(0)), themes.at("/0/items").findValues("id").stream().map(JsonNode::intValue).toList());
+            assertEquals(List.of(f.ids.get(1)), themes.at("/1/items").findValues("id").stream().map(JsonNode::intValue).toList());
+            assertEquals(f.ids, themes.at("/2/items").findValues("id").stream().map(JsonNode::intValue).toList());
+
+            int gift = f.ids.get(1);
+            var changedPrice = json.convertValue(source.value.get().orElseThrow().bindings().get(gift).product(),
+                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() { });
+            changedPrice.remove("id");
+            changedPrice.put("price", 7000);
+            assertEquals(200, request(f.admin, "PUT", "/api/admin/products/" + gift, changedPrice).status());
+            var changed = request(guest, "GET", path, null);
+            assertEquals(7000, changed.body().at("/data/themes/1/items/0/product/price").intValue());
+            assertEquals(500, changed.body().at("/data/themes/1/items/0/volumeMl").intValue());
+            assertEquals(200, request(f.admin, "DELETE", "/api/admin/products/" + f.ids.get(0), null).status());
+            assertTrue(request(guest, "GET", path, null).body().at("/data/themes/0/items").isEmpty());
+
+            source.stable.set(new ReviewedLocalCatalog(authority.records(), authority.sha256(), UUID.randomUUID().toString()));
+            assertEquals(409, request(guest, "GET", path, null).status());
+            source.stable.set(authority);
+            assertEquals(200, request(f.admin, "PUT", "/api/admin/products/" + gift + "/features",
+                Map.of("volumeMl", 501, "sourceName", "Changed authored volume")).status());
+            assertEquals(409, request(guest, "GET", path, null).status());
+            assertEquals(0, remote.calls.get());
         }
     }
     @Test void strictPrivateInputAndOnlyTheCurrentAccountSnapshotReachTheCheckedCatalog()throws Exception{

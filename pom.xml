@@ -33,6 +33,7 @@
         <include>com/pubburi/pub/controller/request/ProductRequest.java</include><include>com/pubburi/pub/controller/request/ProductFeaturesRequest.java</include>
         <include>com/pubburi/pub/controller/request/StrictIntegerDeserializer.java</include><include>com/pubburi/pub/controller/request/StrictStringDeserializer.java</include>
         <include>com/pubburi/pub/controller/rest/ProductRestController.java</include><include>com/pubburi/pub/controller/rest/ProductFeatureRestController.java</include>
+        <include>com/pubburi/pub/controller/rest/ProductThemesController.java</include><include>com/pubburi/pub/model/service/ProductThemeService.java</include>
         <include>com/pubburi/pub/controller/rest/OrderRestController.java</include><include>com/pubburi/pub/controller/request/OrderCreateRequest.java</include><include>com/pubburi/pub/controller/request/OrderDetailRequest.java</include>
         <include>com/pubburi/pub/controller/rest/UserRestController.java</include><include>com/pubburi/pub/controller/request/JoinUserRequest.java</include><include>com/pubburi/pub/controller/request/AdminUserRequest.java</include>
         <include>com/pubburi/pub/model/service/GradeService.java</include><include>com/pubburi/pub/model/service/AccountNotificationActions.java</include>

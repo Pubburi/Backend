@@ -89,6 +89,7 @@ UUID receipt 읽기를 제공한다. 기존 주문 API는 유지하고 일반404
 
 - `GET /api/products?page=1&size=12&type=&q=&sort=popular`: 상품 목록, 검색, 카테고리, 정렬
 - `GET /api/products/popular`: 인기 상품
+- `GET /api/products/themes`: 쿼리 없는 공개 테마 목록. [검수 테마 계약](#검수-상품-테마)을 따른다.
 - `GET /api/products/{id}`: 상품 상세
 - `GET /api/products/{id}/features`: 출처가 기록된 상품 특성. 미확인 필드는 null
 - `GET /api/products/{id}/similar`: 검수된 기준 상품의 유사 상품 최대 4개, 선택 `includeExplanations=true`의 실제 비교 이유. [추천 계약](CONTENT-RECOMMENDATIONS.md#상품-상세의-유사-상품)
@@ -109,6 +110,25 @@ Backend는 `minPriceKrw/maxPriceKrw`, `minAbvPercent/maxAbvPercent`, 반복 `tas
 기존 ProductResponse의 7필드/주종은 유지한다. 별도 특성의 volumeMl·설명·맛/향 태그·출처와
 null/빈 배열·검증·삭제/원자 교체는 [특성 계약](PRODUCT-FEATURES.md)과 [OpenAPI](openapi/product-features.json)를 따른다.
 sourceName은 알려진 값/빈 배열 검수에도 필요하지만 권리 승인을 뜻하지 않으며 sourceUrl을 fetch하지 않는다.
+
+### 검수 상품 테마
+
+`GET /api/products/themes`는 계정·세션 입력 없이 `data={source,themes}`를 `Cache-Control: no-store`로
+반환한다. 쿼리는400이다. `source=REVIEWED_LOCAL_CATALOG`이면 `themes`는 BEGINNER, GIFT, TABLE
+순서의 `{id,items}` 세 항목이며, 각 `items`는 최대6개의 `{product,volumeMl}`다. `product`는
+현재 Product7이고, 가격은 현재 로컬 시연 값이다. 조건에 맞는 상품이 없는 테마도 빈 배열로 남는다.
+
+| 테마 ID | 검수 조건 | 정렬 |
+|---|---|---|
+| BEGINNER | 도수 7 vol% 이하 | 도수 오름차순, ID 오름차순 |
+| GIFT | 용량 300–500 mL | 용량 오름차순, ID 오름차순 |
+| TABLE | 용량 500 mL 이상 | 용량 내림차순, ID 오름차순 |
+
+운영자가 고정한 [로컬 검수 권위](CONTENT-RECOMMENDATIONS.md#검수-catalog와-현재-업무-값)의 명시 ID와
+현재 업무 namespace·상품 사실을 하나의 읽기 snapshot에서 대조한다. 삭제된 행은 제외한다.
+권위 미설정·초기 검증 실패·DEMO는 `UNAVAILABLE`과 `themes=[]`다. 이미 읽은 권위가 호출 중
+바뀌거나 현재 검수 사실·namespace와 다르면409다. 추천 서버 호출이나 업무 쓰기는 없다.
+테마는 도수·용량 필터이며 적합성·건강·음식 조합·재고·선물 포장 정보를 제공하지 않는다.
 
 ## Comments
 
