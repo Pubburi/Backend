@@ -1,0 +1,148 @@
+{
+  "request": {
+    "catalog": [
+      {"product_id": 1, "sku_group": "a", "category": "맥주", "abv_percent": 5, "price_krw": 1000, "available": true},
+      {"product_id": 2, "sku_group": "a", "category": "맥주", "abv_percent": 5, "price_krw": 1000, "available": true},
+      {"product_id": 3, "sku_group": "b", "category": "맥주", "abv_percent": 5, "price_krw": 1000, "available": true},
+      {"product_id": 4, "sku_group": "c", "category": "과실주", "abv_percent": 5.25, "price_krw": 1000, "available": true},
+      {"product_id": 5, "sku_group": "d", "category": "과실주", "abv_percent": 5, "price_krw": 1000, "available": false},
+      {"product_id": 6, "sku_group": "e", "category": "과실주", "abv_percent": 10, "price_krw": 1000, "available": true},
+      {"product_id": 7, "sku_group": "f", "category": "맥주", "abv_percent": 5, "price_krw": 1000, "available": true},
+      {"product_id": 8, "sku_group": "g", "category": "과실주", "abv_percent": 5, "price_krw": 1000, "available": false}
+    ],
+    "preferences": {
+      "surveyStatus": "COMPLETED",
+      "softPreferences": {"categories": ["맥주", "과실주"], "tasteTags": null, "aromaTags": null, "targetAbvPercent": 5},
+      "hardConstraints": {"minPriceKrw": null, "maxPriceKrw": 1500, "minAbvPercent": null, "maxAbvPercent": 6}
+    },
+    "constraints": {"exclude_product_ids": [7], "max_abv_percent": 7},
+    "include_explanations": true,
+    "limit": 3
+  },
+  "response": {
+    "algorithm": "b1-tfidf-minmax-v1",
+    "model_fingerprint": "e39b367746641ccead760f1791ee3223210f20d49d1708ab34db5a9f58b569dd",
+    "items": [
+      {
+        "product_id": 1,
+        "score": 0.8535533905932737,
+        "reasons": ["available", "price_within_range", "abv_within_range", "content_similarity"],
+        "contributions": [
+          {"component": "abv_percent", "feature": "abv_percent", "contribution": 0.5},
+          {"component": "text", "feature": "category:맥주", "contribution": 0.35355339059327373}
+        ],
+        "explanation": {
+          "version": "r04-facts-v1",
+          "basis": "content_similarity",
+          "comparison": {"kind": "profile"},
+          "score_evidence": [
+            {"kind": "abv_comparison", "label": "도수 비교 근거", "actual_value": 5.0, "target_value": 5.0, "unit": "vol%", "contribution": 0.5},
+            {"kind": "category_match", "label": "주종 일치", "actual_value": "맥주", "target_value": "맥주", "contribution": 0.35355339059327373}
+          ],
+          "total_positive_contributions": 2,
+          "score_evidence_truncated": false,
+          "filter_evidence": [
+            {"kind": "availability_filter", "label": "입력 가용 조건 충족", "actual_value": true},
+            {"kind": "price_filter", "label": "입력 가격 조건 충족", "actual_value": 1000, "minimum": null, "maximum": 1500, "unit": "KRW"},
+            {"kind": "abv_filter", "label": "입력 도수 조건 충족", "actual_value": 5.0, "minimum": null, "maximum": 6.0, "unit": "vol%"}
+          ],
+          "fallback_reason": null
+        }
+      },
+      {
+        "product_id": 4,
+        "score": 0.8285533905932737,
+        "reasons": ["available", "price_within_range", "abv_within_range", "content_similarity"],
+        "contributions": [
+          {"component": "abv_percent", "feature": "abv_percent", "contribution": 0.475},
+          {"component": "text", "feature": "category:과실주", "contribution": 0.35355339059327373}
+        ],
+        "explanation": {
+          "version": "r04-facts-v1",
+          "basis": "content_similarity",
+          "comparison": {"kind": "profile"},
+          "score_evidence": [
+            {"kind": "abv_comparison", "label": "도수 비교 근거", "actual_value": 5.25, "target_value": 5.0, "unit": "vol%", "contribution": 0.475},
+            {"kind": "category_match", "label": "주종 일치", "actual_value": "과실주", "target_value": "과실주", "contribution": 0.35355339059327373}
+          ],
+          "total_positive_contributions": 2,
+          "score_evidence_truncated": false,
+          "filter_evidence": [
+            {"kind": "availability_filter", "label": "입력 가용 조건 충족", "actual_value": true},
+            {"kind": "price_filter", "label": "입력 가격 조건 충족", "actual_value": 1000, "minimum": null, "maximum": 1500, "unit": "KRW"},
+            {"kind": "abv_filter", "label": "입력 도수 조건 충족", "actual_value": 5.25, "minimum": null, "maximum": 6.0, "unit": "vol%"}
+          ],
+          "fallback_reason": null
+        }
+      },
+      {
+        "product_id": 3,
+        "score": 0.8535533905932737,
+        "reasons": ["available", "price_within_range", "abv_within_range", "content_similarity"],
+        "contributions": [
+          {"component": "abv_percent", "feature": "abv_percent", "contribution": 0.5},
+          {"component": "text", "feature": "category:맥주", "contribution": 0.35355339059327373}
+        ],
+        "explanation": {
+          "version": "r04-facts-v1",
+          "basis": "content_similarity",
+          "comparison": {"kind": "profile"},
+          "score_evidence": [
+            {"kind": "abv_comparison", "label": "도수 비교 근거", "actual_value": 5.0, "target_value": 5.0, "unit": "vol%", "contribution": 0.5},
+            {"kind": "category_match", "label": "주종 일치", "actual_value": "맥주", "target_value": "맥주", "contribution": 0.35355339059327373}
+          ],
+          "total_positive_contributions": 2,
+          "score_evidence_truncated": false,
+          "filter_evidence": [
+            {"kind": "availability_filter", "label": "입력 가용 조건 충족", "actual_value": true},
+            {"kind": "price_filter", "label": "입력 가격 조건 충족", "actual_value": 1000, "minimum": null, "maximum": 1500, "unit": "KRW"},
+            {"kind": "abv_filter", "label": "입력 도수 조건 충족", "actual_value": 5.0, "minimum": null, "maximum": 6.0, "unit": "vol%"}
+          ],
+          "fallback_reason": null
+        }
+      }
+    ],
+    "eligible_count": 4,
+    "supported_profile_tokens": 2,
+    "unknown_profile_tokens": 0,
+    "active_numeric_preferences": ["abv_percent"],
+    "fallback_reason": null,
+    "fit_scope": "request_catalog",
+    "representation_fitted": true,
+    "reranking_algorithm": "r08-text-mmr-group-v1",
+    "policy": {"relevance_weight": 0.7, "min_relevance_score": 0.0},
+    "candidate_pool_limit": 100,
+    "candidate_pool_size": 4,
+    "pool_truncated": false,
+    "relevance_pool_size": 4,
+    "selected_count": 3,
+    "selected_group_count": 3,
+    "exploration_reason": "selected",
+    "selections": [
+      {
+        "product_id": 1,
+        "sku_group": "a",
+        "selection_score": 0.5974873734152916,
+        "redundancy_penalty_input": 0.0,
+        "max_observed_text_similarity": null,
+        "basis": "highest_relevance_anchor"
+      },
+      {
+        "product_id": 4,
+        "sku_group": "c",
+        "selection_score": 0.5799873734152916,
+        "redundancy_penalty_input": 0.0,
+        "max_observed_text_similarity": 0.0,
+        "basis": "observed_text"
+      },
+      {
+        "product_id": 3,
+        "sku_group": "b",
+        "selection_score": 0.2974873734152915,
+        "redundancy_penalty_input": 1.0,
+        "max_observed_text_similarity": 1.0,
+        "basis": "observed_text"
+      }
+    ]
+  }
+}

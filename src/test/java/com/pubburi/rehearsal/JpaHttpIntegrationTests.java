@@ -75,8 +75,24 @@ class JpaHttpIntegrationTests {
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/orders/{id}/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
+            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/exploration","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/orders/{id}/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
         var schemas=docs.body().at("/components/schemas");
+        var exploration = docs.body().at("/paths/~1api~1users~1me~1recommendations~1exploration/post");
+        var ownerHeader = exploration.path("parameters");
+        assertEquals(1, ownerHeader.size());
+        assertEquals("X-Pubburi-Feedback-Owner", ownerHeader.at("/0/name").textValue());
+        assertEquals("header", ownerHeader.at("/0/in").textValue());
+        assertTrue(ownerHeader.at("/0/required").booleanValue());
+        var explorationInput = schemas.path("ExplorationRecommendationRequest");
+        assertEquals(Set.of("limit"), keys(explorationInput.path("properties")));
+        assertFalse(explorationInput.path("additionalProperties").booleanValue());
+        assertEquals(4, explorationInput.at("/properties/limit/default").intValue());
+        assertEquals(Set.of("source", "catalogScope", "result", "products"),
+            keys(schemas.at("/ExplorationRecommendationResponse/properties")));
+        assertEquals(Set.of("algorithm", "fit_scope", "representation_fitted", "model_fingerprint", "items",
+            "eligible_count", "supported_profile_tokens", "unknown_profile_tokens", "active_numeric_preferences",
+            "fallback_reason", "exploration_reason", "selections"), keys(schemas.at("/ExplorationRecommendationResult/properties")));
+        assertEquals(Set.of("product_id", "basis"), keys(schemas.at("/ExplorationRecommendationSelection/properties")));
         assertEquals(Set.of("productId","quantity"),keys(schemas.path("CartInputItem").path("properties")));
         assertEquals(Set.of("productId","productName","currentProduct","quantity"),keys(schemas.path("CartItem").path("properties")));
         assertEquals(Set.of("version","items"),keys(schemas.path("AccountCart").path("properties")));
