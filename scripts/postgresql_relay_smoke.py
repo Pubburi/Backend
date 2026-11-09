@@ -549,3 +549,64 @@ def business_after_restart(http, state):
     assert Relay(store, engine, state["source_id"]).once()["status"] == "idle"
     assert http.request("GET", f"/{engine.index}/_doc/{state['final']['product_id']}")[1]["_source"] == state["final"]
     assert completed_ack_snapshot(owner) == state["completed_ack_snapshot"]
+
+
+def business_cutover(http, state):
+    """Prove the recoverable external/DB gap against the existing owned real relay fixture."""
+    from psycopg.errors import LockNotAvailable
+    from search_cutover import CutoverPlan, move_alias, read_alias_index, run_cutover
+
+    environ = state["environ"]
+    store, owner, _ = fixture(environ)
+    source, old_index, new_index = state["source_id"], state["index"], "pubburi-products-v1-pgstage"
+    old = Engine(http, old_index, "backend_product_events", source, refresh="false")
+    new = Engine(http, new_index, "backend_product_events", source, refresh="false")
+    new.ready(create=True)
+    old_id, new_id = target_identity(old, source), target_identity(new, source)
+    plan = CutoverPlan(source, old_id["cluster_uuid"], old_index, old_id["index_uuid"], new_index, new_id["index_uuid"])
+    database, token = environ["PUBBURI_PG_DB_NAME"], environ["PUBBURI_PG_RUN_TOKEN"]
+    binding = "SELECT source_id::text, fingerprint, identity_json::text, bound_at FROM t_product_search_relay_target"
+    immutable = "SELECT payload::text AS payload FROM t_product_search_outbox ORDER BY event_id"
+    before_binding, before_events, before_acks = sql(owner, binding), sql(owner, immutable), completed_ack_snapshot(owner)
+    move_alias(http, None, old_index)
+
+    with owner.transaction() as writer:
+        writer.execute("LOCK TABLE pubburi.t_product IN ROW EXCLUSIVE MODE")
+        try:
+            run_cutover(owner, http, plan, database, token)
+        except LockNotAvailable:
+            pass
+        else:
+            raise AssertionError("Cutover accepted a concurrent producer lock")
+    assert read_alias_index(http) == old_index and sql(owner, binding) == before_binding
+
+    class LostAliasAcknowledgement:
+        def request(self, method, path, body=None):
+            status, value = http.request(method, path, body)
+            if method == "POST" and path == "/_aliases":
+                assert status == 200 and value["acknowledged"] is True
+                raise SearchError("authored_alias_ack_lost")
+            return status, value
+
+    try:
+        run_cutover(owner, LostAliasAcknowledgement(), plan, database, token)
+    except SearchError as error:
+        assert str(error) == "authored_alias_ack_lost"
+    else:
+        raise AssertionError("Cutover did not observe the injected lost acknowledgement")
+    assert read_alias_index(http) == new_index and sql(owner, binding) == before_binding
+
+    result = run_cutover(owner, http, plan, database, token)
+    assert result["status"] == "cut_over" and result["events"] == len(before_events) and result["documents"] > 0
+    after = sql(owner, binding)
+    assert run_cutover(owner, http, plan, database, token)["status"] == "already_cut_over"
+    assert sql(owner, binding) == after and read_alias_index(http) == new_index
+    assert sql(owner, immutable) == before_events and completed_ack_snapshot(owner) == before_acks and store.source_id() == source
+    assert http.request("GET", f"/{new_index}/_doc/{state['final']['product_id']}")[1]["_source"] == state["final"]
+    try:
+        Relay(store, old, source).once()
+    except SearchError as error:
+        assert str(error) == "relay_target_identity_mismatch"
+    else:
+        raise AssertionError("Old physical writer remained bound after cutover")
+    assert Relay(store, new, source).once()["status"] == "idle"

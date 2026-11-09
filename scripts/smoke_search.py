@@ -201,7 +201,7 @@ def main():
             verify_public_search(http, endpoint, private, os.environ, business_relay["index"], "mysql")
             report["completed"].append("public MySQL engine search and name suggestions preserve current facts through delayed changes and fallback")
         if pg_relay is not None:
-            from postgresql_relay_smoke import after_restart as pg_after, business_after_restart as pg_business_after
+            from postgresql_relay_smoke import after_restart as pg_after, business_after_restart as pg_business_after, business_cutover
             def replace_pg_index(index, source):
                 owned_container()
                 if index != pg_relay["index"]: raise ValueError("postgresql_relay_index_scope_rejected")
@@ -213,6 +213,8 @@ def main():
             from public_search_smoke import verify as verify_public_search
             verify_public_search(http, endpoint, private, pg_fixture["business"], pg_business["index"])
             report["completed"].append("public PostgreSQL engine search and name suggestions preserve current facts through delayed changes and fallback")
+            business_cutover(http, pg_business)
+            report["completed"].append("PostgreSQL producer fence, full staged cutover, lost alias acknowledgement recovery and exact ACK preservation")
         source = private / "events.json"
         source.write_text(json.dumps({"schemaVersion": 1, "dataKind": "authored_fixture", "events": events}))
         base = [sys.executable, "scripts/search_index.py"]

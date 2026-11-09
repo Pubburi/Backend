@@ -8,27 +8,37 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
+import java.util.function.Supplier;
 import com.fasterxml.jackson.core.*;
 import com.fasterxml.jackson.databind.*;
 import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
+import com.pubburi.pub.model.dao.ProductSearchIdentityDao.BoundTarget;
 
 /** Read-only, bounded local engine consumer. Never returns engine source documents. */
 public final class ProductSearchHttpClient implements ProductSearchGateway {
     public static final int MAX_RESPONSE_BYTES=131072;
+    public static final String READ_ALIAS = "pubburi-products-v1-read";
     private final URI endpoint;
     private final String index;
+    private final Supplier<BoundTarget> aliasBinding;
     private final HttpClient http;
     private final Duration deadline;
     private final ObjectMapper mapper;
     public ProductSearchHttpClient(URI endpoint,String index,Duration connectTimeout,Duration deadline,ObjectMapper mapper) {
+        this(endpoint, index, connectTimeout, deadline, mapper, null);
+    }
+
+    public ProductSearchHttpClient(URI endpoint, String index, Duration connectTimeout, Duration deadline,
+            ObjectMapper mapper, Supplier<BoundTarget> aliasBinding) {
         if(!"http".equals(endpoint.getScheme()) || endpoint.getHost()==null || !Set.of("127.0.0.1","::1","[::1]").contains(endpoint.getHost())
                 || endpoint.getUserInfo()!=null || endpoint.getQuery()!=null || endpoint.getFragment()!=null
                 || !(endpoint.getPath().isEmpty() || endpoint.getPath().equals("/")) || endpoint.getPort()<1)
             throw new IllegalArgumentException("Search origin must be an operator-configured numeric loopback HTTP origin");
-        if(!index.matches("pubburi-products-v1(?:-[a-z0-9]{1,32})?") || deadline.isNegative() || deadline.isZero() || connectTimeout.isNegative() || connectTimeout.isZero())
+        if (!(aliasBinding == null ? physicalIndex(index) : READ_ALIAS.equals(index))
+                || deadline.isNegative() || deadline.isZero() || connectTimeout.isNegative() || connectTimeout.isZero())
             throw new IllegalArgumentException("Search index and positive timeouts are required");
-        this.endpoint=endpoint;this.index=index;this.deadline=deadline;
+        this.endpoint=endpoint;this.index=index;this.deadline=deadline;this.aliasBinding=aliasBinding;
         this.http=HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER).build();
         this.mapper=mapper.copy().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.mapper.getFactory().setStreamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(20).maxNameLength(128).maxStringLength(2048).maxDocumentLength(MAX_RESPONSE_BYTES).build());
@@ -52,24 +62,48 @@ public final class ProductSearchHttpClient implements ProductSearchGateway {
     private Optional<Selection> select(String sourceId,Object query,PageCriteria page) {
         try {
             if(sourceId==null || !UUID.fromString(sourceId).toString().equals(sourceId))return Optional.empty();
+            BoundTarget binding = aliasBinding == null ? null : aliasBinding.get();
+            if (aliasBinding != null && (binding == null || !sourceId.equals(binding.sourceId())
+                    || !physicalIndex(binding.indexName()) || !binding.indexUuid().matches("[A-Za-z0-9_-]{1,128}"))) return Optional.empty();
             long end=System.nanoTime()+deadline.toNanos();
-            String generation=metadata(exchange("GET",metadataPath(),null,end),sourceId);
-            var result=selection(exchange("POST","/"+index+"/_search?allow_partial_search_results=false",query,end),page);
-            if(!generation.equals(metadata(exchange("GET",metadataPath(),null,end),sourceId)))return Optional.empty();
+            String physical = binding == null ? index : binding.indexName();
+            String generation = generation(physical, sourceId, binding, end);
+            var result = selection(exchange("POST", "/" + index + "/_search?allow_partial_search_results=false", query, end), page, physical);
+            if (!generation.equals(generation(physical, sourceId, binding, end))) return Optional.empty();
+            if (binding != null && !binding.equals(aliasBinding.get())) return Optional.empty();
             return Optional.of(result);
         } catch(InterruptedException interrupted){Thread.currentThread().interrupt();return Optional.empty();}
         catch(java.io.IOException|ExecutionException|TimeoutException|IllegalArgumentException invalid){return Optional.empty();}
     }
-    private String metadataPath(){return "/"+index+"?filter_path=*.settings.index.uuid,*.mappings._meta";}
-    private String metadata(JsonNode body,String sourceId){
-        require(body.isObject() && body.size()==1 && body.has(index));
-        var meta=body.path(index).path("mappings").path("_meta");
+    private String generation(String physical, String sourceId, BoundTarget binding, long end)
+            throws java.io.IOException, InterruptedException, ExecutionException, TimeoutException {
+        if (binding != null) {
+            var alias = exchange("GET", "/_alias/" + READ_ALIAS, null, end);
+            var physicalAliases = alias.path(physical);
+            var aliases = physicalAliases.path("aliases");
+            var entry = aliases.path(READ_ALIAS);
+            var filter = entry.path("filter");
+            var term = filter.path("term");
+            require(alias.isObject() && alias.size() == 1 && physicalAliases.isObject() && physicalAliases.size() == 1
+                && aliases.isObject() && aliases.size() == 1 && entry.isObject() && entry.size() == 2
+                && entry.path("is_write_index").isBoolean() && !entry.path("is_write_index").booleanValue()
+                && filter.isObject() && filter.size() == 1 && term.isObject() && term.size() == 1
+                && term.path("deleted").isBoolean() && !term.path("deleted").booleanValue());
+        }
+        var body = exchange("GET", "/" + physical + "?filter_path=*.settings.index.uuid,*.mappings._meta", null, end);
+        String uuid = metadata(body, physical, sourceId);
+        if (binding != null) require(binding.indexUuid().equals(uuid));
+        return uuid;
+    }
+    private String metadata(JsonNode body,String physical,String sourceId){
+        require(body.isObject() && body.size()==1 && body.has(physical));
+        var meta=body.path(physical).path("mappings").path("_meta");
         require(meta.isObject() && text(meta.get("owner"),"pubburi") && text(meta.get("schema"),"products-v1")
                 && text(meta.get("data_kind"),"backend_product_events") && text(meta.get("source_id"),sourceId));
-        var uuid=body.path(index).path("settings").path("index").path("uuid");require(uuid.isTextual() && !uuid.textValue().isBlank() && uuid.textValue().length()<=128);
+        var uuid=body.path(physical).path("settings").path("index").path("uuid");require(uuid.isTextual() && !uuid.textValue().isBlank() && uuid.textValue().length()<=128);
         return uuid.textValue();
     }
-    private Selection selection(JsonNode body,PageCriteria page){
+    private Selection selection(JsonNode body,PageCriteria page,String physical){
         require(body.isObject() && body.path("timed_out").isBoolean() && !body.path("timed_out").booleanValue()
                 && body.path("_shards").path("failed").isIntegralNumber() && body.path("_shards").path("failed").canConvertToInt() && body.path("_shards").path("failed").intValue()==0
                 && body.path("_shards").path("total").isIntegralNumber() && body.path("_shards").path("total").canConvertToInt() && body.path("_shards").path("total").intValue()==1
@@ -80,7 +114,7 @@ public final class ProductSearchHttpClient implements ProductSearchGateway {
         require(hits.path("hits").size()==Math.min(page.size(),Math.max(0L,count-offset)));
         var ids=new ArrayList<Integer>();var unique=new HashSet<Integer>();
         for(var hit:hits.path("hits")){
-            var id=hit.path("_id");require(id.isTextual() && id.textValue().matches("[1-9][0-9]{0,9}") && text(hit.get("_index"),index) && !hit.has("_source"));
+            var id=hit.path("_id");require(id.isTextual() && id.textValue().matches("[1-9][0-9]{0,9}") && text(hit.get("_index"),physical) && !hit.has("_source"));
             int value=Integer.parseInt(id.textValue());require(value>0 && unique.add(value));ids.add(value);
         }
         return new Selection(List.copyOf(ids),count);
@@ -113,6 +147,9 @@ public final class ProductSearchHttpClient implements ProductSearchGateway {
         }finally{cancelled.set(true);if(future!=null && !future.isDone())future.cancel(true);var body=active.get();if(body!=null)body.abort();}
     }
     private static boolean text(JsonNode node,String expected){return node!=null && node.isTextual() && expected.equals(node.textValue());}
+    private static boolean physicalIndex(String name) {
+        return name != null && !READ_ALIAS.equals(name) && name.matches("pubburi-products-v1(?:-[a-z0-9]{1,32})?");
+    }
     private static void require(boolean valid){if(!valid)throw new IllegalArgumentException("Invalid search response");}
     private static final class LimitedBody implements HttpResponse.BodySubscriber<byte[]>{
         final CompletableFuture<byte[]> result=new CompletableFuture<>();final ByteArrayOutputStream bytes=new ByteArrayOutputStream();Flow.Subscription subscription;

@@ -2,8 +2,8 @@
 
 이 relay는 [업무 생산](SEARCH-OUTBOX.md)의 이벤트를 개별 claim해 명시한 로컬 색인으로 보낸다.
 `init`·`once`·`watch`를 직접 실행할 때만 동작하며 Java 서버/기본 통합 기동은 Python 의존성이나
-검색 엔진을 요구하지 않는다. 기본 공개 상품 검색은 MySQL 그대로다. 자동 색인 재생성·retention/
-재색인 세대 cutover·전체 S02 완료와 구분한다.
+검색 엔진을 요구하지 않는다. 공개 상품 검색은 현재 업무 DB로 기동한다. 별도 로컬 검색 세대
+전환은 아래 운영 명령을 사용한다.
 
 ## 전달 계약
 
@@ -124,6 +124,44 @@ watch는 Ctrl+C로 중단한다. 급작스러운 종료는 미ACK lease를 남�
 재claim한다. 실패를 없애려고 delivered_at/token/UUID를 수정하거나 이벤트를 삭제하지 않는다.
 추가 metadata 조회·DB 쓰기/잠금·이력 보관과 반복 전송 비용이 있다. 처리량/지연 개선 수치는 미측정이다.
 
+## PostgreSQL 검색 세대 전환
+
+검증 표식이 있는 로컬 PostgreSQL18.6과 source-bound OpenSearch에서만 별도 작업으로 실행한다.
+기존 전달을 모두 ACK까지 처리한 뒤 relay와 상품·특성·주문 쓰기를 중단한다. 읽기 앱은 계속 서비스할
+수 있다. 운영자가 기존 binding의 물리 이름·UUID·cluster UUID와 새 물리 이름·UUID를 확인해 고정한다.
+새 index는 기존 `search_index.py init`의 `backend_product_events`와 동일 source UUID로 준비한다.
+`pubburi-products-v1-read`는 고정 읽기 별칭으로 예약한다. 처음 별칭을 만드는 경우에만
+`--bootstrap-read-alias`를 명시한다. 기존 별칭은 현재 binding에 대응하는 단일 필터 별칭이어야 한다.
+
+~~~bash
+# 기존 PUBBURI_PG_URL, PUBBURI_PG_DB_NAME, PUBBURI_PG_CONTAINER_ID, PUBBURI_PG_VALIDATION_LABEL,
+# PUBBURI_PG_RUN_TOKEN, PUBBURI_PG_CA와 별도 제어 역할의 PUBBURI_DB_USER/PASSWORD를 준비한다.
+export PUBBURI_DB_URL="$PUBBURI_PG_URL" PUBBURI_RELAY_DB_CA="$PUBBURI_PG_CA"
+export PUBBURI_SEARCH_CUTOVER_MUTATING=1 PUBBURI_SEARCH_CUTOVER_WRITERS_STOPPED=1
+.venv-relay/bin/python scripts/search_cutover.py --endpoint "$ENGINE_ORIGIN" \
+  --source-id "$SOURCE_UUID" --cluster-uuid "$CLUSTER_UUID" \
+  --old-index "$OLD_INDEX" --old-uuid "$OLD_INDEX_UUID" \
+  --new-index "$NEW_INDEX" --new-uuid "$NEW_INDEX_UUID"
+~~~
+
+제어 역할은 superuser·확장 권한 없이 marker와 target, 상품/특성/태그/version/outbox/delivery
+SELECT, 해당 여섯 업무·전달 표의 `MAINTAIN`, target의 `UPDATE(fingerprint,identity_json,bound_at)`을
+사용한다. target row를 `FOR UPDATE NOWAIT`, 여섯 표를 `SHARE NOWAIT`로 잠가 producer와 relay
+쓰기를 막고, 모든 이벤트에 완료 ACK가 있는지 확인한다. 읽기와 별칭 이동 후 binding이 일치할 때까지의
+검색 대체는 [공개 검색](PRODUCT-SEARCH.md)을 따른다. 별도 DB 복사본과 별개 OpenSearch 운영자를
+동일 source/색인에 붙이지 않는다. [PostgreSQL 잠금](https://www.postgresql.org/docs/18/sql-lock.html)
+
+한 번에 전체 불변 이력 최대1,000건·4MiB·60초를 처리한다. 이벤트 ID 최대값은 경계로 쓰지 않는다.
+각 상품의 연속 버전과 최신 행·삭제 표식을 현재 상품/특성에 대조하고, 새 색인의 문서 집합과 정확한
+최신 내용·버전을 검증한다. 이후 필터·비쓰기 설정을 유지하며 별칭을 원자적으로 옮기고 기존 DB
+binding을 조건부 변경한다. 원본 UUID, 업무값, version/outbox/ACK와 구 색인은 보존한다.
+[OpenSearch 별칭 변경](https://docs.opensearch.org/latest/api-reference/alias/aliases-api/)
+
+별칭 이동과 DB 갱신은 서로 다른 시스템의 작업이다. 중간 실패가 나면 쓰기/relay 중단을 유지하고
+**동일 인자**로 재실행한다. 기존 별칭/기존 binding이면 검증부터, 새 별칭/기존 binding이면 새
+색인을 재검증한 뒤 binding 변경부터 수습한다. 새 별칭/새 binding이면 재검증 후 완료 상태를 반환한다.
+제3의 물리 세대나 변조된 identity는 거절한다. 성공 뒤 새 물리 이름으로 relay를 시작한다.
+
 기존 MySQL 구현/실제 조건·실패는 [전달 기록](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md),
 PG 제공/검증 범위는 [어댑터 기록](https://github.com/Pubburi/Backend/blob/ac2b0cd15f77f85feffaefbd74b1a228e2839399/docs/plans/2026-11-04-postgresql-search-relay.md)에 구분한다.
-공개 엔진 검색·필수조건 PG fallback·기본 runtime/cutover와 전체 DB05–06은 후속이다.
+업무 DB 전체 전환과 검색 색인의 세대 전환은 별도 인수 범위다.
