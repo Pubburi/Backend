@@ -287,7 +287,9 @@ def verify_default_recommendation_openapi(document):
 
 def verify_product_filter_openapi(document):
     operation = document["paths"]["/api/products"]["get"]
-    assert "application/json" in operation["responses"]["200"]["content"]
+    response = operation["responses"]["200"]
+    assert "application/json" in response["content"]
+    assert response["headers"]["X-Pubburi-Search-Hint"]["schema"]["type"] == "string"
     parameters = {item["name"]: item for item in operation["parameters"]}
     assert {"type", "q", "sort", "page", "size", "minPriceKrw", "maxPriceKrw",
             "minAbvPercent", "maxAbvPercent", "tasteTag", "aromaTag"} <= set(parameters)

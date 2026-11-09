@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from postgresql_schema import ROOT, verify_owned_postgres
 from search_index import _DeadlineConnection
-from api_smoke import verify_content_recommendation_openapi, verify_similar_products_openapi, verify_product_suggestions_openapi, verify_order_recommendation_openapi
+from api_smoke import verify_content_recommendation_openapi, verify_similar_products_openapi, verify_product_filter_openapi, verify_product_suggestions_openapi, verify_order_recommendation_openapi
 
 
 @contextmanager
@@ -122,6 +122,7 @@ def verify_openapi_scope(docs):
     if operations!=70:raise ValueError("jpa_runtime_operation_scope_changed")
     verify_content_recommendation_openapi(docs)
     verify_similar_products_openapi(docs)
+    verify_product_filter_openapi(docs)
     verify_product_suggestions_openapi(docs)
     verify_order_recommendation_openapi(docs)
     return operations

@@ -9,11 +9,75 @@ import com.pubburi.pub.model.dao.ProductSearchIdentityDao;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.ProductSuggestion;
 import com.pubburi.pub.search.ProductSearchGateway;
+import com.pubburi.pub.search.ProductSearchHint;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class PublicProductSearchServiceTests {
     static final PageCriteria PAGE=PageCriteria.of(1,12,12);
+
+    @Test void verifiedAliasPreservesTheOriginalPageAndEveryMandatoryCondition() {
+        var db = mock(ProductService.class);
+        var identities = mock(ProductSearchIdentityDao.class);
+        var engine = mock(ProductSearchGateway.class);
+        var filters = ProductSearchFilters.fromQuery("1000", "1800", "3", "7.5",
+            new String[]{"dry,fruit", "tea"}, new String[]{"floral"});
+        var original = PageResponse.<Product>of(List.of(), PAGE, 0);
+        var probe = new PageCriteria(1, 1);
+        var match = new Product(7, "Authored", "약 · 청주", 1500, "authored.png", 7);
+        when(db.searchProducts("약 · 청주", " 약주 ", "priceDesc", filters, PAGE)).thenReturn(original);
+        when(db.searchProducts("약 · 청주", "약 · 청주", "priceDesc", filters, probe))
+            .thenReturn(PageResponse.of(List.of(match), probe, 1));
+
+        var result = new PublicProductSearchService(db, identities, engine)
+            .search("약 · 청주", " 약주 ", "priceDesc", filters, PAGE);
+        assertThat(result.page()).isSameAs(original);
+        assertThat(result.source()).isEqualTo(PublicProductSearchService.Source.DATABASE);
+        assertThat(result.hint().headerValue()).isEqualTo("ALIAS:%EC%95%BD%20%C2%B7%20%EC%B2%AD%EC%A3%BC");
+        var reads = inOrder(db);
+        reads.verify(db).searchProducts("약 · 청주", " 약주 ", "priceDesc", filters, PAGE);
+        reads.verify(db).searchProducts("약 · 청주", "약 · 청주", "priceDesc", filters, probe);
+        reads.verifyNoMoreInteractions();
+        verifyNoInteractions(identities);
+        verify(engine).enabled();
+        verifyNoMoreInteractions(engine);
+    }
+
+    @Test void zeroResultsDoNotSuggestAmbiguousExactShortOrNonliteralTerms() {
+        var db = mock(ProductService.class);
+        var filters = ProductSearchFilters.none();
+        var service = new PublicProductSearchService(db, () -> null, ProductSearchGateway.disabled());
+        var empty = PageResponse.<Product>of(List.of(), PAGE, 0);
+        for (String term : List.of("", "약", "탁쥬", "과류주", "과실주", "약주%", "과실쥬_", "과실쥬\\", "과실쥬 탁주", "과실쥬1", "가".repeat(21))) {
+            when(db.searchProducts(null, term, null, filters, PAGE)).thenReturn(empty);
+            assertThat(service.search(null, term, null, filters, PAGE).hint()).isNull();
+            verify(db).searchProducts(null, term, null, filters, PAGE);
+        }
+        var outOfRange = new PageCriteria(3, 1);
+        when(db.searchProducts(null, "과실쥬", null, filters, outOfRange))
+            .thenReturn(PageResponse.of(List.of(), outOfRange, 2));
+        assertThat(service.search(null, "과실쥬", null, filters, outOfRange).hint()).isNull();
+        verify(db).searchProducts(null, "과실쥬", null, filters, outOfRange);
+        verifyNoMoreInteractions(db);
+        assertThat(ProductSearchHint.forQuery("과실쥬").headerValue()).isEqualTo("TYPO:%EA%B3%BC%EC%8B%A4%EC%A3%BC");
+    }
+
+    @Test void optionalVerificationFailureLeavesTheOriginalPageAndPrimaryFailureStillPropagates() {
+        var db = mock(ProductService.class);
+        var filters = ProductSearchFilters.none();
+        var service = new PublicProductSearchService(db, () -> null, ProductSearchGateway.disabled());
+        var empty = PageResponse.<Product>of(List.of(), PAGE, 0);
+        var failure = new DataAccessResourceFailureException("Authored database read failure");
+        when(db.searchProducts(null, "과실쥬", null, filters, PAGE)).thenReturn(empty).thenThrow(failure);
+        when(db.searchProducts(null, "과실주", null, filters, new PageCriteria(1, 1))).thenThrow(failure);
+
+        var result = service.search(null, "과실쥬", null, filters, PAGE);
+        assertThat(result.page()).isSameAs(empty);
+        assertThat(result.hint()).isNull();
+        assertThatThrownBy(() -> service.search(null, "과실쥬", null, filters, PAGE)).isSameAs(failure);
+        verify(db).searchProducts(null, "과실주", null, filters, new PageCriteria(1, 1));
+    }
     @Test void suggestionsNormalizeBeforeIoAndDisabledOrShortInputNeedsNoSource() {
         var db=mock(ProductService.class);var identity=mock(ProductSearchIdentityDao.class);var engine=mock(ProductSearchGateway.class);
         var service=new PublicProductSearchService(db,identity,engine);

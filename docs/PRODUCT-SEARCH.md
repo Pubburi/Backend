@@ -74,6 +74,21 @@ items와 total은 같은 공통 필터 SQL을 사용한다. 태그별 EXISTS로 
 판매·매진·원천 사실 확인을 완료했다고 주장하지 않는다. 이 GET은 상품/특성/주문수·계정 취향을
 수정하지 않고 추천 서버·외부 키·AWS 없이 동작한다.
 
+## 검색 결과 0건의 대체 제안
+
+현재 DB에서 원래 `q`의 **total=0**인 경우에만 `X-Pubburi-Search-Hint`를 선택적으로 반환한다.
+값은 `ALIAS:` 또는 `TYPO:` 뒤에 UTF-8 percent encoding한 제안 검색어를 붙인다. 공백은 `%20`이다.
+`약주`의 별칭은 검수 원천 주종 매핑의 `약 · 청주`다. 오타 후보는 완성형 한글 3–20자에서
+한 글자를 바꿔 나오는 기존 주종이 정확히 하나일 때만 허용한다. 예를 들어 `과실쥬`는 `과실주`를
+제안할 수 있다. 정확한 기존 주종, 여러 후보로 갈리는 입력, 짧은 입력, LIKE 와일드카드나 혼합
+문자가 있는 입력에는 오타 제안을 붙이지 않는다. 별칭에 일치하면 그 별칭 하나를 검증한다.
+
+제안은 같은 주종·가격·도수·맛/향 AND 조건과 정렬로 현재 DB의 첫 페이지 한 건을 확인한다.
+같은 조건의 상품이 있을 때만 헤더가 붙고 JSON·total·페이지·엔진 분류에는 원래 질의가 반영된다.
+선택적 확인 조회만 실패하면 제안 헤더 없이 이미 조회한 원래 페이지를 반환한다.
+페이지가 범위를 벗어났지만 total이 양수인 경우에도 원래 페이지를 반환한다. 제안을 선택하면
+기존 상품 검색을 새 `q`로 다시 실행한다.
+
 ## 명시 엔진 읽기와 현재 DB fallback
 
 `PUBBURI_SEARCH_ENABLED=true`, `PUBBURI_SEARCH_ENDPOINT`, `PUBBURI_SEARCH_INDEX`를 명시하면
@@ -95,7 +110,7 @@ redirect 거부를 적용한다. 엔진 원격 대기는 업무 DB 트랜잭션 
 이 단계는 DB 확인 쿼리를 유지하고 원격 비용을 추가한다. 속도/DB 부하 감소나 검색 품질 개선을
 주장하지 않으며 현재 페이지/total의 일치를 전체 색인의 정합성 증명으로 확대하지 않는다.
 
-JSON은 그대로이고 `X-Pubburi-Search-Source`만 DATABASE(비활성), ENGINE_VERIFIED(현재 페이지/
+JSON은 그대로이고 `X-Pubburi-Search-Source`는 DATABASE(비활성), ENGINE_VERIFIED(현재 페이지/
 total 일치), DATABASE_FALLBACK(오류/불일치/미지원)으로 구분한다. q의 기존 LIKE `%`/`_`/backslash,
 100 UTF-16 단위를 넘는 q와 from+size>10000은 DB 의미를 그대로 사용한다. 그 밖의 q는 keyword
 필드의 literal wildcard 후보를 만들고 DB와 대조한다. Nori 의미 검색/동의어/오타로 q를 바꾸지 않는다.

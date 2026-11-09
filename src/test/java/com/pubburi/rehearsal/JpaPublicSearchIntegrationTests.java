@@ -37,10 +37,11 @@ class JpaPublicSearchIntegrationTests extends JpaAccountTestSupport {
     @DynamicPropertySource static void properties(DynamicPropertyRegistry values)throws Exception{engine=new Remote();values.add("pubburi.search.enabled",()->true);values.add("pubburi.search.endpoint",engine::origin);values.add("pubburi.search.index",()->INDEX);}
     @BeforeEach void reset(){engine.reset();engine.source=required("PUBBURI_JPA_SOURCE_ID");observed.insideTransaction.set(null);}
     @AfterAll static void stop(){if(engine!=null)engine.close();}
-    record Search(int status,JsonNode body,String source){}
+    record Search(int status,JsonNode body,String source,String hint){}
     Search search(String query)throws Exception{
         var response=client().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/products"+query)).timeout(Duration.ofSeconds(8)).header("Accept","application/json").GET().build(),HttpResponse.BodyHandlers.ofString());
-        return new Search(response.statusCode(),json.readTree(response.body()),response.headers().firstValue("X-Pubburi-Search-Source").orElse(null));
+        return new Search(response.statusCode(),json.readTree(response.body()),response.headers().firstValue("X-Pubburi-Search-Source").orElse(null),
+            response.headers().firstValue("X-Pubburi-Search-Hint").orElse(null));
     }
     String token(){return UUID.randomUUID().toString().replace("-","");}
     void selected(List<Integer> ids,int total){engine.ids=ids;engine.total=total;}
@@ -91,6 +92,49 @@ class JpaPublicSearchIntegrationTests extends JpaAccountTestSupport {
             int calls=engine.calls.get();var result=search(query);assertEquals(200,result.status());assertEquals("DATABASE_FALLBACK",result.source());assertEquals(calls,engine.calls.get());
         }
         engine.mode="status";var failed=search("?q="+token);assertEquals(200,failed.status());assertEquals("DATABASE_FALLBACK",failed.source());assertEquals(empty.body(),failed.body());
+    }
+
+    @Test void oneTypoHintUsesTheSameCurrentTypePriceAbvAndAllRequiredTags() throws Exception {
+        var admin = loggedIn("ADMIN");
+        String tag = token();
+        var product = new HashMap<>(product("ci_jpa_write_" + tag, 1200));
+        product.put("type", "과실주");
+        product.put("abv", 7.25);
+        var created = request(admin, "POST", "/api/admin/products", product);
+        assertEquals(201, created.status());
+        int id = created.body().at("/data/id").intValue();
+        try {
+            assertEquals(200, request(admin, "PUT", "/api/admin/products/" + id + "/features", Map.of(
+                "tasteTags", List.of(tag, "dry,fruit"), "aromaTags", List.of("floral"), "sourceName", "Authored hint fixture")).status());
+            String typo = URLEncoder.encode("과실쥬", StandardCharsets.UTF_8);
+            String canonical = URLEncoder.encode("과실주", StandardCharsets.UTF_8);
+            String query = "?q=" + typo + "&type=" + canonical + "&maxPriceKrw=1200&maxAbvPercent=7.25"
+                + "&tasteTag=" + tag + "&tasteTag=dry%2Cfruit&aromaTag=floral&sort=priceDesc&size=1";
+            selected(List.of(), 0);
+            var hinted = search(query);
+            assertEquals(200, hinted.status());
+            assertEquals("ENGINE_VERIFIED", hinted.source());
+            assertEquals("TYPO:%EA%B3%BC%EC%8B%A4%EC%A3%BC", hinted.hint());
+            assertEquals(json.valueToTree(PageResponse.of(List.of(), new PageCriteria(1, 1), 0)), hinted.body().path("data"));
+            assertTrue(engine.last.get().toString().contains("과실쥬"), "The engine receives the original query only");
+
+            for (String blocked : List.of(query.replace("type=" + canonical, "type=" + URLEncoder.encode("맥주", StandardCharsets.UTF_8)),
+                    query.replace("maxPriceKrw=1200", "maxPriceKrw=1199"), query.replace("maxAbvPercent=7.25", "maxAbvPercent=7.24"),
+                    query + "&tasteTag=extra", query + "&aromaTag=extra")) {
+                var empty = search(blocked);
+                assertEquals(200, empty.status());
+                assertEquals(hinted.body(), empty.body());
+                assertNull(empty.hint());
+            }
+
+            engine.mode = "status";
+            var fallback = search(query);
+            assertEquals("DATABASE_FALLBACK", fallback.source());
+            assertEquals(hinted.body(), fallback.body());
+            assertEquals(hinted.hint(), fallback.hint());
+        } finally {
+            remove(admin, List.of(id));
+        }
     }
     static final class ObservedGateway implements ProductSearchGateway{
         final ProductSearchGateway delegate;final AtomicReference<Boolean> insideTransaction=new AtomicReference<>();
