@@ -147,6 +147,12 @@
         "responses": {
           "200": {
             "description": "Current MySQL page and total under the same mandatory conditions. Empty result is a normal page.",
+            "headers": {
+              "X-Pubburi-Search-Hint": {
+                "description": "Optional ALIAS: or TYPO: followed by a percent-encoded UTF-8 query. Present only when the original total is zero and the same mandatory conditions match a current product for the suggested query.",
+                "schema": {"type": "string"}
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {

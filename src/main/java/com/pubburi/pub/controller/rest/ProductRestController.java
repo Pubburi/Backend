@@ -29,6 +29,7 @@ import com.pubburi.pub.controller.response.ResponseMapper;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.service.ProductService;
 import com.pubburi.pub.model.service.PublicProductSearchService;
+import com.pubburi.pub.search.ProductSearchHint;
 
 import jakarta.servlet.http.HttpSession;
 import jakarta.servlet.http.HttpServletRequest;
@@ -60,6 +61,9 @@ public class ProductRestController {
 	@Operation(summary = "Search current products with mandatory filters", parameters = {
 		@Parameter(name = "tasteTag", in = ParameterIn.QUERY, style = ParameterStyle.FORM, explode = Explode.TRUE, description = "Repeat for all required taste tags; commas stay literal. Unknown/empty tags cannot match.", array = @ArraySchema(maxItems = 20, schema = @Schema(type = "string", maxLength = 40))),
 		@Parameter(name = "aromaTag", in = ParameterIn.QUERY, style = ParameterStyle.FORM, explode = Explode.TRUE, description = "Repeat for all required aroma tags; commas stay literal. Unknown/empty tags cannot match.", array = @ArraySchema(maxItems = 20, schema = @Schema(type = "string", maxLength = 40)))})
+	@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", headers = {
+		@io.swagger.v3.oas.annotations.headers.Header(name = ProductSearchHint.HEADER, schema = @Schema(type = "string"),
+			description = "Optional ALIAS: or TYPO: plus percent-encoded UTF-8 query. Present only for an empty original result and a current match under the same mandatory filters.") })
 	public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> products(@RequestParam(required = false) String type,
 			@RequestParam(required = false) String q, @RequestParam(defaultValue = "popular") String sort,
 			@Parameter(description = "Existing page normalization; (page - 1) * normalized size must fit 0..2147483647 OFFSET or returns 400 BAD_REQUEST")
@@ -73,7 +77,12 @@ public class ProductRestController {
 				request.getParameterValues("tasteTag"), request.getParameterValues("aromaTag"));
 		var result = publicSearch.search(type, q, sort, filters, PageCriteria.of(page, size, 12));
 		PageResponse<ProductResponse> products = result.page().map(ResponseMapper::product);
-		return ResponseEntity.ok().header("X-Pubburi-Search-Source", result.source().name()).body(ApiResponse.ok(products));
+		var response = ResponseEntity.ok().header("X-Pubburi-Search-Source", result.source().name());
+		if (result.hint() != null) {
+			response.header(ProductSearchHint.HEADER, result.hint().headerValue())
+				.header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS, ProductSearchHint.HEADER);
+		}
+		return response.body(ApiResponse.ok(products));
 	}
 
 	@GetMapping(value = "/products/suggestions", produces = MediaType.APPLICATION_JSON_VALUE)
