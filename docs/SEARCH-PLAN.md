@@ -79,8 +79,8 @@ bulk의 개별 실패를 처리하고 재색인은 변경 재생을 완료한 �
 선택적 OpenSearch3.9.0/nori·strict ID 문서/버전·삭제 표식·명시 재생은
 [S02 기록](https://github.com/Pubburi/Backend/blob/e7a957babd094442d9e027174bb795aefccc4219/docs/plans/2026-11-01-local-search-replay.md)에 둔다. 원자적 업무 버전/outbox 생산은
 [생산 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-product-search-outbox.md), 개별 claim/ack·lease 재전달은
-[relay 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)이다. 재색인/정리·
-개인화 검색·성능 개선은 후속이다.
+[relay 증가분](https://github.com/Pubburi/Backend/blob/53c15c06327f4518b9c269ac95ccdd68b3f05c81/docs/plans/2026-11-01-durable-search-relay.md)이다.
+[PostgreSQL 검색 세대 전환](SEARCH-RELAY.md#postgresql-검색-세대-전환)은 쓰기 중단·전체 이력 검증·별칭 이동/DB 갱신 사이의 재실행을 제공한다. 보존 정리·개인화 검색·성능 개선은 후속이다.
 R06의 [본인 문구 caller](SEARCH-PHRASES.md)는 현재 명시 취향과 별도 선택만 기존 제공자에
 전달하며 원격 뒤 현재 snapshot/수명을 확인한다. 조건 검증·장애/빈 결과는 구분하지만 상품을
 검색하지 않는다. React의 명시 선택/문구 클릭·실제 검색/빈 결과와 S04 전체는 별도 후속이다.

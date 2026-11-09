@@ -7,8 +7,10 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
+import java.util.function.Supplier;
 import com.fasterxml.jackson.databind.*;
 import com.pubburi.pub.controller.api.*;
+import com.pubburi.pub.model.dao.ProductSearchIdentityDao.BoundTarget;
 import com.sun.net.httpserver.*;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +19,42 @@ class ProductSearchHttpClientTests {
     static final String HITS="""
         {"timed_out":false,"_shards":{"total":1,"successful":1,"failed":0},"hits":{"total":{"value":2,"relation":"eq"},"hits":[{"_id":"2","_index":"pubburi-products-v1-test"},{"_id":"5","_index":"pubburi-products-v1-test"}]}}
         """;
+    static final String READ_ALIAS = ProductSearchHttpClient.READ_ALIAS;
+    static final String FILTERED_ALIAS = """
+        {"pubburi-products-v1-test":{"aliases":{"pubburi-products-v1-read":{"is_write_index":false,"filter":{"term":{"deleted":false}}}}}}
+        """;
+
+    @Test void stableReadAliasRequiresTheSameReadOnlyPhysicalAndDatabaseGenerationBeforeAndAfter() throws Exception {
+        try (var server = new Server()) {
+            var bound = new BoundTarget(SOURCE, INDEX, "physical-identity", "a".repeat(64));
+            var client = server.aliasClient(() -> bound);
+            assertThat(client.search(SOURCE, null, null, null, ProductSearchFilters.none(), PageCriteria.of(1, 12, 12)))
+                .contains(new ProductSearchGateway.Selection(List.of(2, 5), 2));
+            assertThat(server.searchPath).hasValue("/" + READ_ALIAS + "/_search");
+            assertThat(client.suggest(SOURCE, "한글")).contains(new ProductSearchGateway.Selection(List.of(2, 5), 2));
+            for (String invalid : List.of(FILTERED_ALIAS.replace("v1-test", "v1-other"),
+                    FILTERED_ALIAS.replace("is_write_index\":false", "is_write_index\":true"),
+                    FILTERED_ALIAS.replace("deleted\":false", "deleted\":true"),
+                    FILTERED_ALIAS.replace("\"aliases\"", "\"other\""))) {
+                server.alias.set(invalid);
+                assertThat(client.suggest(SOURCE, "한글")).isEmpty();
+            }
+            server.alias.set(FILTERED_ALIAS);
+            server.mode.set("aliasMoved");
+            server.aliasReads.set(0);
+            assertThat(client.suggest(SOURCE, "한글")).isEmpty();
+            server.mode.set("normal");
+            server.response.set(HITS.replace(INDEX, "pubburi-products-v1-other"));
+            assertThat(client.suggest(SOURCE, "한글")).isEmpty();
+            server.response.set(HITS);
+            assertThat(server.aliasClient(() -> new BoundTarget(SOURCE, INDEX, "wrong-uuid", "a".repeat(64)))
+                .suggest(SOURCE, "한글")).isEmpty();
+            var bindingReads = new AtomicInteger();
+            var samePhysicalDifferentBinding = new BoundTarget(SOURCE, INDEX, "physical-identity", "b".repeat(64));
+            assertThat(server.aliasClient(() -> bindingReads.getAndIncrement() == 0 ? bound : samePhysicalDifferentBinding)
+                .suggest(SOURCE, "한글")).isEmpty();
+        }
+    }
     @Test void queryIncludesEveryHardKnownTagAtomAndDeterministicSortWithoutQueryStringSyntax()throws Exception{
         try(var server=new Server()){
             var filter=ProductSearchFilters.fromQuery("0","12000","0","5.10",new String[]{"a,b","line\nx"},new String[]{"floral"});
@@ -76,14 +114,23 @@ class ProductSearchHttpClientTests {
     }
     static final class Server implements AutoCloseable{
         final HttpServer http;final ExecutorService executor=Executors.newCachedThreadPool();final AtomicReference<String> response=new AtomicReference<>(HITS),mode=new AtomicReference<>("normal"),authorization=new AtomicReference<>(),cookie=new AtomicReference<>();final AtomicReference<JsonNode> last=new AtomicReference<>();final AtomicInteger calls=new AtomicInteger(),metadata=new AtomicInteger();final CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        final AtomicReference<String> alias = new AtomicReference<>(FILTERED_ALIAS), searchPath = new AtomicReference<>();
+        final AtomicInteger aliasReads = new AtomicInteger();
         Server()throws Exception{http=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);http.setExecutor(executor);http.createContext("/",exchange->{try{
             calls.incrementAndGet();authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));String body;
-            if(exchange.getRequestMethod().equals("GET")){int n=metadata.incrementAndGet();String source=mode.get().equals("source")?"00000000-0000-0000-0000-000000000000":SOURCE;String generation=mode.get().equals("generation") && n%2==0?"changed":"physical-identity";body="{\""+INDEX+"\":{\"settings\":{\"index\":{\"uuid\":\""+generation+"\"}},\"mappings\":{\"_meta\":{\"owner\":\"pubburi\",\"schema\":\"products-v1\",\"data_kind\":\"backend_product_events\",\"source_id\":\""+source+"\"}}}}";}
-            else{last.set(new ObjectMapper().readTree(exchange.getRequestBody()));body=response.get();}
+            if (exchange.getRequestURI().getPath().equals("/_alias/" + READ_ALIAS)) {
+                body = mode.get().equals("aliasMoved") && aliasReads.incrementAndGet() > 1
+                    ? alias.get().replace(INDEX, "pubburi-products-v1-other") : alias.get();
+            } else if(exchange.getRequestMethod().equals("GET")){int n=metadata.incrementAndGet();String source=mode.get().equals("source")?"00000000-0000-0000-0000-000000000000":SOURCE;String generation=mode.get().equals("generation") && n%2==0?"changed":"physical-identity";body="{\""+INDEX+"\":{\"settings\":{\"index\":{\"uuid\":\""+generation+"\"}},\"mappings\":{\"_meta\":{\"owner\":\"pubburi\",\"schema\":\"products-v1\",\"data_kind\":\"backend_product_events\",\"source_id\":\""+source+"\"}}}}";}
+            else{searchPath.set(exchange.getRequestURI().getPath());last.set(new ObjectMapper().readTree(exchange.getRequestBody()));body=response.get();}
             if(mode.get().equals("slowBody") && exchange.getRequestMethod().equals("POST")){exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,0);try(var output=exchange.getResponseBody()){output.write("{".getBytes(StandardCharsets.UTF_8));output.flush();entered.countDown();release.await(4,TimeUnit.SECONDS);}return;}
             byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type",mode.get().equals("media")?"text/html":"application/json");exchange.getResponseHeaders().set("Location","/must-not-follow");exchange.sendResponseHeaders(mode.get().equals("status")?503:mode.get().equals("redirect")?302:200,bytes.length);try(var output=exchange.getResponseBody()){output.write(bytes);}
         }catch(Exception error){exchange.close();}});http.start();}
         ProductSearchHttpClient client(){return new ProductSearchHttpClient(URI.create("http://127.0.0.1:"+http.getAddress().getPort()),INDEX,Duration.ofMillis(100),Duration.ofMillis(700),new ObjectMapper());}
+        ProductSearchHttpClient aliasClient(Supplier<BoundTarget> binding) {
+            return new ProductSearchHttpClient(URI.create("http://127.0.0.1:" + http.getAddress().getPort()), READ_ALIAS,
+                Duration.ofMillis(100), Duration.ofMillis(700), new ObjectMapper(), binding);
+        }
         Optional<ProductSearchGateway.Selection> call(){metadata.set(0);return client().search(SOURCE,null,null,null,ProductSearchFilters.none(),PageCriteria.of(1,12,12));}
         @Override public void close()throws Exception{release.countDown();http.stop(0);executor.shutdownNow();assertThat(executor.awaitTermination(3,TimeUnit.SECONDS)).isTrue();}
     }

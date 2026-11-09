@@ -122,6 +122,12 @@ total 일치), DATABASE_FALLBACK(오류/불일치/미지원)으로 구분한다.
 명시한 index는 기존 [source-bound relay](SEARCH-RELAY.md)로 준비하며 공개 앱이 자동 재색인하거나
 유실된 index/alias를 복구하지 않는다. [구현/검증 기록](https://github.com/Pubburi/Backend/blob/41eeffb3257a6b26d6ba530d58f67ff0bc443c11/docs/plans/2026-11-04-public-search-fallback.md)을 따른다.
 
+PostgreSQL에서 `PUBBURI_SEARCH_READ_ALIAS=pubburi-products-v1-read`를 명시하면 검색·자동완성이
+같은 읽기 별칭을 사용한다. 별칭은 `deleted=false` 필터와 명시 `is_write_index=false`를 가진
+물리 색인 한 개여야 한다. 요청 앞뒤에 물리 이름·UUID·source metadata와 PostgreSQL의 현재 relay
+binding을 대조한다. 별칭과 binding이 어긋나거나 호출 중 바뀌면 현재 DB의 같은 질의로 대체한다.
+엔진 전체 요청 기한과 현재 상품/ID순 검증은 위 계약을 따른다. 세대 전환은 별도의 [로컬 운영 계약](SEARCH-RELAY.md#postgresql-검색-세대-전환)으로 실행한다.
+
 예를 들어 다음은 원화/도수와 명시 태그를 모두 만족하는 상품의 첫 페이지를 조회한다. 태그는
 계약 설명용 값이며 실제 상품의 맛을 주장하지 않는다.
 

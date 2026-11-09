@@ -19,6 +19,7 @@ import uuid
 from urllib.parse import urlsplit
 
 VERSION = "3.9.0"
+READ_ALIAS = "pubburi-products-v1-read"
 MAX_INPUT_BYTES = 4 * 1024 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 SCHEMA = Path(__file__).resolve().parents[1] / "search" / "products-v1.json"
@@ -273,7 +274,7 @@ class Http:
 
 class Engine:
     def __init__(self, http, index="pubburi-products-v1", kind="authored_fixture", source_id=None, refresh="wait_for"):
-        if not re.fullmatch(r"pubburi-products-v1(?:-[a-z0-9]{1,32})?", index) or kind not in KINDS or refresh not in ("wait_for", "false"):
+        if index == READ_ALIAS or not re.fullmatch(r"pubburi-products-v1(?:-[a-z0-9]{1,32})?", index) or kind not in KINDS or refresh not in ("wait_for", "false"):
             raise SearchError("owned_index_and_data_kind_required")
         self.http, self.index, self.kind = http, index, kind
         self.refresh = refresh

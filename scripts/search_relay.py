@@ -73,6 +73,11 @@ def connect_database(settings):
     return connection
 
 
+def encode_target_identity(identity):
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return encoded, hashlib.sha256(encoded.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class Claim:
     event_id: int
@@ -113,8 +118,7 @@ class Store:
             return row["source_id"]
 
     def bind(self, identity):
-        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-        fingerprint = hashlib.sha256(encoded.encode()).hexdigest()
+        encoded, fingerprint = encode_target_identity(identity)
         with self.transaction() as cursor:
             cursor.execute("SELECT source_id, fingerprint FROM t_product_search_relay_target WHERE singleton_id=1 FOR UPDATE")
             row = cursor.fetchone()
@@ -188,8 +192,7 @@ class PostgresStore(Store):
             return row["source_id"]
 
     def bind(self, identity):
-        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-        fingerprint = hashlib.sha256(encoded.encode()).hexdigest()
+        encoded, fingerprint = encode_target_identity(identity)
         with self.transaction() as cursor:
             cursor.execute("SELECT source_id::text AS source_id, fingerprint FROM t_product_search_relay_target WHERE singleton_id=1 FOR UPDATE")
             row = cursor.fetchone()
@@ -277,14 +280,18 @@ def target_identity(engine, source_id):
 
 
 def claim_document(claim):
-    if claim.row["payload"] is None: raise SearchError("relay_payload_exceeds_limit")
+    return outbox_document(claim.row)
+
+
+def outbox_document(row):
+    if row["payload"] is None: raise SearchError("relay_payload_exceeds_limit")
     try:
-        value = document(decode(claim.row["payload"]))
+        value = document(decode(row["payload"]))
     except SearchError as error:
         raise SearchError("relay_outbox_payload_invalid") from error
-    if (value["product_id"] != claim.row["product_id"] or value["source_version"] != claim.row["source_version"]
-            or type(claim.row["deleted"]) is not int or claim.row["deleted"] not in (0, 1)
-            or value["deleted"] != bool(claim.row["deleted"])):
+    if (value["product_id"] != row["product_id"] or value["source_version"] != row["source_version"]
+            or type(row["deleted"]) is not int or row["deleted"] not in (0, 1)
+            or value["deleted"] != bool(row["deleted"])):
         raise SearchError("relay_outbox_metadata_mismatch")
     return value
 

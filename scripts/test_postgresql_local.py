@@ -50,7 +50,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
     def test_duplicate_unknown_nonfinite_nonstring_and_shared_ports_fail(self):
         for mutation in ({'PUBBURI_PG_ADMIN_PASSWORD':'no'}, {'JAVA_TOOL_OPTIONS':'-Dsecret=no'},
                          {'SPRING_DATASOURCE_URL':'remote'}, {'PUBBURI_SERVER_PORT':True},
-                         {'PUBBURI_FRONTEND_PORT':'15001'}, {'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED':'yes'}, {'PUBBURI_RECOMMENDATION_BASE_URL':'https://remote.invalid'}, {'PUBBURI_SEARCH_ENDPOINT':'http://127.0.0.1:9200/private'}, {'PUBBURI_JPA_REHEARSAL':'0'}):
+                         {'PUBBURI_FRONTEND_PORT':'15001'}, {'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED':'yes'}, {'PUBBURI_RECOMMENDATION_BASE_URL':'https://remote.invalid'}, {'PUBBURI_SEARCH_ENDPOINT':'http://127.0.0.1:9200/private'}, {'PUBBURI_SEARCH_READ_ALIAS':'wildcard*'}, {'PUBBURI_JPA_REHEARSAL':'0'}):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 with self.assertRaises(RuntimeError):pg.configuration(self.config(Path(temporary), dict(self.env(), **mutation)))
         for text in ('{"a":1,"a":2}', '{"a":NaN}', '{"a":1} true'):
