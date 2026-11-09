@@ -8,6 +8,8 @@ import java.util.*;
 import com.pubburi.pub.controller.api.GlobalExceptionHandler;
 import com.pubburi.pub.controller.auth.*;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse;
+import com.pubburi.pub.controller.response.ExplorationRecommendationResponse;
+import com.pubburi.pub.controller.response.ExplorationRecommendationResponse.Scope;
 import com.pubburi.pub.model.service.OwnedContentRecommendationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -16,6 +18,44 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class OwnedContentContractTests {
     static final String PATH="/api/users/me/recommendations/content";
+
+    @Test void explorationRequiresAConfirmedOwnerAndStrictPrivateLimit() throws Exception {
+        String path = "/api/users/me/recommendations/exploration";
+        var user = SessionFixtures.user("한글", "USER");
+        String encoded = "%ED%95%9C%EA%B8%80";
+        var session = new MockHttpSession();
+        session.setAttribute(AccessGuard.SESSION_USER, SessionUser.from(user));
+        var service = mock(OwnedContentRecommendationService.class);
+        when(service.explore(user.getId(), user.getAuthEpoch(), 4))
+            .thenReturn(ExplorationRecommendationResponse.unavailable(Scope.REVIEWED_DEMO));
+        var mvc = MockMvcBuilders.standaloneSetup(new OwnedContentRecommendationController(SessionFixtures.guard(user), service))
+            .setControllerAdvice(new GlobalExceptionHandler()).addFilters(new NotebookPrivacyFilter()).build();
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "private, no-store"));
+        mvc.perform(post(path).session(session).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post(path).session(session).header(FeedbackOwner.HEADER, "another").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post(path).session(session).header(FeedbackOwner.HEADER, encoded, encoded).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isBadRequest());
+        for (String body : List.of("null", "[]", "{} {}", "{\"limit\":1,\"limit\":2}", "{\"limit\":null}",
+                "{\"limit\":1.0}", "{\"limit\":true}", "{\"limit\":\"1\"}", "{\"limit\":0}", "{\"limit\":13}",
+                "{\"policy\":{}}", "{\"profile\":{}}", "{\"includeActivity\":true}")) {
+            mvc.perform(post(path).session(session).header(FeedbackOwner.HEADER, encoded).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "private, no-store"));
+        }
+        mvc.perform(post(path + "?limit=3").session(session).header(FeedbackOwner.HEADER, encoded).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+
+        mvc.perform(post(path).session(session).header(FeedbackOwner.HEADER, encoded).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isOk()).andExpect(header().string("Vary", "Cookie"))
+            .andExpect(jsonPath("$.data.source").value("UNAVAILABLE"))
+            .andExpect(jsonPath("$.data.catalogScope").value("REVIEWED_DEMO"))
+            .andExpect(jsonPath("$.data.result").isEmpty()).andExpect(jsonPath("$.data.products").isEmpty());
+        verify(service).explore(user.getId(), user.getAuthEpoch(), 4);
+    }
+
     @Test void strictPrivateLimitAndOptInDoNotAcceptOwnerProfileCatalogOrSelectors()throws Exception{
         var user=SessionFixtures.user("own","ADMIN");var session=new MockHttpSession();session.setAttribute(AccessGuard.SESSION_USER,SessionUser.from(user));var service=mock(OwnedContentRecommendationService.class);
         when(service.recommend(user.getId(),user.getAuthEpoch(),4,false)).thenReturn(ContentRecommendationResponse.unavailable());

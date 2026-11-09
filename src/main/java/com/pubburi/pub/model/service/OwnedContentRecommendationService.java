@@ -12,6 +12,8 @@ import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse.*;
+import com.pubburi.pub.controller.response.ExplorationRecommendationResponse;
+import com.pubburi.pub.controller.response.ExplorationRecommendationResponse.Scope;
 import com.pubburi.pub.recommendation.*;
 
 @Service
@@ -21,6 +23,7 @@ public class OwnedContentRecommendationService {
     private final ContentGateway gateway;
     private final ContentContract contract;
     private final FeedbackContract feedbackContract;
+    private final ExplorationContract explorationContract;
     private final ObjectMapper mapper;
     public OwnedContentRecommendationService(OwnedContentSnapshotService snapshots, ContentCatalogSource catalogs,
             ContentGateway gateway, ObjectMapper mapper) {
@@ -30,6 +33,44 @@ public class OwnedContentRecommendationService {
         this.mapper = mapper;
         contract = new ContentContract(mapper);
         feedbackContract = new FeedbackContract(contract);
+        explorationContract = new ExplorationContract(mapper, contract);
+    }
+
+    public ExplorationRecommendationResponse explore(String id, String epoch, int limit) {
+        var approved = catalogs.current().filter(authority -> authority.scope() == CatalogScope.REVIEWED_DEMO
+            || authority.scope() == CatalogScope.REVIEWED_LOCAL_CATALOG);
+        var ids = approved.map(ContentCatalogSource.Authority::ids).orElse(List.of());
+        var namespace = approved.map(ContentCatalogSource.Authority::businessSourceId).orElse(null);
+        var before = snapshot(id, epoch, ids, List.of(), true, namespace);
+        if (approved.isEmpty()) return ExplorationRecommendationResponse.unavailable(Scope.REVIEWED_DEMO);
+
+        var authority = approved.get();
+        var catalog = authority.resolve(before.products()).orElseThrow(() ->
+            new ResponseStatusException(HttpStatus.CONFLICT, "Reviewed catalog facts changed"));
+        var scope = catalog.scope() == CatalogScope.REVIEWED_LOCAL_CATALOG ? Scope.REVIEWED_LOCAL_CATALOG : Scope.REVIEWED_DEMO;
+        var excluded = ContextContract.excludedByFeedback(catalog.catalog(), before.feedback());
+        var response = gateway.explore(catalog.catalog(), before.preferences(), limit, excluded);
+
+        var current = snapshot(id, epoch, ids, List.of(), true, namespace);
+        if (!equal(mapper.valueToTree(before.preferences()), mapper.valueToTree(current.preferences()))
+                || !before.feedback().notInterested().equals(current.feedback().notInterested())) changed();
+        requireCurrent(catalog, current);
+        var after = catalogs.current();
+        if (after.isEmpty()) {
+            if (scope == Scope.REVIEWED_LOCAL_CATALOG) changed();
+            return ExplorationRecommendationResponse.unavailable(scope);
+        }
+        if (authority.scope() != after.get().scope() || !authority.sha256().equals(after.get().sha256())
+                || !Objects.equals(namespace, after.get().businessSourceId())) changed();
+        if (response.isEmpty()) return ExplorationRecommendationResponse.unavailable(scope);
+
+        try {
+            var result = explorationContract.validate(response.get(), catalog.catalog(), before.preferences(), limit, Set.copyOf(excluded));
+            var products = result.items().stream().map(item -> current.products().get(item.productId()).currentProduct()).toList();
+            return new ExplorationRecommendationResponse(Source.PROVIDER, scope, result, products);
+        } catch (IllegalArgumentException invalid) {
+            return ExplorationRecommendationResponse.unavailable(scope);
+        }
     }
     public ContentRecommendationResponse recommend(String id, String epoch, int limit, boolean includeActivity) {
         return recommend(id, epoch, limit, includeActivity, false);

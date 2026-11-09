@@ -32,6 +32,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named="PUBBURI_JPA_INTEGRATION",matches="1")
 class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
     static final String PATH="/api/users/me/recommendations/content",PREFS="/api/users/me/preferences";
+    static final String EXPLORATION = "/api/users/me/recommendations/exploration";
     static Remote remote;
     @Autowired Source source;@Autowired Observed observed;@Autowired OwnedContentSnapshotService snapshots;@Autowired Gate gate;
     @Autowired jakarta.persistence.EntityManagerFactory entityManagerFactory;
@@ -245,6 +246,61 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             .put("excluded_not_interested_count", 1).put("excluded_positive_group_count", 0);
         root.putArray("matches").addObject().put("source", "baseline").putNull("positive_product_id")
             .set("product_id", catalog.get(1).get("product_id"));
+        return root;
+    }
+
+    @Test void explorationUsesWholeOwnNegativeGroupsAndRejectsChangesDuringRemoteIo() throws Exception {
+        try (var f = new Fixture()) {
+            int excluded = f.ids.get(0);
+            String feedback = "/api/users/me/recommendations/feedback/" + excluded;
+            var owner = Map.of("X-Pubburi-Feedback-Owner", f.user);
+            var catalog = source.value.get().orElseThrow().catalog();
+            ((ObjectNode) catalog.get(1)).set("sku_group", catalog.get(0).get("sku_group"));
+            assertEquals(200, request(f.owner, "PUT", feedback, Map.of("feedback", "NOT_INTERESTED"), owner).status());
+            var initial = accountState(control(), f.user);
+            var identity = sourceIdentity(control());
+            remote.handler.set((exchange, body) -> {
+                assertEquals("/v1/recommendations/exploration", exchange.getRequestURI().toString());
+                remote.reply(exchange, 200, emptyExploration(body));
+            });
+            var result = request(f.owner, "POST", EXPLORATION, Map.of(), owner);
+            assertEquals(200, result.status());
+            assertEquals("PROVIDER", result.body().at("/data/source").textValue());
+            assertEquals("baseline_fallback", result.body().at("/data/result/exploration_reason").textValue());
+            assertEquals("no_eligible_products", result.body().at("/data/result/fallback_reason").textValue());
+            assertTrue(result.body().at("/data/products").isEmpty());
+            assertEquals(Set.of("catalog", "preferences", "constraints", "limit", "include_explanations"), keys(remote.last.get()));
+            assertEquals(json.valueToTree(f.ids), remote.last.get().at("/constraints/exclude_product_ids"));
+            assertFalse(remote.last.get().toString().contains(f.user));
+            assertNull(remote.cookie.get());
+            assertNull(remote.authorization.get());
+            assertEquals(Boolean.FALSE, observed.inside.get());
+            assertEquals(initial, accountState(control(), f.user));
+            assertEquals(identity, sourceIdentity(control()));
+
+            var otherSession = login(f.user, password);
+            remote.handler.set((exchange, body) -> {
+                assertEquals(200, request(otherSession, "DELETE", feedback, null, owner).status());
+                remote.reply(exchange, 200, emptyExploration(body));
+            });
+            assertEquals(409, request(f.owner, "POST", EXPLORATION, Map.of(), owner).status());
+            int calls = remote.calls.get();
+            f.bind(CatalogScope.REVIEWED_FAMILY_BROWSE_DEMO);
+            var family = request(f.owner, "POST", EXPLORATION, Map.of(), owner);
+            assertEquals(200, family.status());
+            assertEquals("UNAVAILABLE", family.body().at("/data/source").textValue());
+            assertEquals(calls, remote.calls.get());
+        }
+    }
+
+    private static ObjectNode emptyExploration(JsonNode request) {
+        var root = zero(request).put("eligible_count", 0).put("fallback_reason", "no_eligible_products")
+            .put("reranking_algorithm", "r08-text-mmr-group-v1").put("candidate_pool_limit", 100)
+            .put("candidate_pool_size", 0).put("pool_truncated", false).put("relevance_pool_size", 0)
+            .put("selected_count", 0).put("selected_group_count", 0).put("exploration_reason", "baseline_fallback");
+        root.putObject("policy").put("relevance_weight", 0.7).put("min_relevance_score", 0);
+        root.putArray("items");
+        root.putArray("selections");
         return root;
     }
 
@@ -560,6 +616,10 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
             inside.set(TransactionSynchronizationManager.isActualTransactionActive());
             return delegate.recommend(c, p, l, activity);
         }
+        @Override public Optional<JsonNode> explore(JsonNode catalog, UserPreferencesResponse preferences, int limit, List<Integer> excluded) {
+            inside.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return delegate.explore(catalog, preferences, limit, excluded);
+        }
         @Override public Optional<JsonNode> feedback(JsonNode c, UserPreferencesResponse p, int l, ActivityEvidence activity,
                 FeedbackSignals signals) {
             inside.set(TransactionSynchronizationManager.isActualTransactionActive());
@@ -583,7 +643,7 @@ class JpaOwnedContentIntegrationTests extends JpaAccountTestSupport {
     @FunctionalInterface interface Handler {void handle(HttpExchange exchange,JsonNode body)throws Exception;}
     static class Remote implements AutoCloseable {
         final HttpServer server;final ExecutorService executor=Executors.newCachedThreadPool();final AtomicReference<Handler> handler=new AtomicReference<>();final AtomicInteger calls=new AtomicInteger();final AtomicReference<JsonNode> last=new AtomicReference<>();final AtomicReference<String> cookie=new AtomicReference<>(),authorization=new AtomicReference<>();
-        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_ids")?"/v1/recommendations/context":body.has("reference_product_id")?"/v1/recommendations/similar":body.has("feedback")?"/v1/recommendations/feedback":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
+        Remote()throws Exception{server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);server.createContext("/",exchange->{try{var body=new ObjectMapper().readTree(exchange.getRequestBody().readAllBytes());assertEquals(body.has("reference_product_ids")?"/v1/recommendations/context":body.has("reference_product_id")?"/v1/recommendations/similar":body.has("feedback")?"/v1/recommendations/feedback":body.path("constraints").has("exclude_product_ids")?"/v1/recommendations/exploration":"/v1/recommendations/content",exchange.getRequestURI().toString());calls.incrementAndGet();last.set(body);cookie.set(exchange.getRequestHeaders().getFirst("Cookie"));authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));handler.get().handle(exchange,body);}catch(Throwable error){exchange.close();}});server.start();}
         String origin(){return "http://127.0.0.1:"+server.getAddress().getPort();}void reply(HttpExchange exchange,int status,JsonNode body)throws Exception{reply(exchange,status,new ObjectMapper().writeValueAsString(body));}void reply(HttpExchange exchange,int status,String body)throws Exception{byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(status,bytes.length);try(var output=exchange.getResponseBody()){output.write(bytes);}}@Override public void close(){server.stop(0);executor.shutdownNow();try{assertTrue(executor.awaitTermination(3,TimeUnit.SECONDS));}catch(InterruptedException error){Thread.currentThread().interrupt();throw new IllegalStateException(error);}}
     }
 }

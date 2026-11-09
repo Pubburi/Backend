@@ -59,6 +59,7 @@
 | PUT | `/api/users/me/password` | 본인 현재 암호 확인·새 hash/epoch·현재 세션 CAS 유지/다른 기존 세션 회수 |
 | POST | `/api/users/me/search-phrases` | 본인 현재 취향·별도 검색 선택만 전달·정확 조건/수명·장애 구분 |
 | POST | `/api/users/me/recommendations/content` | 본인 현재 취향·검수 container-DEMO B1/R04·현재 상품/특성·필수조건/수명 재확인 |
+| POST | `/api/users/me/recommendations/exploration` | 본인 저장 취향과 필수조건·관심 없음에 결속한 검수 상품 탐색 순서 |
 | GET | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 상품별 추천 피드백 읽기 |
 | PUT | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 선택 저장·교체, 삭제된 상품404 |
 | DELETE | `/api/users/me/recommendations/feedback/{productId}` | 현재 본인의 선택 해제, 이미 없으면 그대로 성공 |
@@ -68,7 +69,7 @@
 
 매장 DTO는 `id/name/latitude/longitude/image`를 유지한다. 등록되지 않은 다른 추천 등의
 경로는 404이며 가짜 성공 응답을 제공하지 않는다. 실제 `/v3/api-docs`의 API 경로는
-위 API와 [계정 카트/주문 맥락](CART.md)·[내부 알림](NOTIFICATIONS.md)을 포함한54개/68작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
+위 API와 [계정 카트/주문 맥락](CART.md)·[내부 알림](NOTIFICATIONS.md)을 포함한55개/69작업이고 `/docs`는 문서 UI다. 세션은 메모리 저장이므로 프로세스 재시작 뒤 재로그인해야 한다.
 
 추천 피드백은 Flyway V4와 최소 권한을 적용한 명시 PostgreSQL 런타임에서 쓴다. 세 메서드는
 세션에서 본인을 정하고 URL 인코딩한 현재 ID와 `X-Pubburi-Feedback-Owner`를 비교한다. 다른

@@ -30,6 +30,26 @@ REVIEWED_LOCAL_CATALOG를 유지한다. family scope는 승인된 family PROVIDE
 `highlyRatedCategories` 배열을 제공한다. 근거가 없거나 UNAVAILABLE이면 이 필드를 생략한다.
 모든 응답은 private, no-store·Vary Cookie다. 점수는 만족 확률/품질 성과가 아니며 결과를 저장하지 않는다.
 
+## 본인 탐색 추천
+
+`POST /api/users/me/recommendations/exploration`은 현재 본인의 저장 취향과
+[탐색 제공자](https://github.com/Pubburi/Recommendation/blob/main/docs/EXPLORATION-API.md)를 연결한다.
+요청은 `{}` 또는 `{"limit":4}`다. limit은 기본4·정수1–12이고, 본인 ID를 `encodeURIComponent`한
+`X-Pubburi-Feedback-Owner`가 필요하다. 쿼리·추가 JSON 필드·중복 키는400, 계정 불일치/만료는401이다.
+본인 명시 취향·필수 가격/도수 조건과 `관심 없음`의 검수 상품군 전체를 반영한다. 활동과 `맞음`은
+기존 취향 추천에서 소비한다. provider 호출 전후에 계정 수명·조건·관심 없음·현재 업무 사실·권위 pin을
+별도 읽기 트랜잭션으로 대조한다. 변경은409, 제공 불가는 UNAVAILABLE로 구분하며 업무 쓰기는 없다.
+
+`data`는 `source`, `catalogScope`, `result`, `products`다. 스코프는 REVIEWED_DEMO 또는
+REVIEWED_LOCAL_CATALOG다. result는 B1의 열 필드와 `exploration_reason`, 같은 순서의
+`selections:[{product_id,basis}]`를 담는다. 첫 `highest_relevance_anchor` 이후 `observed_text` 또는
+`unknown_conservative`다. 관찰 불가를 다양성 관측으로 해석하지 않는다. 선택은 양수 점수·서로 다른
+검수 상품군에 한정하고, products는 그 순서의 현재 Product7이다. 탐색 순서를 B1 점수로 재정렬하지
+않는다. 기본 relevance 정책은 가중치0.7·최소 점수0이다. 정상 기준선은 `baseline_fallback`과 빈 배열이며
+양수 근거가 없을 때 B0를 섞지 않는다. `below_relevance_floor`는 제공자 계약의 별도 상태이며 현재
+고정 정책에서는 발생하지 않는다. 검수 부족·제공자 장애·계약 불일치는 UNAVAILABLE, result=null,
+products=[]다. 캐시는 private, no-store·Vary Cookie다.
+
 ## 상품 상세의 유사 상품
 
 현재 계정 카트를 기준으로 한 별도 [맥락 추천 계약](CART.md#현재-카트의-검수-맥락-추천)은

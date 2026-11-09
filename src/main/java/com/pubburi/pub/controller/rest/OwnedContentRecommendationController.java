@@ -7,8 +7,11 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pubburi.pub.controller.api.ApiResponse;
 import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.auth.FeedbackOwner;
+import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.controller.request.ContentRecommendationRequest;
+import com.pubburi.pub.controller.request.ExplorationRecommendationRequest;
 import com.pubburi.pub.controller.response.ContentRecommendationResponse;
+import com.pubburi.pub.controller.response.ExplorationRecommendationResponse;
 import com.pubburi.pub.model.service.OwnedContentRecommendationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -31,8 +34,34 @@ public class OwnedContentRecommendationController {
         var result=FeedbackOwner.confirmed(request, observed)
             ? service.recommend(observed.id(),observed.authEpoch(),input.getLimit(),input.getIncludeActivity(),true)
             : service.recommend(observed.id(),observed.authEpoch(),input.getLimit(),input.getIncludeActivity());
-        var current=guard.requireLogin(session);
-        if(!Objects.equals(observed.id(),current.id()) || !Objects.equals(observed.authEpoch(),current.authEpoch()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Account session is no longer current");
+        requireCurrent(observed, session);
         return ApiResponse.ok(result);
+    }
+
+    @PostMapping(value = "/api/users/me/recommendations/exploration", consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Explore reviewed alternatives using the current account's saved preferences",
+        description = "Uses current saved hard constraints and excludes every known not-interested product group. Preserves the provider's positive-only selection order and factual explanations. Reads no activity or other account's preferences. Only reviewed container demo and reviewed local catalogs are supported. Input changes yield 409 and expired or replaced sessions yield 401. Provider failure yields UNAVAILABLE with null result and no products.",
+        parameters = @Parameter(name = FeedbackOwner.HEADER, in = ParameterIn.HEADER, required = true,
+            description = FeedbackOwner.DESCRIPTION))
+    public ApiResponse<ExplorationRecommendationResponse> explore(@RequestBody ExplorationRecommendationRequest input,
+            HttpServletRequest request, HttpSession session) {
+        var observed = guard.requireLogin(session);
+        if (request.getQueryString() != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Query parameters are not supported");
+        }
+        if (!FeedbackOwner.confirmed(request, observed)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Expected account header is required");
+        }
+        var result = service.explore(observed.id(), observed.authEpoch(), input.limit());
+        requireCurrent(observed, session);
+        return ApiResponse.ok(result);
+    }
+
+    private void requireCurrent(SessionUser observed, HttpSession session) {
+        var current = guard.requireLogin(session);
+        if (!Objects.equals(observed.id(), current.id()) || !Objects.equals(observed.authEpoch(), current.authEpoch())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account session is no longer current");
+        }
     }
 }

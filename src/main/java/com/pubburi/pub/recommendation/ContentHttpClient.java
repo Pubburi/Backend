@@ -14,15 +14,23 @@ import com.pubburi.pub.controller.response.ContentRecommendationResponse.Activit
 /** Fixed B1 routes and bounded transport. Does not fit, score, retry or forward credentials. */
 public final class ContentHttpClient implements ContentGateway, SimilarProductGateway, ContextGateway {
     public static final int MAX_REQUEST_BYTES=524288,MAX_RESPONSE_BYTES=262144;
-    private final HttpClient client;private final URI endpoint, similarEndpoint, feedbackEndpoint,contextEndpoint;private final Duration deadline;private final ObjectMapper mapper;
+    private final HttpClient client;private final URI endpoint, similarEndpoint, feedbackEndpoint,contextEndpoint,explorationEndpoint;private final Duration deadline;private final ObjectMapper mapper;
     public ContentHttpClient(URI origin,Duration connectTimeout,Duration deadline,ObjectMapper mapper){
         if(!Set.of("http","https").contains(origin.getScheme()) || origin.getHost()==null || origin.getUserInfo()!=null || origin.getQuery()!=null || origin.getFragment()!=null || !(origin.getPath().isEmpty() || origin.getPath().equals("/")) || connectTimeout.isNegative() || connectTimeout.isZero() || deadline.isNegative() || deadline.isZero())throw new IllegalArgumentException("Recommendation origin and positive timeouts are required");
         client=HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER).build();endpoint=origin.resolve("/v1/recommendations/content");similarEndpoint=origin.resolve("/v1/recommendations/similar");feedbackEndpoint=origin.resolve("/v1/recommendations/feedback");contextEndpoint=origin.resolve("/v1/recommendations/context");this.deadline=deadline;
+        explorationEndpoint = origin.resolve("/v1/recommendations/exploration");
         this.mapper=mapper.copy().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.mapper.getFactory().setStreamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(20).maxStringLength(5000).maxNameLength(128).maxDocumentLength(MAX_RESPONSE_BYTES).build());
     }
     @Override public Optional<JsonNode> recommend(JsonNode catalog,UserPreferencesResponse preferences,int limit,ActivityEvidence activity){
         return post(endpoint, recommendationFields(catalog, preferences, limit, activity));
+    }
+
+    @Override public Optional<JsonNode> explore(JsonNode catalog, UserPreferencesResponse preferences, int limit,
+            List<Integer> excluded) {
+        var fields = recommendationFields(catalog, preferences, limit, null);
+        fields.put("constraints", Map.of("exclude_product_ids", excluded));
+        return post(explorationEndpoint, fields);
     }
 
     @Override public Optional<JsonNode> feedback(JsonNode catalog, UserPreferencesResponse preferences, int limit,

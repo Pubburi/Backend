@@ -204,6 +204,8 @@ nullable을 표시한다. [삭제 이력·전환 계약](ORDER-HISTORY-PRESERVAT
   UNAVAILABLE은 result=null/products=[]이며 기본 B0 추천으로 꾸미지 않는다.
 - private/no-store·query/owner/catalog/profile 주입400·수명401·현재 취향/승인 상품 변화409·DB500을
   구분한다. 원본80 자동 전송/fit·서비스 SKU 승인·전체 R02/R04는 아니다. [공급 계약](CONTENT-RECOMMENDATIONS.md)을 따른다.
+- `POST /api/users/me/recommendations/exploration`: 본인 확인 헤더와 `{"limit":4}`로 요청하며
+  [탐색 계약](CONTENT-RECOMMENDATIONS.md#본인-탐색-추천)의 현재 검수 상품을 제공자 탐색 순서로 반환한다.
 
 ## 서비스 내부 알림
 

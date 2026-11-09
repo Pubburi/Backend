@@ -20,11 +20,25 @@ public final class ContentContract {
     }
 
     public Result validate(JsonNode root, JsonNode catalog, UserPreferencesResponse preferences, int limit) {
-        return validate(root, catalog, preferences, limit, Set.of(), Map.of(), false);
+        return validate(root, catalog, preferences, limit, Set.of(), Map.of(), ResultMode.CONTENT);
     }
 
     Result validate(JsonNode root, JsonNode catalog, UserPreferencesResponse preferences, int limit,
             Set<Integer> excluded, Map<Integer, JsonNode> references, boolean positiveOnly) {
+        return validate(root, catalog, preferences, limit, excluded, references,
+            positiveOnly ? ResultMode.POSITIVE_RANKED : ResultMode.CONTENT);
+    }
+
+    Result validateExploration(JsonNode root, JsonNode catalog, UserPreferencesResponse preferences, int limit,
+            Set<Integer> excluded) {
+        return validate(root, catalog, preferences, limit, excluded, Map.of(), ResultMode.EXPLORATION);
+    }
+
+    private enum ResultMode { CONTENT, POSITIVE_RANKED, EXPLORATION }
+
+    private Result validate(JsonNode root, JsonNode catalog, UserPreferencesResponse preferences, int limit,
+            Set<Integer> excluded, Map<Integer, JsonNode> references, ResultMode mode) {
+        boolean positiveOnly = mode != ResultMode.CONTENT;
         require(fields(root, "algorithm", "fit_scope", "representation_fitted", "model_fingerprint", "items",
             "eligible_count", "supported_profile_tokens", "unknown_profile_tokens", "active_numeric_preferences", "fallback_reason"));
         require(text(root.get("algorithm"), "b1-tfidf-minmax-v1") && text(root.get("fit_scope"), "request_catalog"));
@@ -67,9 +81,10 @@ public final class ContentContract {
             number(item.get("score"), positiveOnly);
             allZero &= item.path("score").decimalValue().signum() == 0;
         }
-        String fallback = eligible.isEmpty() ? "no_eligible_products"
-            : positiveOnly ? items.isEmpty() ? "no_matching_features" : null
-            : !supportedPreference ? "no_supported_preferences" : allZero ? "no_matching_features" : null;
+        String fallback = null;
+        if (eligible.isEmpty()) fallback = "no_eligible_products";
+        else if (mode != ResultMode.POSITIVE_RANKED && !supportedPreference) fallback = "no_supported_preferences";
+        else if (allZero) fallback = "no_matching_features";
         require(equal(root.get("fallback_reason"), mapper.valueToTree(fallback)));
 
         var seen = new HashSet<Integer>();
@@ -82,7 +97,9 @@ public final class ContentContract {
             var product = eligible.get(id);
             var reference = references.get(id);
             BigDecimal score = item.path("score").decimalValue();
-            require(score.compareTo(previous) < 0 || score.compareTo(previous) == 0 && id > previousId);
+            if (mode != ResultMode.EXPLORATION) {
+                require(score.compareTo(previous) < 0 || score.compareTo(previous) == 0 && id > previousId);
+            }
             previous = score;
             previousId = id;
 
