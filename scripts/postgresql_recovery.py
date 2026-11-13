@@ -286,8 +286,8 @@ def lock_business_tables(connection, primary):
     connection.execute('LOCK TABLE ' + ','.join('pubburi."' + name + '"' for name in sorted(primary)) + ' IN SHARE MODE')
 
 
-def backup(env, destination):
-    directory = private.private_directory(destination, local_stack, create=True)
+def backup(env, destination, *, local=local_stack):
+    directory = private.private_directory(destination, local, create=True)
     with connect(env) as connection:
         guard(connection, env)
         stopped_roles(connection)
@@ -335,11 +335,11 @@ def approved_archive(directory, expected, local=local_stack):
     return manifest, archive
 
 
-def restore(env, archive_directory, expected, destination):
-    manifest, archive = approved_archive(archive_directory, expected)
+def restore(env, archive_directory, expected, destination, *, local=local_stack):
+    manifest, archive = approved_archive(archive_directory, expected, local)
     if manifest['source_database'] == env['PUBBURI_PG_DB_NAME']:
         reject('distinct_fresh_target_required')
-    directory = private.private_directory(destination, local_stack, create=True)
+    directory = private.private_directory(destination, local, create=True)
     with connect(env) as connection:
         guard(connection, env)
         stopped_roles(connection)
