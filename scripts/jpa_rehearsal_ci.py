@@ -152,7 +152,7 @@ except KeyboardInterrupt:pass
             probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
             probe.bind(('127.0.0.1',int(env['PUBBURI_SERVER_PORT'])))
     print('Owned PostgreSQL activation and selected-default restart passed; database retained.')
-    return {'state':str(directory), 'config':str(config), 'release':str(release), 'environment':env}
+    return local, config, release
 
 
 
@@ -224,7 +224,7 @@ def run(environ,snapshot,directory,*,recovery_control=None):
             cutover=dict(env,PUBBURI_PG_USER=env['PUBBURI_JPA_CONTROL_USER'],PUBBURI_PG_PASSWORD=env['PUBBURI_JPA_CONTROL_PASSWORD'])
             env.update(PUBBURI_JPA_FAILURE_DB_NAME=environ['PUBBURI_PG_JPA_FAILURE_DB_NAME'],
                        PUBBURI_JPA_FAILURE_RUN_TOKEN=environ['PUBBURI_PG_JPA_FAILURE_RUN_TOKEN'])
-            local_release(env,cutover)
+            selected_release = local_release(env,cutover)
         command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-Dtest=JpaFixturePreparationTests","test"],
                 dict(env,PUBBURI_JPA_PREPARE_FIXTURE="1"),directory/(purpose+"-fixture.log"))
         if purpose=="JPA":normal=env
@@ -240,7 +240,7 @@ def run(environ,snapshot,directory,*,recovery_control=None):
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")
     from postgresql_recovery_ci import run as run_recovery
-    run_recovery(environ,normal,recovery_control)
+    run_recovery(environ,normal,recovery_control,selected_release)
     if environ.get("PUBBURI_PG_RELAY_CI")=="1":
         from prepare_postgresql_relay_ci import prepare
         prepare(environ,relay_business,directory)

@@ -9,6 +9,7 @@ import re
 import secrets
 import subprocess
 import time
+from types import SimpleNamespace
 
 import local_stack
 import postgresql_recovery as recovery
@@ -17,12 +18,8 @@ from postgresql_schema import verify_owned_postgres
 
 
 @contextmanager
-def server(env, directory, name):
+def server(env, directory, name, jar):
     verify_owned_postgres(env)
-    jar=directory/'runtime.jar'
-    if not jar.exists():
-        jar.write_bytes((local_stack.BACKEND/'target/pubburi-server-0.0.1-SNAPSHOT.jar').read_bytes())
-        jar.chmod(0o600)
     verify_jar(jar)
     log=directory/(name+'.log')
     child=dict(child_environment(env),PUBBURI_JPA_PORT='0',PUBBURI_RECOMMENDATION_BASE_URL='http://127.0.0.1:1')
@@ -51,10 +48,14 @@ def server(env, directory, name):
             if process is not None:local_stack.stop(process)
 
 
-def run(environ, runtime, recovery_control):
+def run(environ, runtime, recovery_control, selected_release):
     from jpa_rehearsal_ci import runtime_grants
     if environ.get('PUBBURI_JPA_CI')!='1':raise ValueError('recovery_ci_explicit_fixture_required')
     directory=local_stack.STATE/('worker-recovery-'+secrets.token_hex(16));directory.mkdir(mode=0o700)
+    local, source_config, release = selected_release
+    pg = recovery.private
+    selector = local.STATE / pg.DEFAULT_SELECTION
+    source_selection = pg.private_file(selector, 16384)
     control=dict(runtime,PUBBURI_PG_USER=runtime['PUBBURI_JPA_CONTROL_USER'],PUBBURI_PG_PASSWORD=runtime['PUBBURI_JPA_CONTROL_PASSWORD'])
     target=dict(control,PUBBURI_PG_DB_NAME=environ['PUBBURI_PG_RESTORE_DB_NAME'],
         PUBBURI_PG_RUN_TOKEN=environ['PUBBURI_PG_RESTORE_RUN_TOKEN'],
@@ -70,7 +71,7 @@ def run(environ, runtime, recovery_control):
         status,body=request_json(c,base,method,path,body,time.monotonic()+12,headers=headers)
         if status!=expected:raise ValueError('recovery_ci_http_contract_failed')
         return body['data']
-    with server(runtime,directory,'before') as base:
+    with server(runtime,directory,'before',release/'runtime.jar') as base:
         admin_cookie=http.cookiejar.CookieJar();user=http.cookiejar.CookieJar()
         request(admin_cookie,base,'POST','/api/auth/login',{'id':runtime['PUBBURI_JPA_ADMIN_ID'],'pass':runtime['PUBBURI_JPA_ADMIN_PASSWORD']})
         request(user,base,'POST','/api/users',{'id':actor,'name':'Recovery authored member','pass':password},201)
@@ -135,13 +136,13 @@ def run(environ, runtime, recovery_control):
         for sequence in recovery.SEQUENCES:connection.execute("SELECT nextval('pubburi."+sequence+"')")
         connection.rollback()  # Consumed sequences deliberately survive an aborted write.
     # Gates must reject a live writer and an otherwise idle, still-login-capable runtime.
-    archive=local_stack.STATE/('pg-backup-'+secrets.token_hex(16))
+    archive=local.STATE/'backup'
     with recovery.connect(control) as connection:
-        try:recovery.backup(control,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+        try:recovery.backup(control,local.STATE/'refused-live-client',local=local)
         except ValueError as error:
             if 'other_clients_present' not in str(error):raise
         else:raise ValueError('recovery_ci_live_client_accepted')
-    try:recovery.backup(control,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+    try:recovery.backup(control,local.STATE/'refused-login-role',local=local)
     except ValueError as error:
         if 'writers_can_login' not in str(error):raise
     else:raise ValueError('recovery_ci_live_role_accepted')
@@ -154,8 +155,8 @@ def run(environ, runtime, recovery_control):
                 hidden=connection.execute('SELECT backend_type FROM pg_stat_activity WHERE pid=%s',
                     (held_runtime.info.backend_pid,)).fetchone()
                 if hidden!=(None,):raise ValueError('recovery_ci_cross_role_stats_boundary_changed')
-            refused=local_stack.STATE/('pg-refused-'+secrets.token_hex(16))
-            try:recovery.backup(control,refused)
+            refused=local.STATE/'refused-nologin-client'
+            try:recovery.backup(control,refused,local=local)
             except ValueError as error:
                 if 'other_clients_present' not in str(error):raise
             else:raise ValueError('recovery_ci_existing_nologin_runtime_accepted')
@@ -185,13 +186,12 @@ def run(environ, runtime, recovery_control):
                 connection.execute(sql.SQL('SET ROLE {}').format(sql.Identifier(role)))
                 effective=connection.execute("SELECT has_table_privilege(current_user,'pubburi.t_comment','INSERT'),has_sequence_privilege(current_user,'pubburi.t_comment_id_seq','USAGE')").fetchone()
                 if effective!=(True,True):raise ValueError('recovery_ci_effective_set_writer_missing')
-            refused=local_stack.STATE/('pg-refused-'+secrets.token_hex(16))
-            try:recovery.backup(control,refused)
+            try:recovery.backup(control,local.STATE/'refused-set-role',local=local)
             except ValueError as error:
                 if 'writers_can_login' not in str(error):raise
             else:raise ValueError('recovery_ci_set_runtime_login_accepted')
             with recovery.connect(admin) as connection:connection.execute(sql.SQL('REVOKE {} FROM {}').format(sql.Identifier(role),sql.Identifier(probe)))
-            try:recovery.backup(control,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+            try:recovery.backup(control,local.STATE/'refused-connect-role',local=local)
             except ValueError as error:
                 if 'writers_can_login' not in str(error):raise
             else:raise ValueError('recovery_ci_connect_only_login_accepted')
@@ -203,7 +203,7 @@ def run(environ, runtime, recovery_control):
         # An injected executable object is rejected without emitting a usable archive.
         with recovery.connect(control) as connection:connection.execute("CREATE FUNCTION pubburi.recovery_forbidden() RETURNS int LANGUAGE sql AS 'SELECT 1'")
         try:
-            try:recovery.backup(control,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+            try:recovery.backup(control,local.STATE/'refused-executable-object',local=local)
             except ValueError as error:
                 if 'unversioned_executable_objects' not in str(error):raise
             else:raise ValueError('recovery_ci_executable_object_accepted')
@@ -212,16 +212,16 @@ def run(environ, runtime, recovery_control):
         # The catalog pin catches ordinary DDL drift as well as executable objects.
         with recovery.connect(control) as connection:connection.execute('ALTER TABLE pubburi.t_comment ALTER rating SET DEFAULT 2')
         try:
-            try:recovery.backup(control,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+            try:recovery.backup(control,local.STATE/'refused-schema-drift',local=local)
             except ValueError as error:
                 if 'versioned_schema_changed' not in str(error):raise
             else:raise ValueError('recovery_ci_default_drift_accepted')
         finally:
             with recovery.connect(control) as connection:connection.execute('ALTER TABLE pubburi.t_comment ALTER rating SET DEFAULT 1')
-        pin=recovery.backup(control,archive)
+        pin=recovery.backup(control,archive,local=local)
         manifest=json.loads((archive/'manifest.json').read_text())
         # A wrong pin is rejected before target schema/sequence creation.
-        try:recovery.restore(target,archive,'0'*64,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+        try:recovery.restore(target,archive,'0'*64,local.STATE/'refused-pin',local=local)
         except ValueError:pass
         else:raise ValueError('recovery_ci_unapproved_archive_accepted')
         with recovery.connect(target) as connection:
@@ -230,27 +230,49 @@ def run(environ, runtime, recovery_control):
         admin_target=dict(admin,**{key:target[key] for key in ('PUBBURI_PG_URL','PUBBURI_PG_DB_NAME')})
         with recovery.connect(admin_target) as connection:connection.execute("CREATE FUNCTION public.recovery_forbidden() RETURNS int LANGUAGE sql AS 'SELECT 1'")
         try:
-            try:recovery.restore(target,archive,pin,local_stack.STATE/('pg-refused-'+secrets.token_hex(16)))
+            try:recovery.restore(target,archive,pin,local.STATE/'refused-function',local=local)
             except ValueError as error:
                 if 'unversioned_executable_objects' not in str(error):raise
             else:raise ValueError('recovery_ci_target_function_accepted')
         finally:
             with recovery.connect(admin_target) as connection:connection.execute('DROP FUNCTION public.recovery_forbidden()')
-        attempt=local_stack.STATE/('pg-restored-'+secrets.token_hex(16))
-        recovery.restore(target,archive,pin,attempt)
+        attempt=local.STATE/'restored'
+        recovery.restore(target,archive,pin,attempt,local=local)
         # Source remains precisely frozen, including raw bytes, epoch, claim/ACK and sequence gaps.
         with recovery.connect(control) as connection:
             if json.loads(json.dumps(recovery.state(connection)))!=manifest['state']:raise ValueError('recovery_ci_source_mutated')
         with recovery.connect(target) as connection:connection.execute(runtime_grants(role))
         # The destination has a different marker; preserve it and grant only its read access.
-        url=target['PUBBURI_PG_URL'];admin_target=dict(admin,PUBBURI_PG_URL=url,PUBBURI_PG_DB_NAME=target['PUBBURI_PG_DB_NAME'])
         with recovery.connect(admin_target) as connection:
-            connection.execute('GRANT CONNECT ON DATABASE '+target['PUBBURI_PG_DB_NAME']+' TO '+role)
-            connection.execute('GRANT SELECT ON public.pubburi_pg_migration_guard TO '+role)
+            connection.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(
+                sql.Identifier(target['PUBBURI_PG_DB_NAME']), sql.Identifier(role)))
+            connection.execute(sql.SQL('GRANT SELECT ON public.pubburi_pg_migration_guard TO {}').format(sql.Identifier(role)))
+        target_config = local.STATE/'restored.json'
+        target_environment = dict(pg.configuration(source_config), **{
+            key: target[key] for key in ('PUBBURI_PG_URL','PUBBURI_PG_DB_NAME','PUBBURI_PG_RUN_TOKEN')})
+        pg.write_json(target_config, {'schema_version': 1, 'environment': target_environment})
+        promotion = (local, control, target, archive, pin, attempt, pg.sha(attempt/'promotion.json'), target_config, release)
+        try:
+            recovery.promote(*promotion)
+        except ValueError as error:
+            if str(error) != 'postgresql_recovery_selected_source_connect_granted':
+                raise
+        else:
+            raise ValueError('recovery_ci_unfenced_source_promoted')
+        if pg.private_file(selector, 16384) != source_selection:
+            raise ValueError('recovery_ci_rejected_promotion_changed_selection')
+        with recovery.connect(admin) as connection:
+            connection.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM {}').format(
+                sql.Identifier(control['PUBBURI_PG_DB_NAME']), sql.Identifier(role)))
+        recovery.promote(*promotion)
     finally:
         with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' LOGIN')
-    restored=dict(runtime,**{key:target[key] for key in ('PUBBURI_PG_URL','PUBBURI_PG_DB_NAME','PUBBURI_PG_RUN_TOKEN')})
-    with server(restored,directory,'after') as base:
+    selected = SimpleNamespace(pg_config=None, release_dir=None)
+    if not pg.selected(local, selected) or Path(selected.pg_config) != target_config:
+        raise ValueError('recovery_ci_restored_target_not_selected')
+    promoted_selection = pg.private_file(selector, 16384)
+    restored = dict(runtime, **pg.configuration(selected.pg_config))
+    with server(restored,directory,'after',Path(selected.release_dir)/'runtime.jar') as base:
         user=http.cookiejar.CookieJar()
         request(user,base,'POST','/api/auth/login',{'id':actor,'pass':password},expected=401)
         request(user,base,'POST','/api/auth/login',{'id':actor,'pass':new_password})
@@ -274,10 +296,22 @@ def run(environ, runtime, recovery_control):
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
     # Reverting to the frozen source after accepting this new write would lose it.
+    try:
+        pg.start(local, SimpleNamespace(pg_config=source_config, release_dir=release,
+                                       backend_only=True, command='activate-pg'))
+    except RuntimeError as error:
+        if str(error) != 'activate-pg cannot replace the selected PostgreSQL database.':
+            raise
+    else:
+        raise ValueError('recovery_ci_stale_source_reactivated')
+    if pg.private_file(selector, 16384) != promoted_selection:
+        raise ValueError('recovery_ci_stale_source_changed_selection')
     before = manifest['state']
     with recovery.connect(control) as connection, connection.transaction():
         connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         recovery.guard(connection, control)
+        if connection.execute("SELECT has_database_privilege(%s,current_database(),'CONNECT')", (role,)).fetchone() != (False,):
+            raise ValueError('recovery_ci_source_runtime_unfenced')
         if json.loads(json.dumps(recovery.state(connection))) != before:
             raise ValueError('recovery_ci_source_changed_after_restart_write')
     with recovery.connect(target) as connection, connection.transaction():
@@ -310,6 +344,7 @@ def run(environ, runtime, recovery_control):
         'cart_quantities_revision_and_merge_checkout_receipts_preserved':True,
         'cart_retired_nonce_blocks_late_post_after_restore':True,
         'internal_notifications_snapshots_and_first_read_time_preserved':True,
+        'explicit_promotion_and_stale_source_reactivation_guard_verified':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],
@@ -322,5 +357,5 @@ def run(environ, runtime, recovery_control):
         'product_id':pid,'order_id':order['oId'],'review_id':review['id'],'archive':str(archive),'manifest_sha256':pin,
         'post_restore_writes':{'review_id':created['id'],'comment_sequence_before':[value,called]},
         'admin_actor':{'id':runtime['PUBBURI_JPA_ADMIN_ID'],'password':runtime['PUBBURI_JPA_ADMIN_PASSWORD']}})
-    print('Owned stopped-writer PostgreSQL recovery, exact state and JPA restart passed; no default cutover.',flush=True)
+    print('Owned stopped-writer PostgreSQL recovery, isolated selection and JPA restart passed.',flush=True)
     return directory
