@@ -75,8 +75,9 @@ DDL/소유권을 주지 않는다. `PUBBURI_JPA_EXPECTED_COMMENT_NEXT`는 snapsh
 다른 역할의 기존 세션(NOLOGIN 후 통계 열 가림)·비상속 SET/CONNECT 전용 LOGIN·추가 함수·
 틀린 artifact pin을 거절한 뒤 새 marker-only PG에 복구하고
 V7의 23업무표+2control표 binary-cell/스키마·7sequence·UUID/원문/receipt 동일성을 대조한다. JPA 재기동의
-기존 주문 금액/후기·새 암호/찜/추천 피드백·개인 notebook 원문/배열/revision·cart 수량/revision/멱등 receipt·내부 알림/최초 읽음 시각과 소비 ID 비재사용을 확인하며 그 뒤 새 쓰기와 frozen 동일 상태를
-구분한다. COMMIT 불확실/후행 검수 실패의 단위 주입은 실제 서버 crash나 네트워크 ACK 유실을
+기존 주문 금액/후기·새 암호/찜/추천 피드백·개인 notebook 원문/배열/revision·cart 수량/revision/멱등 receipt·내부 알림/최초 읽음 시각과 소비 ID 비재사용을 확인한다.
+복구본에 새 후기를 저장한 뒤 원본은 백업과 정확히 일치하고, 복구본은 새 후기 한 행과 해당 sequence만 달라졌는지 확인한다.
+COMMIT 불확실/후행 검수 실패의 단위 주입은 실제 서버 crash나 네트워크 ACK 유실을
 재현한 결과가 아니다. 기존 MySQL·PG·JPA 필수 job 안에서 실행하며 별도 파이프라인을 만들지 않는다.
 
 ## 검색·relay와 종료
