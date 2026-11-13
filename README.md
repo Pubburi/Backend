@@ -86,96 +86,7 @@ PostgreSQL로 옮길 때는 원본을 읽기 전용으로 추출하고, 승인�
 
 ## 🧩 문제 해결
 
-### 1. 상품 변경 기록의 원자성부터 검색 엔진 재전달까지 연결하기
-
-#### 문제
-
-검색 색인을 설계할 때 상품 변경은 저장됐지만 엔진에 보낼 기록이 남지 않는 경우를 막아야 했습니다. 삭제 전에 보낸 갱신이 늦게 도착하면 색인에 상품이 다시 나타날 수 있었습니다.
-
-#### 원인
-
-DB 커밋과 엔진 HTTP 전송은 따로 끝납니다. 상품을 지울 때 버전까지 없애면 늦게 들어온 갱신의 순서를 판단할 수 없습니다. 전역 자동 증가 ID도 상품 간 커밋 순서를 보장하지 않습니다.
-
-#### 해결
-
-상품 생성·수정·특성 교체·주문 수 증가·삭제 때 상품과 특성을 잠금 조회합니다. 같은 트랜잭션에서 상품별 버전, 색인할 데이터와 `PENDING` 전송 기록을 저장합니다. 삭제는 버전이 있는 표식으로 남깁니다. relay는 전송 권한을 DB에 기록하고 커밋한 뒤 엔진을 호출합니다. 응답을 받으면 DB 시각으로 유효 기간과 토큰을 다시 확인한 뒤 ACK합니다.
-
-#### 결과
-
-상품 변경과 전송 대기 기록은 함께 커밋되거나 롤백됩니다. relay를 다시 실행하면 미전송 작업을 이어받습니다. 중복이나 순서 역전은 상품별 버전과 엔진에 저장된 값을 대조하고, 원본이나 대상 색인의 식별자가 바뀌면 ACK를 거부합니다.
-
-#### 대체안/회고
-
-`afterCommit`에만 의존하면 DB 커밋 직후 프로세스가 멈췄을 때 전송 기록을 잃습니다. 업무 트랜잭션에서 엔진까지 호출하면 엔진 장애 동안 DB 잠금이 길어집니다. 이 사례에서는 전송 기록을 먼저 저장해 중복 전송을 허용하고, 상품별 버전으로 적용 여부를 판정했습니다. 원본과 물리 색인 UUID도 함께 확인합니다. 추가 조회와 쓰기가 생겼고 전후 지연은 측정하지 않았습니다.
-
-#### 코드
-
-```java
-if (outbox.append(productId, version, deleted, json.writeValueAsString(event)) != 1)
-    throw new IllegalStateException("Search outbox event could not be recorded");
-if (outbox.schedule(productId, version) != 1)
-    throw new IllegalStateException("Search delivery could not be scheduled");
-```
-
-```python
-def ack(self, claim):
-    with self.transaction() as cursor:
-        self.fence_target(cursor, claim.fingerprint, claim.source_id)
-        cursor.execute("""UPDATE t_product_search_delivery SET status='DELIVERED', delivered_at=NOW(6),
-            claim_token=NULL, lease_until=NULL, last_error=NULL
-            WHERE event_id=%s AND status='IN_FLIGHT' AND claim_token=%s AND lease_until>NOW(6)""",
-            (claim.event_id, claim.token))
-        return cursor.rowcount == 1
-```
-
-
-### 2. 같은 ID 재가입과 권한 변경에서 기존 세션을 구분하기
-
-#### 문제
-
-관리자 권한을 회수한 뒤에도 기존 쿠키로 관리자 API를 호출할 수 있었습니다. 삭제 전 쿠키로는 같은 ID로 재가입한 새 계정의 프로필도 열렸습니다.
-
-#### 원인
-
-인증 검사가 로그인 당시의 역할·이름·스탬프를 계속 사용했습니다. DB에서 ID만 확인하면 같은 ID로 재가입한 계정을 구분할 수 없습니다. 본인 정보 수정 뒤 계정 행을 다시 읽어 세션을 갱신하면, 그 사이 관리자가 바꾼 자격까지 이전 세션에 붙을 수 있었습니다.
-
-#### 해결
-
-가입할 때 `auth_epoch`를 발급하고 비밀번호를 직접 바꿀 때 새 값으로 교체했습니다. 보호 요청은 ID와 `auth_epoch`가 모두 일치하는 계정에서 현재 역할과 표시 정보를 읽습니다. 비밀번호 변경은 잠금 안에서 이전 값과 새 값을 함께 반환합니다. 요청이 사용한 세션이 이전 값과 일치할 때만 그 세션을 갱신합니다.
-
-#### 결과
-
-로컬 MySQL 8.4에 HTTP 요청을 보내 권한 강등, 계정 삭제, 같은 ID 재가입, 비밀번호 변경을 각각 전후 1회 확인했습니다. 이전 세션이 허용된 횟수는 모두 **1/1 → 0/1**이었습니다. 권한 강등은 403, 나머지는 401을 반환했고, 새 계정은 로그인할 수 있었습니다. 이름과 스탬프의 오래된 표시도 별도 시나리오에서 **1/1 → 0/1**이었습니다.
-
-#### 대체안/회고
-
-계정의 세션을 모두 찾아 지우려면 서버가 계정별 세션 목록을 관리해야 합니다. 계정의 버전을 비교하면 요청마다 DB를 한 번 읽습니다. 이미 인증을 통과한 요청은 계속 실행되며, DB 조회가 실패하면 인증을 보류하고 세션은 유지합니다. 일반 프로필 수정이나 해시 재계산은 `auth_epoch`를 바꾸지 않습니다. 분산 세션과 동시 요청의 지연은 측정하지 않았습니다.
-
-#### 코드
-
-```java
-User current = userDao.selectSessionIdentity(observed.id(), observed.authEpoch());
-if (!sameIdentity(value(session), observed)) {
-	return null;
-}
-```
-
-```java
-synchronized (session) {
-	if (sameIdentity(value(session), observed)) {
-		if (!java.util.Objects.equals(updated.id(), observed.id())
-				|| !java.util.Objects.equals(updated.previousAuthEpoch(), observed.authEpoch())) {
-			session.removeAttribute(SESSION_USER);
-		} else {
-			session.setAttribute(SESSION_USER, new SessionUser(observed.id(), observed.name(),
-					observed.stamps(), observed.role(), updated.authEpoch()));
-		}
-	}
-}
-```
-
-
-### 3. 응답을 잃어도 장바구니와 주문의 중복 변경 막기
+### 응답을 잃어도 장바구니와 주문의 중복 변경 막기
 
 #### 문제
 
@@ -215,50 +126,6 @@ public Result resolve(SessionUser owner, UUID operation, CartInput.Resolve input
     return new Result(operation, false, Status.RETIRED, view(owner.id(), cart), null);
 }
 ```
-
-
-### 4. 가격 변경·참조 삭제에서 주문 이력을 분리하기
-
-#### 문제
-
-상품 가격을 바꾸면 이미 완료한 주문의 금액이 달라졌습니다. 상품을 삭제하면 주문 상세가, 회원을 삭제하면 주문 자체가 사라질 수 있었습니다.
-
-#### 원인
-
-주문을 조회할 때 현재 상품의 가격을 조인했습니다. 상품과 회원을 가리키는 외래 키에는 `ON DELETE CASCADE`가 걸려 있었습니다. 가격을 따로 저장하더라도 상품 삭제로 상세 행이 지워지면 가격과 수량을 읽을 수 없습니다.
-
-#### 해결
-
-주문을 만들 때 `FOR UPDATE`로 상품을 읽고 상품명·단가·수량·합계와 주문 총액을 저장했습니다. 조회에는 저장한 값을 사용합니다. 새 주문은 `ORDER_SNAPSHOT`, 전환 시점의 값으로 보완한 과거 주문은 `LEGACY_ESTIMATE`로 표시합니다. 상품과 회원을 삭제할 때 외래 키는 `SET NULL`로 끊습니다. 회원 삭제 트랜잭션은 계정을 잠그고 자유 입력 메모를 정리한 뒤 계정을 지웁니다. 소유자가 없는 주문은 관리자만 조회합니다.
-
-#### 결과
-
-로컬에서 상품 가격을 바꿨을 때 기존 주문 금액이 달라진 건수는 **3/3 → 0/3**이었습니다. 같은 초기 데이터에서 상품 삭제 뒤 상세가 유실된 건수는 **2/3 → 0/3**, 이어 회원을 삭제한 뒤 주문이 유실된 건수는 **3/3 → 0/3**이었습니다. 삭제 후에도 주문 상세와 66,000원·217,800원·178,200원의 금액이 남았고 참조는 `null`이 됐습니다.
-
-#### 대체안/회고
-
-삭제 계정을 계속 보관하면 이름과 자격 정보를 남겨야 하고, 모든 조회에서 삭제 상태를 확인해야 합니다. 주문에는 그때 필요한 상품과 금액만 저장하고 계정 참조는 끊었습니다. MySQL 외래 키를 한 `ALTER`에서 제거하고 추가하자 1826 오류가 발생해 두 단계로 나눴습니다. 전환하려면 쓰기를 멈추고 백업한 뒤 중간 상태를 확인해야 합니다. 상품 잠금 조회와 회원 삭제의 동시성 비용은 측정하지 않았습니다.
-
-#### 코드
-
-```java
-detail.setUnitPrice(product.getPrice());
-try {
-	detail.setSumPrice(Math.multiplyExact(product.getPrice(), detail.getQuantity()));
-	totalPrice = Math.addExact(totalPrice, detail.getSumPrice());
-	totalQuantity = Math.addExact(totalQuantity, detail.getQuantity());
-} catch (ArithmeticException ex) {
-	throw new IllegalArgumentException("Order amount or quantity is out of range", ex);
-}
-```
-
-```sql
-ALTER TABLE t_order_detail
-    MODIFY COLUMN product_id INT NULL,
-    ADD CONSTRAINT fk_order_history_product FOREIGN KEY (product_id)
-        REFERENCES t_product(id) ON DELETE SET NULL;
-```
-
 
 <a id="development"></a>
 
@@ -301,4 +168,4 @@ docker compose up -d db
 
 ## 🗺️ 개발 계획
 
-R01–R08·F01–F12 MVP의 목표는 **2026년 12월 31일**, 최종 인계는 **2027년 2월 5일**입니다. MVP 이후에는 오류와 성능을 측정해 개선합니다. [백엔드 개발 계획](docs/DELIVERY-PLAN.md)
+R01–R08·F01–F12 MVP의 목표는 **2026년 12월 31일**, 최종 인계는 **2027년 1월 15일(KST)**입니다. Notion의 기존 할 일을 모두 완료하면 곧바로 오류와 성능을 측정해 개선합니다. [백엔드 개발 계획](docs/DELIVERY-PLAN.md)
