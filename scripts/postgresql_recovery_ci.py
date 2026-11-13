@@ -1,5 +1,6 @@
 """Recovery acceptance inside the existing owned source/JPA CI lifecycle, never an independent stack."""
 from contextlib import contextmanager
+import hashlib
 import http.cookiejar
 import uuid
 import json
@@ -272,6 +273,37 @@ def run(environ, runtime, recovery_control):
         created=request(user,base,'POST','/api/comments',{'productId':pid,'rating':2.5,'comment':'After recovery','tasteTags':[]},201)
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
+    # Reverting to the frozen source after accepting this new write would lose it.
+    before = manifest['state']
+    with recovery.connect(control) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection, control)
+        if json.loads(json.dumps(recovery.state(connection))) != before:
+            raise ValueError('recovery_ci_source_changed_after_restart_write')
+    with recovery.connect(target) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection, target)
+        after = json.loads(json.dumps(recovery.state(connection)))
+        if after['sequences'].pop('t_comment_id_seq') != [created['id'], True]:
+            raise ValueError('recovery_ci_restored_comment_sequence_changed')
+        if after['tables'].pop('t_comment')['rows'] != before['tables']['t_comment']['rows'] + 1:
+            raise ValueError('recovery_ci_restored_comment_count_changed')
+        row = connection.execute('SELECT user_id,product_id,rating,comment FROM pubburi.t_comment WHERE id=%s',
+                                 (created['id'],)).fetchone()
+        if row != (actor, pid, 2.5, 'After recovery'):
+            raise ValueError('recovery_ci_new_review_not_persisted')
+        previous_comments = hashlib.sha256()
+        with connection.cursor() as cursor, cursor.copy(
+                'COPY (SELECT * FROM pubburi.t_comment WHERE id<>%s ORDER BY id::text COLLATE "C") TO STDOUT (FORMAT binary)',
+                (created['id'],)) as copy:
+            for chunk in copy:
+                previous_comments.update(chunk)
+        if previous_comments.hexdigest() != before['tables']['t_comment']['sha256']:
+            raise ValueError('recovery_ci_previous_comments_changed_after_restart_write')
+        after['sequences']['t_comment_id_seq'] = before['sequences']['t_comment_id_seq']
+        after['tables']['t_comment'] = before['tables']['t_comment']
+        if after != before:
+            raise ValueError('recovery_ci_unrelated_state_changed_after_restart_write')
     report={'status':'passed','business_tables':23,'control_tables':2,'sequences':7,
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'private_notebook_original_arrays_memo_revision_preserved':True,
@@ -281,7 +313,7 @@ def run(environ, runtime, recovery_control):
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],
-        'after_start_writes':'one new review; complete frozen equality no longer claimed after new write'}
+        'after_start_writes':'one new review and its sequence changed; frozen source and all other rows stayed equal'}
     recovery.private.write_json(directory/'result.json',report)
     # Private control/runtime material can be retained by the owning caller for independent UI acceptance.
     minimal={key:restored[key] for key in recovery.PG_KEYS}
