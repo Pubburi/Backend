@@ -7,6 +7,19 @@ import java.util.*;
 
 /** Explicit stopped-writer copy into a guarded empty rehearsal target; never merge or reset data. */
 public final class SourceImportTool {
+    private static final Set<String> DISCLOSED_CUTOVER_REASONS = Set.of(
+            "source_cutover_identity_or_highwater_changed",
+            "source_cutover_rows_changed",
+            "source_cutover_value_changed",
+            "postgresql_import_rows_missing",
+            "postgresql_import_value_mismatch",
+            "postgresql_import_reservation_changed",
+            "postgresql_v1_review_tags_unsupported",
+            "postgresql_import_feedback_not_empty",
+            "postgresql_import_notebook_not_empty",
+            "postgresql_import_cart_not_empty",
+            "postgresql_import_notifications_not_empty");
+
     private SourceImportTool(){ }
     static String required(Map<String,String> env,String key){return SourceSettings.required(env,key);}
     static SourceArtifact.Snapshot input(Map<String,String> env) throws Exception {return input(env,true);}
@@ -151,7 +164,15 @@ public final class SourceImportTool {
             System.out.println("{\"status\":\"passed\",\"tables\":"+report.tables()+",\"rows\":"+report.rows()+"}");return 0;
         } catch(Exception error){
             String code=error instanceof ImportTransaction.OutcomeException outcome?outcome.code:"postgresql_source_import_rejected";
-            System.err.println("{\"status\":\"failed\",\"error_code\":\""+code+"\"}");return 2;
+            var failure = SourceContract.JSON.createObjectNode().put("status", "failed").put("error_code", code);
+            if (args.length == 1 && "verify-cutover".equals(args[0]) && error instanceof IllegalArgumentException) {
+                String reason = error.getMessage();
+                if (reason != null && DISCLOSED_CUTOVER_REASONS.contains(reason)) {
+                    failure.put("reason", reason);
+                }
+            }
+            System.err.println(failure);
+            return 2;
         }
     }
     public static void main(String[] args){System.exit(mainResult(args,System.getenv()));}

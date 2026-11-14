@@ -3,6 +3,9 @@ package com.pubburi.migration;
 import static org.junit.jupiter.api.Assertions.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.sql.*;
 import java.util.*;
@@ -37,6 +40,21 @@ class SourceImportIntegrationTests {
         for(var t:SourceContract.TABLES)assertEquals(0,number(c,"SELECT count(*) FROM pubburi."+t.name()),"all business rows must roll back");
         assertEquals(0,number(c,"SELECT count(*) FROM pubburi.migration_source_receipt"));
     }
+    static void assertRejected(String command, Map<String,String> env, Map<String,String> expected) throws Exception {
+        var error = new ByteArrayOutputStream();
+        var previous = System.err;
+        try (var output = new PrintStream(error, true, StandardCharsets.UTF_8)) {
+            System.setErr(output);
+            assertEquals(2, SourceImportTool.mainResult(new String[]{command}, env));
+        } finally {
+            System.setErr(previous);
+        }
+        assertEquals(expected, SourceContract.JSON.readValue(error.toString(StandardCharsets.UTF_8), Map.class));
+    }
+    static void assertCutoverReason(Map<String,String> env, String reason) throws Exception {
+        assertRejected("verify-cutover", env,
+                Map.of("status", "failed", "error_code", "postgresql_source_import_rejected", "reason", reason));
+    }
     static void schema(Map<String,String> env)throws Exception{assertEquals(7,PostgresSchemaTool.run("migrate",env));}
     @Test void realSourceCopiesEveryValueRecordsReceiptAndRejectsReplay() throws Exception {
         var env=env("FRESH");
@@ -56,7 +74,7 @@ class SourceImportIntegrationTests {
             sql.execute("INSERT INTO pubburi.t_user_notification(id,user_id,event_type,event_id,order_id) SELECT '00000000-0000-4000-8000-000000000007'::uuid,id,'ORDER_COMPLETED',1,1 FROM pubburi.t_user LIMIT 1");
             try {
                 var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_import_notifications_not_empty",error.getMessage());
-                assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
+                assertCutoverReason(env, "postgresql_import_notifications_not_empty");
                 assertEquals(1,number(c,"SELECT count(*) FROM pubburi.t_user_notification"));
             } finally {sql.execute("DELETE FROM pubburi.t_user_notification WHERE id='00000000-0000-4000-8000-000000000007'::uuid");}
             sql.execute("INSERT INTO pubburi.t_user_cart(user_id) SELECT id FROM pubburi.t_user LIMIT 1");
@@ -64,14 +82,14 @@ class SourceImportIntegrationTests {
             sql.execute("INSERT INTO pubburi.t_user_cart_operation(user_id,operation_id,kind,intent_hash) SELECT user_id,'00000000-0000-4000-8000-000000000006'::uuid,'MERGE',repeat('a',64) FROM pubburi.t_user_cart");
             try {
                 var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_import_cart_not_empty",error.getMessage());
-                assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
+                assertCutoverReason(env, "postgresql_import_cart_not_empty");
                 assertEquals(1,number(c,"SELECT count(*) FROM pubburi.t_user_cart_operation"));assertEquals(2,number(c,"SELECT quantity FROM pubburi.t_user_cart_item"));
             } finally {sql.execute("DELETE FROM pubburi.t_user_cart");}
             sql.execute("INSERT INTO pubburi.t_user_notebook(id,user_id,product_name,experience) SELECT '00000000-0000-4000-8000-000000000005'::uuid,id,'authored private','INTERESTED' FROM pubburi.t_user LIMIT 1");
             try {
                 var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
                 assertEquals("postgresql_import_notebook_not_empty",error.getMessage());
-                assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
+                assertCutoverReason(env, "postgresql_import_notebook_not_empty");
             } finally {sql.execute("DELETE FROM pubburi.t_user_notebook WHERE id='00000000-0000-4000-8000-000000000005'::uuid");}
             int id;try(var rows=sql.executeQuery("SELECT id FROM pubburi.t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
             sql.execute("""
@@ -81,10 +99,11 @@ class SourceImportIntegrationTests {
             try {
                 var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
                 assertEquals("postgresql_import_feedback_not_empty",error.getMessage());
-                assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
+                assertCutoverReason(env, "postgresql_import_feedback_not_empty");
+                assertRejected("verify-import", env, Map.of("status", "failed", "error_code", "postgresql_source_import_rejected"));
             } finally {sql.execute("DELETE FROM pubburi.t_user_recommendation_feedback");}
             sql.execute("INSERT INTO pubburi.t_comment_taste_tag VALUES("+id+",'authored target opinion')");
-            try {var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_v1_review_tags_unsupported",error.getMessage());}
+            try {assertCutoverReason(env, "postgresql_v1_review_tags_unsupported");}
             finally {sql.execute("DELETE FROM pubburi.t_comment_taste_tag WHERE comment_id="+id);}
             sql.execute("ALTER TABLE pubburi.t_comment_taste_tag ALTER COLUMN tag TYPE VARCHAR(41) COLLATE \"C\"");
             try {var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_review_tag_shape_changed",error.getMessage());}
@@ -100,13 +119,12 @@ class SourceImportIntegrationTests {
             SourceIntegrationTests.update(mysql,"UPDATE t_product SET name=? WHERE id="+id,"Authored stale cutover source");
             try {
                 assertEquals(source.report(),SourceImportTool.verify(env));
-                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));
-                assertEquals("source_cutover_value_changed",error.getMessage());
+                assertCutoverReason(env, "source_cutover_value_changed");
             } finally {SourceIntegrationTests.update(mysql,"UPDATE t_product SET name=? WHERE id="+id,name);}
             try(var s=mysql.prepareStatement("UPDATE pubburi_source_snapshot_guard SET state='ACTIVE' WHERE token=?")) {
                 s.setString(1,env.get("PUBBURI_SOURCE_RUN_TOKEN"));assertEquals(1,s.executeUpdate());
             }
-            try {assertThrows(IllegalArgumentException.class,()->SourceImportTool.verifyCutover(env));}
+            try {assertRejected("verify-cutover", env, Map.of("status", "failed", "error_code", "postgresql_source_import_rejected"));}
             finally {try(var s=mysql.prepareStatement("UPDATE pubburi_source_snapshot_guard SET state='QUIESCED' WHERE token=?")){s.setString(1,env.get("PUBBURI_SOURCE_RUN_TOKEN"));assertEquals(1,s.executeUpdate());}}
         }
         assertEquals(source.report(),SourceImportTool.verifyCutover(env));
