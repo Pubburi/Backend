@@ -4,7 +4,7 @@ DB02의 독립 이관 도구다. [읽기 전용 export](SOURCE-SNAPSHOT.md)로 �
 PostgreSQL 검증 DB**에 복사하고 같은 TX에서 전체 값/ID 예약/수령증을 검수한다. 현재 API의
 MySQL/MyBatis·기존001–009와 Flyway V1–V3는 보존한다. V4의 추천 피드백·V5의 비공개 notebook·V6의 cart/operation receipt·V7의 내부 알림은 PG에서 새로
 기록하는 데이터다. 승인 MySQL v1/v2 파일에는 이 데이터가 없으므로 import와 원본 일치 검수는
-대상 피드백/notebook/cart3표가 비어 있을 때만 허용한다. 기록된 PG 피드백의 보존은 [PG 백업·복구](LOCAL-DEVELOPMENT.md)의
+대상 피드백/notebook/cart3표/알림이 비어 있을 때만 허용한다. PG에서 생성한 데이터는 [PG 백업·복구](LOCAL-DEVELOPMENT.md)의
 검증된 스키마·데이터 단위를 사용한다. JPA API(DB03), Psycopg3 relay(DB05),
 서비스 cutover/역이관(DB06)까지 완료한 것은 아니다.
 
@@ -77,11 +77,26 @@ commit 전 INSERT/대조/제약/예약/수령증 실패는 같은 TX를 rollback
 
 | CLI 결과 | 의미·다음 조치 |
 |---|---|
-| passed | commit ACK와 연결 종료까지 완료 |
+| passed | import의 commit ACK와 연결 종료, 또는 읽기 전용 대조 완료 |
 | postgresql_source_import_rejected | 입력/대상/사전 commit 검수 실패. source/target 상태를 확인하고 수정 |
 | postgresql_import_commit_status_unknown | commit 예외 또는 부모 deadline으로 결과를 확정하지 못함. 성공/rollback으로 추정하지 않고 verify-import |
 | postgresql_import_committed_close_failed | commit ACK 후 연결 종료가 실패함. 이미 받은 ACK를 rollback으로 바꾸지 않고 verify-import |
 | postgresql_import_verification_timed_out | 읽기 전용 대조가 deadline 안에 완료되지 않음. 성공으로 보지 않음 |
+
+`verify-cutover`의 `postgresql_source_import_rejected`에는 다음 고정 `reason`이 함께 나올 수 있다.
+
+| `reason` | 일치 검수를 막은 상태 |
+|---|---|
+| `source_cutover_identity_or_highwater_changed` | MySQL 원본 식별자, 작업 창, collation 또는 AUTO_INCREMENT가 승인본과 다름 |
+| `source_cutover_rows_changed` / `source_cutover_value_changed` | MySQL 원본의 행 구성 또는 값이 승인본과 다름 |
+| `postgresql_import_rows_missing` / `postgresql_import_value_mismatch` | PostgreSQL 복사본의 행이 누락됐거나 값이 승인본과 다름 |
+| `postgresql_import_reservation_changed` | PostgreSQL에서 승인본과 다른 identity 값이 관측됨 |
+| `postgresql_v1_review_tags_unsupported` | PostgreSQL 후기 태그가 v1 승인본의 범위를 벗어남 |
+| `postgresql_import_feedback_not_empty` / `postgresql_import_notebook_not_empty` | PostgreSQL 추천 피드백 또는 개인 기록이 남아 있음 |
+| `postgresql_import_cart_not_empty` / `postgresql_import_notifications_not_empty` | PostgreSQL 장바구니·요청 영수증 또는 내부 알림이 남아 있음 |
+
+코드는 승인본과 같다고 볼 수 없는 첫 사유를 가리킨다. 기존 승인본에 없는 PG 업무 데이터는
+[PG 백업·복구](LOCAL-DEVELOPMENT.md)를 사용해 보존한다. 이 검수는 PG→MySQL 역이관을 실행하지 않는다.
 
 COMMIT 요청이 서버에 도달한 뒤 응답이 사라지면 rollback 호출만으로 결과를 확정할 수 없다.
 [연결 결과 분류](../tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java)는
