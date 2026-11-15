@@ -56,6 +56,7 @@ class SourceImportTypedIntegrationTests {
                 finally {statement.execute("GRANT SELECT ON pubburi.t_comment_taste_tag TO "+owner);}
             }
             assertEquals(source.report(),SourceImportTool.verify(readOnly));
+            ReverseOrderRehearsal.verify(env, c, source);
         }
     }
 }
