@@ -157,13 +157,67 @@ public final class SourceImportTool {
             return report;
         }
     }
+
+    private static int assessLegacyState(Map<String, String> env) throws SQLException {
+        if (!"1".equals(env.get("PUBBURI_PG_IMPORT_WRITES_STOPPED"))) {
+            throw new IllegalArgumentException("postgresql_import_explicit_window_required");
+        }
+        var settings = PostgresSchemaTool.Settings.from(env);
+        var pgOnly = TargetSchemaContract.POSTGRES_ONLY_TABLES;
+        var report = SourceContract.JSON.createObjectNode();
+        var counts = report.putObject("postgresql_only_rows");
+        boolean blocked = false;
+        try (var connection = settings.connect(); var statement = connection.createStatement()) {
+            connection.setReadOnly(true);
+            connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+            connection.setAutoCommit(false);
+            PostgresSchemaTool.guard(connection, settings);
+            // With row security off, PostgreSQL raises an error if a policy would hide rows.
+            statement.execute("SET LOCAL row_security=off");
+            var expected = new HashSet<>(Set.of("flyway_schema_history", "migration_source_receipt"));
+            SourceContract.tables(2).forEach(table -> expected.add(table.name()));
+            expected.addAll(pgOnly);
+            try (var rows = statement.executeQuery("""
+                    SELECT c.relname, c.relkind='r' AND NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhparent=c.oid OR i.inhrelid=c.oid
+                    ) FROM pg_catalog.pg_class c
+                    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                    WHERE n.nspname='pubburi' AND c.relkind IN ('r','p','f','m')
+                    """)) {
+                while (rows.next()) {
+                    if (!rows.getBoolean(2) || !expected.remove(rows.getString(1))) {
+                        throw new IllegalArgumentException("postgresql_legacy_state_schema_changed");
+                    }
+                }
+            }
+            if (!expected.isEmpty()) throw new IllegalArgumentException("postgresql_legacy_state_schema_changed");
+            for (String table : pgOnly) {
+                try (var rows = statement.executeQuery("SELECT count(*) FROM ONLY pubburi." + table)) {
+                    if (!rows.next()) throw new SQLException("postgresql_legacy_state_count_unavailable");
+                    long count = rows.getLong(1);
+                    counts.put(table, count);
+                    blocked |= count != 0;
+                }
+            }
+            connection.rollback();
+        }
+        report.put("status", blocked ? "postgresql_only_state_present" : "postgresql_only_state_empty");
+        (blocked ? System.err : System.out).println(report);
+        return blocked ? 2 : 0;
+    }
+
     public static int mainResult(String[] args,Map<String,String> env) {
         try {
+            if (args.length == 1 && "assess-legacy-state".equals(args[0])) return assessLegacyState(env);
             if(args.length!=1 || !Set.of("import-source","verify-import","verify-cutover").contains(args[0]))throw new IllegalArgumentException();
             var report=switch(args[0]) {case "import-source" -> run(env);case "verify-cutover" -> verifyCutover(env);default -> verify(env);};
             System.out.println("{\"status\":\"passed\",\"tables\":"+report.tables()+",\"rows\":"+report.rows()+"}");return 0;
         } catch(Exception error){
             String code=error instanceof ImportTransaction.OutcomeException outcome?outcome.code:"postgresql_source_import_rejected";
+            if (args.length == 1 && "assess-legacy-state".equals(args[0])) {
+                code = "postgresql_legacy_state_schema_changed".equals(error.getMessage())
+                        ? "postgresql_legacy_state_schema_changed" : "postgresql_legacy_state_unavailable";
+            }
             var failure = SourceContract.JSON.createObjectNode().put("status", "failed").put("error_code", code);
             if (args.length == 1 && "verify-cutover".equals(args[0]) && error instanceof IllegalArgumentException) {
                 String reason = error.getMessage();

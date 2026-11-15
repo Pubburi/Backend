@@ -28,6 +28,22 @@ class PostgreSqlImportChildTests(unittest.TestCase):
             with self.assertRaises(ValueError):postgresql_import.execute(env,'verify-cutover')
             pg.assert_called_once_with(env);child.assert_not_called()
 
+    def test_legacy_state_only_checks_postgresql_and_strips_source_and_mutation_settings(self):
+        env = {"PUBBURI_PG_IMPORT_WRITES_STOPPED": "1", "PUBBURI_PG_URL": "authored-pg",
+               "PUBBURI_PG_PASSWORD": "target-only", "PUBBURI_SOURCE_SNAPSHOT_DIR": "unused",
+               "PUBBURI_SOURCE_PASSWORD": "source-only", "PUBBURI_PG_IMPORT_SHA256": "unused",
+               "PUBBURI_PG_MUTATING": "1", "PUBBURI_PG_ADMIN_PASSWORD": "admin-only"}
+        with patch("postgresql_import.private_path") as artifact, patch("postgresql_import.verify_owned_postgres") as pg, \
+             patch("postgresql_import.verify_owned_source") as mysql, patch("pathlib.Path.is_file", return_value=True), \
+             patch("postgresql_import.subprocess.run") as child:
+            postgresql_import.execute(env, "assess-legacy-state")
+        pg.assert_called_once_with(env)
+        artifact.assert_not_called()
+        mysql.assert_not_called()
+        self.assertEqual(child.call_args.args[0][-1], "assess-legacy-state")
+        self.assertEqual(child.call_args.kwargs["env"], {key: env[key] for key in
+                         ("PUBBURI_PG_IMPORT_WRITES_STOPPED", "PUBBURI_PG_URL", "PUBBURI_PG_PASSWORD")})
+
     def test_parent_timeout_does_not_claim_an_import_rollback_or_leak_exception_details(self):
         env={"PUBBURI_PG_MUTATING":"1","PUBBURI_PG_IMPORT_WRITES_STOPPED":"1"}
         for command,code in (("import-source","postgresql_import_commit_status_unknown"),("verify-import","postgresql_import_verification_timed_out")):

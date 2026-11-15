@@ -40,20 +40,46 @@ class SourceImportIntegrationTests {
         for(var t:SourceContract.TABLES)assertEquals(0,number(c,"SELECT count(*) FROM pubburi."+t.name()),"all business rows must roll back");
         assertEquals(0,number(c,"SELECT count(*) FROM pubburi.migration_source_receipt"));
     }
-    static void assertRejected(String command, Map<String,String> env, Map<String,String> expected) throws Exception {
-        var error = new ByteArrayOutputStream();
-        var previous = System.err;
-        try (var output = new PrintStream(error, true, StandardCharsets.UTF_8)) {
-            System.setErr(output);
-            assertEquals(2, SourceImportTool.mainResult(new String[]{command}, env));
+    static void assertRejected(String command, Map<String,String> env, Map<String,?> expected) throws Exception {
+        assertResult(command, env, 2, expected);
+    }
+    private static void assertResult(String command, Map<String,String> env, int exit, Map<String,?> expected) throws Exception {
+        var captured = new ByteArrayOutputStream();
+        var previous = exit == 0 ? System.out : System.err;
+        try (var output = new PrintStream(captured, true, StandardCharsets.UTF_8)) {
+            if (exit == 0) System.setOut(output); else System.setErr(output);
+            assertEquals(exit, SourceImportTool.mainResult(new String[]{command}, env));
         } finally {
-            System.setErr(previous);
+            if (exit == 0) System.setOut(previous); else System.setErr(previous);
         }
-        assertEquals(expected, SourceContract.JSON.readValue(error.toString(StandardCharsets.UTF_8), Map.class));
+        assertEquals(expected, SourceContract.JSON.readValue(captured.toByteArray(), Map.class));
     }
     static void assertCutoverReason(Map<String,String> env, String reason) throws Exception {
         assertRejected("verify-cutover", env,
                 Map.of("status", "failed", "error_code", "postgresql_source_import_rejected", "reason", reason));
+    }
+    private static Map<String, ?> legacyState(String status, int rows) {
+        return Map.of("status", status, "postgresql_only_rows", Map.of(
+                "t_user_recommendation_feedback", rows, "t_user_notebook", rows, "t_user_cart", rows,
+                "t_user_cart_item", rows, "t_user_cart_operation", rows, "t_user_notification", rows));
+    }
+
+    private static void assertLegacyStateBlocked(Map<String, String> env, Statement sql) throws Exception {
+        var blocked = legacyState("postgresql_only_state_present", 1);
+        assertRejected("assess-legacy-state", env, blocked);
+        sql.execute("ALTER TABLE pubburi.t_user_notebook ENABLE ROW LEVEL SECURITY");
+        try {
+            sql.execute("ALTER TABLE pubburi.t_user_notebook FORCE ROW LEVEL SECURITY");
+            assertRejected("assess-legacy-state", env, Map.of("status", "failed", "error_code", "postgresql_legacy_state_unavailable"));
+        } finally {
+            sql.execute("ALTER TABLE pubburi.t_user_notebook NO FORCE ROW LEVEL SECURITY");
+            sql.execute("ALTER TABLE pubburi.t_user_notebook DISABLE ROW LEVEL SECURITY");
+        }
+        sql.execute("CREATE TABLE pubburi.ci_additional_state (id integer)");
+        try {
+            assertRejected("assess-legacy-state", env, Map.of("status", "failed", "error_code", "postgresql_legacy_state_schema_changed"));
+        } finally { sql.execute("DROP TABLE pubburi.ci_additional_state"); }
+        assertRejected("assess-legacy-state", env, blocked);
     }
     static void schema(Map<String,String> env)throws Exception{assertEquals(7,PostgresSchemaTool.run("migrate",env));}
     @Test void realSourceCopiesEveryValueRecordsReceiptAndRejectsReplay() throws Exception {
@@ -70,38 +96,51 @@ class SourceImportIntegrationTests {
         }
         assertEquals(5,PostgresSchemaTool.run("migrate",env));
         assertEquals(source.report(),SourceImportTool.run(env));assertEquals(source.report(),SourceImportTool.verify(env));
+        var legacyState = new HashMap<>(env);
+        legacyState.keySet().removeIf(key -> key.startsWith("PUBBURI_SOURCE_") || key.equals("PUBBURI_PG_MUTATING"));
+        assertResult("assess-legacy-state", legacyState, 0, legacyState("postgresql_only_state_empty", 0));
         try(Connection c=settings.connect();var sql=c.createStatement()) {
-            sql.execute("INSERT INTO pubburi.t_user_notification(id,user_id,event_type,event_id,order_id) SELECT '00000000-0000-4000-8000-000000000007'::uuid,id,'ORDER_COMPLETED',1,1 FROM pubburi.t_user LIMIT 1");
             try {
-                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_import_notifications_not_empty",error.getMessage());
+                sql.execute("INSERT INTO pubburi.t_user_notification(id,user_id,event_type,event_id,order_id) SELECT '00000000-0000-4000-8000-000000000007'::uuid,id,'ORDER_COMPLETED',1,1 FROM pubburi.t_user LIMIT 1");
+                var notification=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
+                assertEquals("postgresql_import_notifications_not_empty",notification.getMessage());
                 assertCutoverReason(env, "postgresql_import_notifications_not_empty");
                 assertEquals(1,number(c,"SELECT count(*) FROM pubburi.t_user_notification"));
-            } finally {sql.execute("DELETE FROM pubburi.t_user_notification WHERE id='00000000-0000-4000-8000-000000000007'::uuid");}
-            sql.execute("INSERT INTO pubburi.t_user_cart(user_id) SELECT id FROM pubburi.t_user LIMIT 1");
-            sql.execute("INSERT INTO pubburi.t_user_cart_item(user_id,product_id,current_product_id,product_name,quantity) SELECT c.user_id,p.id,p.id,p.name,2 FROM pubburi.t_user_cart c CROSS JOIN pubburi.t_product p LIMIT 1");
-            sql.execute("INSERT INTO pubburi.t_user_cart_operation(user_id,operation_id,kind,intent_hash) SELECT user_id,'00000000-0000-4000-8000-000000000006'::uuid,'MERGE',repeat('a',64) FROM pubburi.t_user_cart");
-            try {
-                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));assertEquals("postgresql_import_cart_not_empty",error.getMessage());
+                assertRejected("assess-legacy-state", legacyState, Map.of("status", "postgresql_only_state_present",
+                        "postgresql_only_rows", Map.of("t_user_recommendation_feedback", 0, "t_user_notebook", 0,
+                                "t_user_cart", 0, "t_user_cart_item", 0, "t_user_cart_operation", 0, "t_user_notification", 1)));
+
+                sql.execute("INSERT INTO pubburi.t_user_cart(user_id) SELECT id FROM pubburi.t_user LIMIT 1");
+                sql.execute("INSERT INTO pubburi.t_user_cart_item(user_id,product_id,current_product_id,product_name,quantity) SELECT c.user_id,p.id,p.id,p.name,2 FROM pubburi.t_user_cart c CROSS JOIN pubburi.t_product p LIMIT 1");
+                sql.execute("INSERT INTO pubburi.t_user_cart_operation(user_id,operation_id,kind,intent_hash) SELECT user_id,'00000000-0000-4000-8000-000000000006'::uuid,'MERGE',repeat('a',64) FROM pubburi.t_user_cart");
+                var cart=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
+                assertEquals("postgresql_import_cart_not_empty",cart.getMessage());
                 assertCutoverReason(env, "postgresql_import_cart_not_empty");
-                assertEquals(1,number(c,"SELECT count(*) FROM pubburi.t_user_cart_operation"));assertEquals(2,number(c,"SELECT quantity FROM pubburi.t_user_cart_item"));
-            } finally {sql.execute("DELETE FROM pubburi.t_user_cart");}
-            sql.execute("INSERT INTO pubburi.t_user_notebook(id,user_id,product_name,experience) SELECT '00000000-0000-4000-8000-000000000005'::uuid,id,'authored private','INTERESTED' FROM pubburi.t_user LIMIT 1");
-            try {
-                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
-                assertEquals("postgresql_import_notebook_not_empty",error.getMessage());
+                assertEquals(1,number(c,"SELECT count(*) FROM pubburi.t_user_cart_operation"));
+                assertEquals(2,number(c,"SELECT quantity FROM pubburi.t_user_cart_item"));
+
+                sql.execute("INSERT INTO pubburi.t_user_notebook(id,user_id,product_name,experience) SELECT '00000000-0000-4000-8000-000000000005'::uuid,id,'authored private','INTERESTED' FROM pubburi.t_user LIMIT 1");
+                var notebook=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
+                assertEquals("postgresql_import_notebook_not_empty",notebook.getMessage());
                 assertCutoverReason(env, "postgresql_import_notebook_not_empty");
-            } finally {sql.execute("DELETE FROM pubburi.t_user_notebook WHERE id='00000000-0000-4000-8000-000000000005'::uuid");}
-            int id;try(var rows=sql.executeQuery("SELECT id FROM pubburi.t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
-            sql.execute("""
-                INSERT INTO pubburi.t_user_recommendation_feedback(user_id,product_id,feedback)
-                SELECT u.id,p.id,'MATCHED' FROM pubburi.t_user u CROSS JOIN pubburi.t_product p LIMIT 1
-                """);
-            try {
-                var error=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
-                assertEquals("postgresql_import_feedback_not_empty",error.getMessage());
+
+                sql.execute("""
+                    INSERT INTO pubburi.t_user_recommendation_feedback(user_id,product_id,feedback)
+                    SELECT u.id,p.id,'MATCHED' FROM pubburi.t_user u CROSS JOIN pubburi.t_product p LIMIT 1
+                    """);
+                var feedback=assertThrows(IllegalArgumentException.class,()->SourceImportTool.verify(env));
+                assertEquals("postgresql_import_feedback_not_empty",feedback.getMessage());
                 assertCutoverReason(env, "postgresql_import_feedback_not_empty");
                 assertRejected("verify-import", env, Map.of("status", "failed", "error_code", "postgresql_source_import_rejected"));
-            } finally {sql.execute("DELETE FROM pubburi.t_user_recommendation_feedback");}
+                assertLegacyStateBlocked(legacyState, sql);
+            } finally {
+                sql.execute("DELETE FROM pubburi.t_user_recommendation_feedback");
+                sql.execute("DELETE FROM pubburi.t_user_notebook WHERE id='00000000-0000-4000-8000-000000000005'::uuid");
+                sql.execute("DELETE FROM pubburi.t_user_cart");
+                sql.execute("DELETE FROM pubburi.t_user_notification WHERE id='00000000-0000-4000-8000-000000000007'::uuid");
+            }
+            assertResult("assess-legacy-state", legacyState, 0, legacyState("postgresql_only_state_empty", 0));
+            int id;try(var rows=sql.executeQuery("SELECT id FROM pubburi.t_comment ORDER BY id LIMIT 1")){assertTrue(rows.next());id=rows.getInt(1);}
             sql.execute("INSERT INTO pubburi.t_comment_taste_tag VALUES("+id+",'authored target opinion')");
             try {assertCutoverReason(env, "postgresql_v1_review_tags_unsupported");}
             finally {sql.execute("DELETE FROM pubburi.t_comment_taste_tag WHERE comment_id="+id);}

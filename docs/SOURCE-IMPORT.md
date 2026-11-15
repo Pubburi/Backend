@@ -21,6 +21,7 @@ python3 scripts/postgresql_schema.py migrate
 python3 scripts/postgresql_import.py import-source
 python3 scripts/postgresql_import.py verify-import
 python3 scripts/postgresql_import.py verify-cutover
+python3 scripts/postgresql_import.py assess-legacy-state
 ~~~
 
 원본과 대상의 쓰기·relay·DDL이 중단된 작업 창에서 `PUBBURI_PG_IMPORT_WRITES_STOPPED=1`을
@@ -97,6 +98,12 @@ commit 전 INSERT/대조/제약/예약/수령증 실패는 같은 TX를 rollback
 
 코드는 승인본과 같다고 볼 수 없는 첫 사유를 가리킨다. 기존 승인본에 없는 PG 업무 데이터는
 [PG 백업·복구](LOCAL-DEVELOPMENT.md)를 사용해 보존한다. 이 검수는 PG→MySQL 역이관을 실행하지 않는다.
+
+`assess-legacy-state`는 같은 쓰기 중단 선언과 소유 PostgreSQL 연결 설정으로 PG 전용 여섯 표의
+행 수를 한 시점에서 확인한다. MySQL 접속과 승인 snapshot은 필요 없다. 피드백·비공개 기록·장바구니
+세 표·내부 알림 가운데 하나라도 남으면 `postgresql_only_state_present`와 종료 코드 2를 반환한다.
+스키마가 달라졌거나 전체 행을 읽을 수 없는 경우에도 실패한다. 행 수가 모두 0이면 이 여섯 표에
+한해 `postgresql_only_state_empty`를 반환한다. 공유 표의 변경·ID·시각과 실제 역이관은 별도 검수가 필요하다.
 
 필수 CI의 주문 역방향 리허설은 PostgreSQL에서 새로 쓴 주문과 두 품목을 별도 폐기 MySQL의
 주문 두 표에 복사한다. 폐기 복사본의 주문 시각만 `TIMESTAMP(6)`으로 확장해 UTC 소수점 이하

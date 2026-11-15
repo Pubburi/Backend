@@ -6,6 +6,10 @@ import java.util.*;
 
 /** Verify the locked target catalog, not merely Flyway's historical SQL checksums. */
 final class TargetSchemaContract {
+    static final List<String> POSTGRES_ONLY_TABLES = List.of(
+            "t_user_recommendation_feedback", "t_user_notebook", "t_user_cart", "t_user_cart_item",
+            "t_user_cart_operation", "t_user_notification");
+
     private TargetSchemaContract(){ }
     static void verify(Connection connection,int version) throws Exception {
         var contract=SourceContract.tables(version);
@@ -15,13 +19,10 @@ final class TargetSchemaContract {
         boolean reviewTags;
         // pg_class is not filtered by table SELECT grants; a hidden extension is never treated as absent.
         try(var s=connection.createStatement();var r=s.executeQuery("SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='pubburi' AND c.relname='t_comment_taste_tag')")) {r.next();reviewTags=r.getBoolean(1);}
-        expected.add("t_user_recommendation_feedback");
+        expected.addAll(POSTGRES_ONLY_TABLES);
         verifyEmptyFeedback(connection);
-        expected.add("t_user_notebook");
         verifyEmptyNotebook(connection);
-        expected.addAll(List.of("t_user_cart","t_user_cart_item","t_user_cart_operation"));
         verifyEmptyCart(connection);
-        expected.add("t_user_notification");
         verifyEmptyNotifications(connection);
         if(reviewTags && !actual.contains("t_comment_taste_tag")) throw new IllegalArgumentException("postgresql_review_tag_unreadable");
         if(version==2 && !reviewTags) throw new IllegalArgumentException("postgresql_v2_review_tags_required");
