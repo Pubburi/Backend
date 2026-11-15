@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import one approved typed artifact into an owned empty PostgreSQL rehearsal target."""
+"""Run guarded PostgreSQL imports and read-only migration checks."""
 import argparse
 import json
 import os
@@ -16,10 +16,12 @@ CUTOVER_REQUIRED = frozenset('PUBBURI_SOURCE_'+key for key in (
     'VALIDATION_LABEL','IMPORT_WRITES_STOPPED','IMPORT_SHA256','IMPORT_SOURCE_ID','IMPORT_WINDOW_UUID'))
 
 
-def child_environment(environ, cutover=False):
-    keys={"PATH","JAVA_HOME","HOME","TMPDIR","TMP","TEMP","LANG","LC_ALL","LC_CTYPE","PUBBURI_SOURCE_SNAPSHOT_DIR"}
-    keys.update("PUBBURI_PG_"+suffix for suffix in ("URL","DB_NAME","USER","PASSWORD","RUN_TOKEN","CA","MUTATING",
-                "IMPORT_WRITES_STOPPED","IMPORT_SHA256","IMPORT_SOURCE_ID","IMPORT_WINDOW_UUID"))
+def child_environment(environ, cutover=False, legacy_state=False):
+    keys={"PATH","JAVA_HOME","HOME","TMPDIR","TMP","TEMP","LANG","LC_ALL","LC_CTYPE"}
+    keys.update("PUBBURI_PG_"+suffix for suffix in ("URL","DB_NAME","USER","PASSWORD","RUN_TOKEN","CA","IMPORT_WRITES_STOPPED"))
+    if not legacy_state:
+        keys.add("PUBBURI_SOURCE_SNAPSHOT_DIR")
+        keys.update("PUBBURI_PG_"+suffix for suffix in ("MUTATING","IMPORT_SHA256","IMPORT_SOURCE_ID","IMPORT_WINDOW_UUID"))
     child={key:value for key,value in environ.items() if key in keys}
     if cutover:
         child.update(source_environment(environ, True))
@@ -29,14 +31,16 @@ def child_environment(environ, cutover=False):
 def execute(environ, command):
     if (command=="import-source" and environ.get("PUBBURI_PG_MUTATING")!="1") or environ.get("PUBBURI_PG_IMPORT_WRITES_STOPPED")!="1":
         raise ValueError("postgresql_import_explicit_window_required")
-    private_path(environ,True)
+    legacy_state = command == "assess-legacy-state"
+    if not legacy_state:
+        private_path(environ,True)
     verify_owned_postgres(environ)
     if command=="verify-cutover":
         verify_owned_source(environ)
     target=ROOT/"tools/postgresql-migration/target"
     if not (target/"classes/com/pubburi/migration/SourceImportTool.class").is_file():
         raise ValueError("postgresql_import_build_required")
-    env=child_environment(environ,command=="verify-cutover")
+    env=child_environment(environ,command=="verify-cutover",legacy_state)
     java=str(Path(env["JAVA_HOME"])/"bin/java") if env.get("JAVA_HOME") else "java"
     runtime=str(target/"classes")+os.pathsep+str(target/"dependency/*")
     return subprocess.run([java,"-cp",runtime,"com.pubburi.migration.SourceImportTool",command],
@@ -45,7 +49,7 @@ def execute(environ, command):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command",choices=("import-source","verify-import","verify-cutover"))
+    parser.add_argument("command",choices=("import-source","verify-import","verify-cutover","assess-legacy-state"))
     args=parser.parse_args()
     try:
         result=execute(os.environ,args.command)
