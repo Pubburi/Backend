@@ -19,8 +19,13 @@ import java.util.TreeMap;
 
 /** Writes only the authored order slice into a separately fenced legacy MySQL fixture. */
 final class ReverseOrderRehearsal {
-    private static final SourceContract.Table ORDERS = table("t_order");
+    private static final SourceContract.Table ORIGINAL_ORDERS = table("t_order");
+    private static final SourceContract.Table ORDERS = new SourceContract.Table(ORIGINAL_ORDERS.name(),
+            ORIGINAL_ORDERS.columns().stream().map(column -> column.name().equals("order_time")
+                    ? new SourceContract.Column(column.name(), column.kind(), column.nullable(), column.sqlType(), "6")
+                    : column).toList(), ORIGINAL_ORDERS.primary());
     private static final SourceContract.Table DETAILS = table("t_order_detail");
+    private static final String ORDER_TIME = "2026-11-15T04:00:00.123456Z";
 
     private ReverseOrderRehearsal() { }
 
@@ -37,18 +42,18 @@ final class ReverseOrderRehearsal {
 
         try (var mysql = legacy.connect()) {
             SourceSession.guard(mysql, legacy);
+            assertOrderTimePrecision(mysql, 6);
             var beforeOrders = legacyRows(mysql, ORDERS);
             var beforeDetails = legacyRows(mysql, DETAILS);
             assertFalse(beforeOrders.isEmpty());
             assertFalse(beforeDetails.isEmpty());
 
-            int fractional = authoredOrder(pg, "2026-11-15T04:00:00.123456Z");
+            int orderId = authoredOrder(pg, ORDER_TIME);
             assertEquals("source_typed_value_invalid", assertThrows(IllegalArgumentException.class,
-                    () -> pgRows(pg, ORDERS, "o_id", fractional)).getMessage());
+                    () -> pgRows(pg, ORIGINAL_ORDERS, "o_id", orderId)).getMessage());
             assertEquals(beforeOrders, legacyRows(mysql, ORDERS));
             assertEquals(beforeDetails, legacyRows(mysql, DETAILS));
 
-            int orderId = authoredOrder(pg, "2026-11-15T04:00:01Z");
             try (var insert = pg.prepareStatement("""
                     INSERT INTO pubburi.t_order_detail
                     (order_id,product_id,quantity,product_name,product_type,product_img,unit_price,sum_price)
@@ -63,6 +68,7 @@ final class ReverseOrderRehearsal {
             var details = pgRows(pg, DETAILS, "order_id", orderId);
             assertEquals(2, details.size());
             assertTrue(order.get(1).isNull());
+            assertEquals(ORDER_TIME, order.get(4).textValue());
             assertEquals("18000", order.get(6).textValue());
             assertEquals("SNAPSHOT", order.get(7).textValue());
             assertTrue(details.stream().allMatch(row -> row.get(2).isNull()));
@@ -101,6 +107,7 @@ final class ReverseOrderRehearsal {
 
         // The separate read-only MySQL source still matches every accepted row and all seven highwaters.
         try (var current = new SourceSession(original, source.version())) {
+            assertOrderTimePrecision(current.connection, 0);
             SourceImportTool.compareSource(current, source);
             current.finish();
         }
@@ -108,6 +115,14 @@ final class ReverseOrderRehearsal {
 
     private static SourceContract.Table table(String name) {
         return SourceContract.TABLES.stream().filter(table -> table.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    private static void assertOrderTimePrecision(Connection mysql, int expected) throws SQLException {
+        assertEquals(1, SourceImportIntegrationTests.number(mysql, """
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t_order' AND COLUMN_NAME='order_time'
+                  AND DATA_TYPE='timestamp' AND IS_NULLABLE='YES' AND DATETIME_PRECISION=
+                """ + expected));
     }
 
     private static int authoredOrder(Connection pg, String instant) throws SQLException {

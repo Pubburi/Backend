@@ -148,16 +148,23 @@ def run(environ):
                 source['PUBBURI_SOURCE_TYPED_'+key] = typed['PUBBURI_SOURCE_'+key]
             reverse_database, reverse_writer = "source_reverse_order_ci", "source_reverse_writer"
             reverse_password, reverse_token, reverse_window = secrets.token_hex(24), secrets.token_hex(24), str(uuid.uuid4())
+            reverse_url = source["PUBBURI_SOURCE_URL"].rsplit("/", 1)[0] + "/" + reverse_database
+            verify_owned_source(dict(source, PUBBURI_SOURCE_URL=reverse_url, PUBBURI_SOURCE_DB_NAME=reverse_database))
             sql("SET time_zone='+00:00'; CREATE DATABASE " + reverse_database +
                 " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + reverse_database + ";\n" + (ROOT / "data.sql").read_text(), timeout=40)
-            sql("USE " + reverse_database + "; CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); "
+            order_times_sql = ("SET time_zone='+00:00'; SELECT o_id, CAST(UNIX_TIMESTAMP(order_time) AS DECIMAL(20,6)) FROM "
+                               + reverse_database + ".t_order ORDER BY o_id")
+            order_times_before = sql(order_times_sql)
+            sql("USE " + reverse_database + "; "
+                "ALTER TABLE t_order MODIFY COLUMN order_time TIMESTAMP(6) NULL DEFAULT CURRENT_TIMESTAMP(6); "
+                "CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); "
                 "INSERT INTO pubburi_source_snapshot_guard VALUES ('" + reverse_token + "','QUIESCED','" + reverse_window + "'); "
                 "CREATE USER '" + reverse_writer + "'@'%' IDENTIFIED BY '" + reverse_password + "' REQUIRE SSL; "
                 "GRANT SELECT ON " + reverse_database + ".pubburi_source_snapshot_guard TO '" + reverse_writer + "'@'%'; "
                 "GRANT SELECT,INSERT ON " + reverse_database + ".t_order TO '" + reverse_writer + "'@'%'; "
                 "GRANT SELECT,INSERT ON " + reverse_database + ".t_order_detail TO '" + reverse_writer + "'@'%';")
-            reverse_url = source["PUBBURI_SOURCE_URL"].rsplit("/", 1)[0] + "/" + reverse_database
-            verify_owned_source(dict(source, PUBBURI_SOURCE_URL=reverse_url, PUBBURI_SOURCE_DB_NAME=reverse_database))
+            if sql(order_times_sql) != order_times_before:
+                raise ValueError("source_ci_reverse_existing_order_time_changed")
             source.update(PUBBURI_SOURCE_REVERSE_URL=reverse_url, PUBBURI_SOURCE_REVERSE_DB_NAME=reverse_database,
                           PUBBURI_SOURCE_REVERSE_USER=reverse_writer, PUBBURI_SOURCE_REVERSE_PASSWORD=reverse_password,
                           PUBBURI_SOURCE_REVERSE_RUN_TOKEN=reverse_token, PUBBURI_SOURCE_REVERSE_WINDOW_UUID=reverse_window)
