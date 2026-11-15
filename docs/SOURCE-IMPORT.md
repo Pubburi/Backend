@@ -98,6 +98,12 @@ commit 전 INSERT/대조/제약/예약/수령증 실패는 같은 TX를 rollback
 코드는 승인본과 같다고 볼 수 없는 첫 사유를 가리킨다. 기존 승인본에 없는 PG 업무 데이터는
 [PG 백업·복구](LOCAL-DEVELOPMENT.md)를 사용해 보존한다. 이 검수는 PG→MySQL 역이관을 실행하지 않는다.
 
+필수 CI의 주문 역방향 리허설은 PostgreSQL에서 새로 쓴 주문과 두 품목을 별도 폐기 MySQL의
+주문 두 표에 복사한다. 기존 원본의 전행과 7개 ID 고수위, 대상의 기존 행, 새 주문의 가격·삭제 참조·UTC 시각,
+주문/품목의 다음 ID를 비교한다. 두 번째 품목 쓰기 실패 시 주문과 첫 품목의 rollback 및 성공 후 재실행 거절을 확인한다.
+기존 MySQL 주문 시각은 초 단위이므로 PostgreSQL의 소수초가 남은 주문은 변환 전에 거절한다.
+운영에서 사용하는 역이관 명령과 전체 업무 표·PG 전용 데이터의 보존 검증은 남아 있다.
+
 COMMIT 요청이 서버에 도달한 뒤 응답이 사라지면 rollback 호출만으로 결과를 확정할 수 없다.
 [연결 결과 분류](../tools/postgresql-migration/src/main/java/com/pubburi/migration/ImportTransaction.java)는
 commit 시도/확인을 자원 종료 바깥에서도 구분한다. 실제 네트워크 ACK 유실을 실험했다고
