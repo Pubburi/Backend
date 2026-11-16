@@ -238,6 +238,42 @@ def run(environ, runtime, recovery_control, selected_release):
             with recovery.connect(admin_target) as connection:connection.execute('DROP FUNCTION public.recovery_forbidden()')
         attempt=local.STATE/'restored'
         recovery.restore(target,archive,pin,attempt,local=local)
+        preservation = (local, control, target, archive, pin, attempt, pg.sha(attempt/'promotion.json'))
+        verified = {'status': 'preservation_verified', 'tables': 25, 'sequences': 7}
+        if recovery.verify_preserved(*preservation) != verified:
+            raise ValueError('recovery_ci_preservation_not_verified')
+        sibling = dict(target, PUBBURI_PG_DB_NAME=environ['PUBBURI_PG_JPA_FAILURE_DB_NAME'],
+            PUBBURI_PG_RUN_TOKEN=environ['PUBBURI_PG_JPA_FAILURE_RUN_TOKEN'])
+        sibling['PUBBURI_PG_URL'] = target['PUBBURI_PG_URL'].rsplit('/', 1)[0] + '/' + sibling['PUBBURI_PG_DB_NAME']
+        verify_owned_postgres(sibling)
+        with recovery.connect(sibling) as connection:
+            if connection.execute('SELECT source_id::text FROM pubburi.migration_source_receipt').fetchone() != (manifest['state']['source_id'],):
+                raise ValueError('recovery_ci_preservation_sibling_lineage_changed')
+        try:
+            recovery.verify_preserved(local, control, sibling, *preservation[3:])
+        except ValueError as error:
+            if str(error) != 'postgresql_recovery_promotion_completion_mismatch':
+                raise
+        else:
+            raise ValueError('recovery_ci_preservation_sibling_accepted')
+        with recovery.connect(target) as connection:
+            read_at = connection.execute('SELECT read_at FROM pubburi.t_user_notification WHERE id=%s', (notification_id,)).fetchone()[0]
+            changed = connection.execute("UPDATE pubburi.t_user_notification SET read_at=read_at+interval '1 second' WHERE id=%s", (notification_id,))
+            count = connection.execute('SELECT count(*) FROM pubburi.t_user_notification').fetchone()[0]
+            if read_at is None or changed.rowcount != 1 or count != manifest['state']['tables']['t_user_notification']['rows']:
+                raise ValueError('recovery_ci_preservation_notification_fixture_changed')
+        try:
+            recovery.verify_preserved(*preservation)
+        except ValueError as error:
+            if str(error) != 'postgresql_recovery_restored_target_changed':
+                raise
+        else:
+            raise ValueError('recovery_ci_preservation_changed_notification_accepted')
+        finally:
+            with recovery.connect(target) as connection:
+                connection.execute('UPDATE pubburi.t_user_notification SET read_at=%s WHERE id=%s', (read_at, notification_id))
+        if recovery.verify_preserved(*preservation) != verified or pg.private_file(selector, 16384) != source_selection:
+            raise ValueError('recovery_ci_preservation_changed_selection')
         # Source remains precisely frozen, including raw bytes, epoch, claim/ACK and sequence gaps.
         with recovery.connect(control) as connection:
             if json.loads(json.dumps(recovery.state(connection)))!=manifest['state']:raise ValueError('recovery_ci_source_mutated')
@@ -344,6 +380,7 @@ def run(environ, runtime, recovery_control, selected_release):
         'cart_quantities_revision_and_merge_checkout_receipts_preserved':True,
         'cart_retired_nonce_blocks_late_post_after_restore':True,
         'internal_notifications_snapshots_and_first_read_time_preserved':True,
+        'preservation_rejects_sibling_copy_and_same_count_notification_change':True,
         'explicit_promotion_and_stale_source_reactivation_guard_verified':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),

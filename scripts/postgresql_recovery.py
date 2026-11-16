@@ -389,6 +389,61 @@ def promotion_fence(connection, env, *, source):
         reject('selected_source_connect_granted')
 
 
+def verify_restore_receipt(local, target, restore_dir, completion_pin, manifest_pin, source_id, primary):
+    restored = private.private_directory(restore_dir, local)
+    completion = private.strict_json(private.private_file(restored / 'completed.json', 8192))
+    raw = private.private_file(restored / 'promotion.json', 8192)
+    receipt = private.strict_json(raw)
+    if (not re.fullmatch(r'[0-9a-f]{64}', completion_pin or '')
+            or hashlib.sha256(raw).hexdigest() != completion_pin
+            or not isinstance(receipt, dict) or type(receipt.get('schema_version')) is not int
+            or receipt != promotion_receipt(target, manifest_pin, source_id)
+            or completion != {'status': 'verified', 'manifest_sha256': manifest_pin, 'source_id': source_id,
+                'tables': len(primary), 'sequences': len(SEQUENCES)}):
+        reject('promotion_completion_mismatch')
+
+
+def verify_locked_copy(connection, primary, state_at_backup, reason):
+    connection.execute('BEGIN ISOLATION LEVEL READ COMMITTED')
+    lock_business_tables(connection, primary)
+    if json.loads(json.dumps(state(connection))) != state_at_backup:
+        reject(reason)
+
+
+def verify_preserved(local, source, target, archive_dir, manifest_pin, restore_dir, completion_pin):
+    with local.operation_lock():
+        previous = private.selection_record(local)
+        if previous is None:
+            reject('selected_source_required')
+        selected = private.configuration(previous['pg_config'], previous['config_sha256'])
+        manifest, _ = approved_archive(archive_dir, manifest_pin, local)
+        expected = manifest['state']
+        primary = schema_primary(expected, 'manifest_schema_changed')
+        if (database_identity(source) != database_identity(selected)
+                or source['PUBBURI_PG_USER'] == selected['PUBBURI_PG_USER']
+                or source['PUBBURI_PG_DB_NAME'] != manifest['source_database']
+                or source['PUBBURI_PG_DB_NAME'] == target['PUBBURI_PG_DB_NAME']
+                or selected['PUBBURI_JPA_SOURCE_ID'] != expected['source_id']):
+            reject('preservation_source_mismatch')
+        verify_restore_receipt(local, target, restore_dir, completion_pin, manifest_pin, expected['source_id'], primary)
+        with ExitStack() as stack:
+            checks = []
+            for env, reason in ((source, 'selected_source_changed'), (target, 'restored_target_changed')):
+                verify_owned_postgres(env, child_env=private.base_environment())
+                connection = stack.enter_context(connect(env))
+                promotion_fence(connection, env, source=False)
+                verify_locked_copy(connection, primary, expected, reason)
+                checks.append((connection, env))
+            if private.selection_record(local) != previous:
+                reject('selected_source_changed')
+            private.configuration(previous['pg_config'], previous['config_sha256'])
+            for connection, env in checks:
+                promotion_fence(connection, env, source=False)
+            for connection, _ in checks:
+                connection.rollback()
+        return {'status': 'preservation_verified', 'tables': len(primary), 'sequences': len(SEQUENCES)}
+
+
 def promote(local, source, target, archive_dir, manifest_pin, restore_dir, completion_pin, pg_config, release_dir):
     with local.operation_lock():
         previous = private.selection_record(local)
@@ -411,17 +466,7 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
                 or source['PUBBURI_PG_USER'] == selected['PUBBURI_PG_USER']
                 or target['PUBBURI_PG_USER'] == runtime['PUBBURI_PG_USER']):
             reject('promotion_identity_mismatch')
-        restored = private.private_directory(restore_dir, local)
-        completion = private.strict_json(private.private_file(restored / 'completed.json', 8192))
-        raw = private.private_file(restored / 'promotion.json', 8192)
-        receipt = private.strict_json(raw)
-        if (not re.fullmatch(r'[0-9a-f]{64}', completion_pin or '')
-                or hashlib.sha256(raw).hexdigest() != completion_pin
-                or not isinstance(receipt, dict) or type(receipt.get('schema_version')) is not int
-                or receipt != promotion_receipt(target, manifest_pin, source_id)
-                or completion != {'status': 'verified', 'manifest_sha256': manifest_pin, 'source_id': source_id,
-                    'tables': len(primary), 'sequences': len(SEQUENCES)}):
-            reject('promotion_completion_mismatch')
+        verify_restore_receipt(local, target, restore_dir, completion_pin, manifest_pin, source_id, primary)
         for env in (source, target, runtime):
             verify_owned_postgres(env, child_env=private.base_environment())
 
@@ -431,10 +476,8 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
                 connection = connect(env)
                 stack.callback(connection.close)
                 promotion_fence(connection, env, source=is_source)
-                connection.execute('BEGIN ISOLATION LEVEL READ COMMITTED')
-                lock_business_tables(connection, primary)
-                if json.loads(json.dumps(state(connection))) != state_at_backup:
-                    reject('selected_source_changed' if is_source else 'restored_target_changed')
+                verify_locked_copy(connection, primary, state_at_backup,
+                                   'selected_source_changed' if is_source else 'restored_target_changed')
                 connections.append((connection, env, is_source))
             target_connection = connections[-1][0]
             if target_connection.execute("""SELECT NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole
@@ -453,7 +496,7 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('backup','restore','promote'))
+    parser.add_argument('command', choices=('backup','restore','verify-preserved','promote'))
     parser.add_argument('--config', required=True)
     parser.add_argument('--output-dir')
     parser.add_argument('--archive-dir')
@@ -468,7 +511,13 @@ def main():
         promotion_args = (args.target_config, args.restore_dir, args.expected_restore_sha256,
                           args.pg_config, args.release_dir)
         with cleanup_on_termination():
-            if args.command == 'promote':
+            if args.command == 'verify-preserved':
+                if (args.output_dir or args.pg_config or args.release_dir or not all((
+                        args.target_config, args.archive_dir, args.expected_sha256, args.restore_dir, args.expected_restore_sha256))):
+                    reject('explicit_preservation_arguments_required')
+                result = verify_preserved(local_stack, configuration(args.config), configuration(args.target_config),
+                    args.archive_dir, args.expected_sha256, args.restore_dir, args.expected_restore_sha256)
+            elif args.command == 'promote':
                 if args.output_dir or not all((*promotion_args, args.archive_dir, args.expected_sha256)):
                     reject('explicit_promotion_arguments_required')
                 promote(local_stack, configuration(args.config), configuration(args.target_config),
@@ -494,7 +543,9 @@ def main():
     except Exception:
         # Neither DB errors/credentials nor source rows are public diagnostics. Keep the
         # archive and started/partial target for operator inspection; never retry/reset it.
-        print(json.dumps({'status':'failed','error_code':'postgresql_recovery_rejected_or_completion_unknown'}))
+        code = ('postgresql_recovery_preservation_rejected' if args.command == 'verify-preserved'
+                else 'postgresql_recovery_rejected_or_completion_unknown')
+        print(json.dumps({'status':'failed','error_code':code}))
         return 2
 
 

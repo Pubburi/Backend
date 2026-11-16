@@ -257,6 +257,11 @@ claim/ACK·Flyway/receipt와 소비된 ID를 초기화하지 않는다. V3/V4/V5
 
 ### 검증한 복구본을 기본 로컬 대상으로 승계
 
+MySQL 역이관을 준비할 때는 선택된 PostgreSQL 원본과 복구본의 현재 상태를 먼저 대조할 수 있다.
+`postgresql_recovery.py verify-preserved`에 아래 승계 명령의 `--pg-config`와 `--release-dir`를 뺀
+인수를 전달한다. 쓰기를 중단한 두 DB를 승인 백업의 전체 행·시퀀스와 대조한다. 같은 source UUID를
+가진 다른 복사본이나 복구 후 바뀐 PostgreSQL 전용 데이터도 거절한다. 원본 선택은 그대로 유지된다.
+
 `restore`가 남긴 `completed.json`과 `promotion.json`을 사용한다. 후자는 승인 manifest와 복구 대상의
 CID·label·DB명·marker를 결속한다. 운영자가 두 SHA256을 확인하고 별도 승계를 실행한다.
 
