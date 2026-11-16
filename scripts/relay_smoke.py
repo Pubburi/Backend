@@ -94,8 +94,8 @@ def exercise(http, endpoint, private, environ):
                 raise RuntimeError("Relay fixture schema is not empty; refusing to adopt or reset it")
     finally:
         connection.close()
-    ddl = Path("docs/migrations/007-product-search-outbox.sql").read_text().split("-- Current state only:")[0]
-    ddl += "\n" + Path("docs/migrations/008-search-outbox-delivery.sql").read_text()
+    ddl = Path("tools/mysql-baseline/migrations/007-product-search-outbox.sql").read_text().split("-- Current state only:")[0]
+    ddl += "\n" + Path("tools/mysql-baseline/migrations/008-search-outbox-delivery.sql").read_text()
     subprocess.run(["docker", "exec", "-i", "-e", "MYSQL_PWD", queue_env["PUBBURI_SMOKE_CONTAINER_ID"],
         "mysql", "-u" + queue_env["PUBBURI_DB_USER"], "--default-character-set=utf8mb4", queue_env["PUBBURI_DB_NAME"]],
         input=ddl, capture_output=True, text=True, check=True,

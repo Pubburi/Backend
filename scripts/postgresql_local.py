@@ -22,12 +22,12 @@ from jpa_smoke import defer_termination, verify_jar as validate_jar, verify_open
 REQUIRED = frozenset(('PUBBURI_PG_URL', 'PUBBURI_PG_DB_NAME', 'PUBBURI_PG_USER',
     'PUBBURI_PG_PASSWORD', 'PUBBURI_PG_RUN_TOKEN', 'PUBBURI_PG_CA',
     'PUBBURI_PG_CONTAINER_ID', 'PUBBURI_PG_VALIDATION_LABEL', 'PUBBURI_JPA_SOURCE_ID',
-    'PUBBURI_JPA_REHEARSAL', 'PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT',
-    'PUBBURI_RECOMMENDATION_PORT'))
-OPTIONAL = frozenset(('PUBBURI_LOG_LEVEL', 'PUBBURI_RECOMMENDATION_BASE_URL',
-    'PUBBURI_SEARCH_ENABLED', 'PUBBURI_SEARCH_ENDPOINT', 'PUBBURI_SEARCH_INDEX', 'PUBBURI_SEARCH_READ_ALIAS',
-    'PUBBURI_CONTENT_CATALOG_PATH', 'PUBBURI_CONTENT_CATALOG_SHA256',
-    'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED',
+    'PUBBURI_JPA_REHEARSAL', 'PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT'))
+OPTIONAL = frozenset(('PUBBURI_LOG_LEVEL', 'PUBBURI_SEARCH_ENABLED', 'PUBBURI_SEARCH_ENDPOINT',
+    'PUBBURI_SEARCH_INDEX', 'PUBBURI_SEARCH_READ_ALIAS'))
+# Existing pinned runtime files may contain settings for the retired provider.
+LEGACY_SETTINGS = frozenset(('PUBBURI_RECOMMENDATION_PORT', 'PUBBURI_RECOMMENDATION_BASE_URL',
+    'PUBBURI_CONTENT_CATALOG_PATH', 'PUBBURI_CONTENT_CATALOG_SHA256', 'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED',
     'PUBBURI_REVIEWED_CATALOG_PATH', 'PUBBURI_REVIEWED_CATALOG_SHA256',
     'PUBBURI_REVIEWED_MAPPING_PATH', 'PUBBURI_REVIEWED_MAPPING_SHA256'))
 INPUTS = ('pom.xml', 'mvnw', '.mvn', 'src/main', 'tools/postgresql-migration/src/main/resources')
@@ -85,6 +85,8 @@ def configuration(path, expected_sha256=None):
     if not isinstance(value, dict) or set(value) != {'schema_version', 'environment'} or type(value['schema_version']) is not int or value['schema_version'] != 1:
         reject()
     env = value['environment']
+    if isinstance(env, dict):
+        env = {key: value for key, value in env.items() if key not in LEGACY_SETTINGS}
     if (not isinstance(env, dict) or not REQUIRED <= set(env) or set(env) - REQUIRED - OPTIONAL
             or any(not isinstance(v, str) or not v or '\x00' in v for v in env.values())):
         reject()
@@ -92,19 +94,17 @@ def configuration(path, expected_sha256=None):
         reject()
     if not re.fullmatch(r'[A-Za-z0-9_-]{12,100}', env['PUBBURI_PG_RUN_TOKEN']):
         reject()
-    ports = [env[k] for k in ('PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT')]
-    if len(set(ports)) != 3 or any(not re.fullmatch(r'[1-9][0-9]{0,4}', p) or int(p) > 65535 for p in ports):
+    ports = [env[k] for k in ('PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT')]
+    if len(set(ports)) != 2 or any(not re.fullmatch(r'[1-9][0-9]{0,4}', p) or int(p) > 65535 for p in ports):
         reject()
-    for key in ('PUBBURI_RECOMMENDATION_BASE_URL', 'PUBBURI_SEARCH_ENDPOINT'):
-        if key in env:
-            url = urlsplit(env[key])
-            if (url.scheme != 'http' or url.hostname not in ('127.0.0.1', '::1')
-                    or not url.port or url.username is not None or url.password is not None
-                    or url.path not in ('', '/') or url.query or url.fragment):
-                reject()
-    for key in ('PUBBURI_SEARCH_ENABLED', 'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED'):
-        if key in env and env[key] not in ('true', 'false'):
+    if 'PUBBURI_SEARCH_ENDPOINT' in env:
+        url = urlsplit(env['PUBBURI_SEARCH_ENDPOINT'])
+        if (url.scheme != 'http' or url.hostname not in ('127.0.0.1', '::1')
+                or not url.port or url.username is not None or url.password is not None
+                or url.path not in ('', '/') or url.query or url.fragment):
             reject()
+    if 'PUBBURI_SEARCH_ENABLED' in env and env['PUBBURI_SEARCH_ENABLED'] not in ('true', 'false'):
+        reject()
     if 'PUBBURI_SEARCH_READ_ALIAS' in env and env['PUBBURI_SEARCH_READ_ALIAS'] != 'pubburi-products-v1-read':
         reject()
     return dict(env)
@@ -291,7 +291,7 @@ def package(local, destination):
         write_json(directory / 'manifest.json', {'schema_version': 1, 'completed': True,
             'provider': 'JPA_POSTGRESQL_REHEARSAL', 'source_commit': commit,
             'source_files': before, 'jar_sha256': sha(directory / 'runtime.jar'),
-            'java_feature': 17, 'postgresql_version': '18.6', 'api_paths': 56, 'api_operations': 70,
+            'java_feature': 17, 'postgresql_version': '18.6', 'api_paths': 48, 'api_operations': 60,
             'preparation': 'database-independent-maven-verify'})
         print('PostgreSQL release packaged; no database was accessed or prepared.', flush=True)
 
@@ -304,7 +304,7 @@ def release(path, local):
     if (not isinstance(value, dict) or set(value) != keys or value['schema_version'] != 1
             or value['completed'] is not True or value['provider'] != 'JPA_POSTGRESQL_REHEARSAL'
             or value['java_feature'] != 17 or value['postgresql_version'] != '18.6'
-            or value['api_paths'] != 56 or value['api_operations'] != 70
+            or value['api_paths'] != 48 or value['api_operations'] != 60
             or value['preparation'] != 'database-independent-maven-verify'
             or not re.fullmatch(r'[0-9a-f]{40}', value['source_commit'])
             or value['source_files'] != source_files(local)):
@@ -327,14 +327,10 @@ def doctor(local, config, release_path, backend_only):
     base = java17(local)
     verify_owned_postgres(env, child_env=base)
     if not backend_only:
-        for repo in (local.FRONTEND, local.RECOMMENDATION):
-            if not (repo / '.git').exists():
-                reject()
-        if not (local.FRONTEND / 'node_modules').is_dir() or not (local.RECOMMENDATION / '.venv').is_dir():
+        if not (local.FRONTEND / '.git').exists() or not (local.FRONTEND / 'node_modules').is_dir():
             reject()
         if not local.run(['node', '--version'], env=base, capture=True).stdout.startswith('v24.'):
             reject()
-        local.run(['uv', 'python', 'find', '--no-python-downloads', '3.12'], cwd=local.RECOMMENDATION, env=base, capture=True)
     print('PostgreSQL release, Java 17 and owned container passed; DB startup guards run in the application.', flush=True)
     return env, directory, manifest
 
@@ -357,15 +353,12 @@ def api_ready(base_url):
 
 def child_environments(env):
     base = base_environment()
-    backend = dict(base, **{k: v for k, v in env.items() if k not in (
-        'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT',
-        'PUBBURI_PG_CONTAINER_ID', 'PUBBURI_PG_VALIDATION_LABEL')})
+    backend = dict(base, **{key: value for key, value in env.items() if key not in LEGACY_SETTINGS and key not in (
+        'PUBBURI_FRONTEND_PORT', 'PUBBURI_PG_CONTAINER_ID', 'PUBBURI_PG_VALIDATION_LABEL')})
     backend['PUBBURI_JPA_PORT'] = env['PUBBURI_SERVER_PORT']
-    backend.setdefault('PUBBURI_RECOMMENDATION_BASE_URL', 'http://127.0.0.1:' + env['PUBBURI_RECOMMENDATION_PORT'])
     frontend = dict(base, PUBBURI_FRONTEND_PORT=env['PUBBURI_FRONTEND_PORT'],
                     VITE_API_PROXY_TARGET='http://127.0.0.1:' + env['PUBBURI_SERVER_PORT'])
-    recommendation = dict(base, PUBBURI_RECOMMENDATION_PORT=env['PUBBURI_RECOMMENDATION_PORT'])
-    return backend, frontend, recommendation
+    return backend, frontend
 
 
 def start(local, args):
@@ -384,7 +377,7 @@ def start(local, args):
             elif cutover_config:
                 raise RuntimeError('--cutover-config is only for the first PostgreSQL selection, before PG business writes.')
         with ExitStack() as stack:
-            ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT', 'PUBBURI_RECOMMENDATION_PORT']
+            ports = ['PUBBURI_SERVER_PORT'] if args.backend_only else ['PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT']
             for key in ports:
                 with socket.socket() as candidate:
                     # Match Tomcat's restart semantics without accepting a LISTEN socket.
@@ -395,7 +388,7 @@ def start(local, args):
             os.chmod(run_dir / 'runtime.jar', 0o600)
             if sha(run_dir / 'runtime.jar') != manifest['jar_sha256']:
                 reject()
-            backend_env, frontend_env, recommendation_env = child_environments(env)
+            backend_env, frontend_env = child_environments(env)
             children = []
             def spawn(name, cwd, command, child_env):
                 log = stack.enter_context((run_dir / (name + '.log')).open('x'))
@@ -424,7 +417,6 @@ def start(local, args):
                 time.sleep(0.25)
             if not args.backend_only:
                 spawn('frontend', local.FRONTEND, ['./scripts/dev.sh'], frontend_env)
-                spawn('recommendation', local.RECOMMENDATION, ['./scripts/dev.sh'], recommendation_env)
                 pending = {k: v for k, v in local.endpoints(env).items() if k != 'backend'}
                 while pending:
                     if any(c.poll() is not None for c in children) or time.monotonic() >= deadline:
@@ -438,7 +430,7 @@ def start(local, args):
                     if pending:
                         time.sleep(0.25)
                 local.probe('backend', 'http://127.0.0.1:' + env['PUBBURI_FRONTEND_PORT'] + '/api/products?page=1&size=1')
-            print('PostgreSQL applications ready (56 paths / 70 operations); database retained on every exit.', flush=True)
+            print('PostgreSQL applications ready (48 paths / 60 operations); database retained on every exit.', flush=True)
             if args.command == 'up':
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)

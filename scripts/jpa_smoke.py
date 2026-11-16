@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import re
 import signal
-import socket
 import subprocess
 import time
 import urllib.error
@@ -21,7 +20,7 @@ from urllib.parse import urlsplit
 
 from postgresql_schema import ROOT, verify_owned_postgres
 from search_index import _DeadlineConnection
-from api_smoke import verify_content_recommendation_openapi, verify_similar_products_openapi, verify_product_filter_openapi, verify_product_suggestions_openapi, verify_order_recommendation_openapi
+from api_smoke import verify_product_filter_openapi, verify_product_suggestions_openapi
 
 
 @contextmanager
@@ -104,7 +103,7 @@ def verify_jar(path):
         raise ValueError("jpa_runtime_provider_missing")
     if any(name.startswith("BOOT-INF/lib/") and any(bad in name.lower() for bad in ("mybatis","mysql-connector","h2-")) for name in names):
         raise ValueError("jpa_runtime_legacy_driver_rejected")
-    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","JpaSessionController.class","UnavailableRecommendationFeedbackController.class","UnavailableNotebookController.class","UnavailableCartController.class","UnavailableNotificationsController.class","UnavailableOrderRecommendationController.class")) or any(name.startswith("BOOT-INF/classes/mappers/") for name in names):
+    if any(name.endswith(suffix) for name in names for suffix in ("ServerApplication.class","JpaSessionController.class","UnavailableNotebookController.class","UnavailableCartController.class","UnavailableNotificationsController.class")) or any(name.startswith("BOOT-INF/classes/mappers/") for name in names):
         raise ValueError("jpa_runtime_unregistered_scope_rejected")
     if not any("spring-data-jpa-" in name for name in names) or not any("hibernate-core-" in name for name in names):
         raise ValueError("jpa_runtime_provider_missing")
@@ -112,19 +111,16 @@ def verify_jar(path):
 
 def verify_openapi_scope(docs):
     if set(docs["paths"])!={"/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/themes","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
+            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/themes","/api/products/{id}","/api/products/{id}/features",
             "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/exploration","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/orders/{id}/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"}:raise ValueError("jpa_runtime_route_scope_changed")
+            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/users/me/profile","/api/users/me/password","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"}:raise ValueError("jpa_runtime_route_scope_changed")
     operations=sum(method in {"get","post","put","patch","delete","head","options","trace"} for path in docs["paths"].values() for method in path)
-    if operations!=70:raise ValueError("jpa_runtime_operation_scope_changed")
-    verify_content_recommendation_openapi(docs)
-    verify_similar_products_openapi(docs)
+    if operations!=60:raise ValueError("jpa_runtime_operation_scope_changed")
     verify_product_filter_openapi(docs)
     verify_product_suggestions_openapi(docs)
-    verify_order_recommendation_openapi(docs)
     return operations
 
 
@@ -161,7 +157,7 @@ def run(environ):
     state={"jar_sha256":hashlib.sha256(immutable.read_bytes()).hexdigest(),"processes":[],"phase":"starting"}
     checkpoint=directory/"owned.json"
     def save():checkpoint.write_text(json.dumps(state));checkpoint.chmod(0o600)
-    processes=[];deadline=time.monotonic()+120;unavailable_upstream=None
+    processes=[];deadline=time.monotonic()+120
     def stop(process):
         if process.poll() is None:
             process.terminate()
@@ -172,8 +168,6 @@ def run(environ):
         save()
     def start(name,extra=None,expect_failure=None):
         env=child_environment(environ);env["PUBBURI_JPA_PORT"]="0"
-        # Keep the owned fallback target refused without borrowing a shared recommendation port.
-        env["PUBBURI_RECOMMENDATION_BASE_URL"]="http://127.0.0.1:"+str(unavailable_upstream.getsockname()[1])
         if extra:env.update(extra)
         log=directory/(name+".log");stream=log.open("w");log.chmod(0o600)
         java=str(Path(env["JAVA_HOME"])/"bin/java") if env.get("JAVA_HOME") else "java"
@@ -202,28 +196,13 @@ def run(environ):
     def login(c,base,role):
         status,body=request(c,base,"POST","/api/auth/login",{"id":environ["PUBBURI_JPA_"+role+"_ID"],"pass":environ["PUBBURI_JPA_"+role+"_PASSWORD"]});expect(status,200)
         if any(key in json.dumps(body) for key in ("password_hash","authEpoch","auth_epoch")):raise ValueError("jpa_runtime_private_field_exposed")
-    def default_selection(base):
-        status,page=request(client(),base,"GET","/api/products?size=1");expect(status,200)
-        for size in (1,4,12):
-            status,result=request(client(),base,"GET","/api/recommendations/default?size="+str(size));expect(status,200)
-            data=result["data"];ids=[p["id"] for p in data.get("items",[])]
-            if set(data)!={"items","source"} or data["source"]!="FALLBACK" or len(ids)!=min(size,page["data"]["total"]) or ids!=sorted(set(ids)):
-                raise ValueError("jpa_runtime_default_fallback_changed")
-            for product in data["items"]:
-                status,current=request(client(),base,"GET","/api/products/"+str(product["id"]));expect(status,200)
-                if product!=current["data"]:raise ValueError("jpa_runtime_default_current_product_changed")
-        for size in ("0","13","1.5","2147483648"):
-            expect(request(client(),base,"GET","/api/recommendations/default?size="+size)[0],400)
     try:
-        unavailable_upstream=socket.socket();unavailable_upstream.bind(("127.0.0.1",0))
-        state["unavailable_upstream_port"]=unavailable_upstream.getsockname()[1];save()
         # Each rejection is checked against a specific guard, not merely any process failure.
         start("implicit",{**failure_env,"PUBBURI_JPA_REHEARSAL":"0"},"jpa_rehearsal_explicit_fixture_required")
         start("auto-ddl",{**failure_env,"SPRING_JPA_HIBERNATE_DDL_AUTO":"create"},"jpa_rehearsal_schema_policy_rejected")
         start("wrong-marker",{**failure_env,"PUBBURI_PG_RUN_TOKEN":"authored-wrong-marker"},"jpa_rehearsal_fixture_or_schema_rejected")
         start("wrong-source",{**failure_env,"PUBBURI_JPA_SOURCE_ID":"00000000-0000-4000-8000-000000000000"},"jpa_rehearsal_fixture_or_schema_rejected")
         first,base=start("normal");anonymous=client();admin=client();ordinary=client()
-        default_selection(base)
         expect(request(anonymous,base,"GET","/api/markets")[0],200)
         payload={"name":"Authored packaged JPA market","latitude":37.123456789,"longitude":127.987654321,"image":"authored.png"}
         expect(request(anonymous,base,"POST","/api/admin/markets",payload)[0],401)
@@ -273,19 +252,6 @@ def run(environ):
         expect(request(account,base,"PUT",preference_path,{"surveyStatus":"SKIPPED","softPreferences":{"tasteTags":[]}})[0],400)
         status,retained_preference=request(account,base,"GET",preference_path);expect(status,200)
         if retained_preference["data"]!=expected_preference:raise ValueError("jpa_runtime_invalid_preference_mutated")
-        phrase_path="/api/users/me/search-phrases"
-        expect(request(anonymous,base,"POST",phrase_path,{})[0],401)
-        status,phrases=request(account,base,"POST",phrase_path,{"searchOptInFields":["tasteTags"],"limit":5});expect(status,200)
-        if phrases["data"]!={"source":"UNAVAILABLE","result":None}:raise ValueError("jpa_runtime_search_phrase_failure_broadened")
-        expect(request(account,base,"POST",phrase_path+"?userId=other",{})[0],400)
-        expect(request(account,base,"POST",phrase_path,{"preferences":{}})[0],400)
-        if request(account,base,"GET",preference_path)[1]["data"]!=expected_preference:raise ValueError("jpa_runtime_search_phrase_mutated_preferences")
-        content_path="/api/users/me/recommendations/content"
-        expect(request(anonymous,base,"POST",content_path,{})[0],401)
-        status,content=request(account,base,"POST",content_path,{});expect(status,200)
-        if content["data"]!={"source":"UNAVAILABLE","catalogScope":"REVIEWED_DEMO","result":None,"products":[]}:raise ValueError("jpa_runtime_unapproved_content_catalog_sent")
-        expect(request(account,base,"POST",content_path,{"catalog":[]})[0],400)
-        expect(request(account,base,"POST",content_path+"?userId=other",{})[0],400)
         if market_id<int(environ.get("PUBBURI_JPA_EXPECTED_MARKET_NEXT","1")):raise ValueError("jpa_runtime_identity_reused")
         if set(created["data"])!={"id","name","latitude","longitude","image"}:raise ValueError("jpa_runtime_market_shape_changed")
         payload["name"]="Authored packaged edited";expect(request(admin,base,"PUT","/api/admin/markets/"+str(market_id),payload)[0],200)
@@ -304,11 +270,8 @@ def run(environ):
             status,features=request(anonymous,base,"GET","/api/products/"+str(first_product["id"])+"/features");expect(status,200)
             if set(features["data"])!={"productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"} or features["data"]["productId"]!=first_product["id"]:
                 raise ValueError("jpa_runtime_product_feature_shape_changed")
-            status,similar=request(anonymous,base,"GET",f"/api/products/{first_product['id']}/similar");expect(status,200)
-            if similar["data"]!={"items":[]}:raise ValueError("jpa_runtime_unapproved_similar_catalog_sent")
         expect(request(anonymous,base,"GET","/api/products/0")[0],404)
         expect(request(anonymous,base,"GET","/api/products/0/features")[0],404)
-        expect(request(anonymous,base,"GET","/api/products/0/similar")[0],404)
         expect(request(anonymous,base,"GET","/api/products?page=2147483647&size=12")[0],400)
         expect(request(anonymous,base,"GET","/api/products?minAbvPercent=5.555")[0],400)
         authored_product={"name":"ci_jpa_packaged_"+uuid.uuid4().hex,"type":"증류주","price":1200,"img":"authored.png","abv":15.5,"orderCount":0}
@@ -330,10 +293,6 @@ def run(environ):
             if present["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_favorite_put_changed")
         status,admin_favorite=request(admin,base,"GET",favorite_path);expect(status,200)
         if admin_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_owner_leaked")
-        feedback_path="/api/users/me/recommendations/feedback/"+str(product_id)
-        feedback_headers={"X-Pubburi-Feedback-Owner":environ["PUBBURI_JPA_USER_ID"]}
-        status,saved_feedback=request(ordinary,base,"PUT",feedback_path,{"feedback":"NOT_INTERESTED"},headers=feedback_headers);expect(status,200)
-        if saved_feedback["data"]!={"productId":product_id,"feedback":"NOT_INTERESTED"}:raise ValueError("jpa_runtime_feedback_write_changed")
         authored_comment={"productId":product_id,"rating":3.7,"comment":"Authored packaged review","tasteTags":[" SWEET ","dry,fruit\none"]}
         expect(request(anonymous,base,"POST","/api/comments",authored_comment)[0],401)
         status,created_comment=request(ordinary,base,"POST","/api/comments",authored_comment);expect(status,201);comment_id=created_comment["data"]["id"]
@@ -363,7 +322,6 @@ def run(environ):
         operations=verify_openapi_scope(docs)
         stop(first)
         second,base=start("restart");status,persisted=request(client(),base,"GET","/api/markets/"+str(market_id));expect(status,200)
-        default_selection(base)
         status,restarted_tags=request(client(),base,"GET","/api/products/"+str(product_id)+"/comments?includeTasteTags=true");expect(status,200)
         if restarted_tags["data"]["items"]!=[tagged_comment]:raise ValueError("jpa_runtime_restart_lost_comment_tags")
         if persisted["data"]["name"]!=payload["name"]:raise ValueError("jpa_runtime_restart_lost_data")
@@ -387,8 +345,6 @@ def run(environ):
         login(ordinary,base,"USER")
         status,persisted_favorite=request(ordinary,base,"GET",favorite_path);expect(status,200)
         if persisted_favorite["data"]!={"productId":product_id,"favorited":True}:raise ValueError("jpa_runtime_restart_lost_favorite")
-        status,persisted_feedback=request(ordinary,base,"GET",feedback_path,headers=feedback_headers);expect(status,200)
-        if persisted_feedback["data"]!=saved_feedback["data"]:raise ValueError("jpa_runtime_restart_lost_feedback")
         status,favorites=request(ordinary,base,"GET","/api/users/me/favorites");expect(status,200)
         if favorites["data"]["items"]!=[persisted_product["data"]] or set(favorites["data"]["items"][0])!=product_fields:raise ValueError("jpa_runtime_favorite_current_product_changed")
         for _ in range(2):expect(request(ordinary,base,"DELETE",favorite_path)[0],200)
@@ -408,8 +364,6 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/products/"+str(product_id))[0],200)
         expect(request(client(),base,"GET","/api/products/"+str(product_id))[0],404)
         expect(request(client(),base,"GET","/api/products/"+str(product_id)+"/features")[0],404)
-        status,deleted_feedback=request(ordinary,base,"GET",feedback_path,headers=feedback_headers);expect(status,200)
-        if deleted_feedback["data"]!={"productId":product_id,"feedback":None}:raise ValueError("jpa_runtime_feedback_parent_cascade_failed")
         status,deleted_favorite=request(ordinary,base,"GET",favorite_path);expect(status,200)
         if deleted_favorite["data"]["favorited"]:raise ValueError("jpa_runtime_favorite_parent_cascade_failed")
         status,empty_favorites=request(ordinary,base,"GET","/api/users/me/favorites");expect(status,200)
@@ -434,8 +388,7 @@ def run(environ):
         expect(request(admin,base,"DELETE","/api/admin/users/"+account_id)[0],200)
         expect(request(admin,base,"POST","/api/auth/logout")[0],200);expect(request(admin,base,"GET","/api/auth/me")[0],401)
         state["phase"]="passed";save()
-        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":56,"registered_api_operations":operations,
-            "public_default_current_fallback":True,
+        return {"status":"passed","provider":"JPA_POSTGRESQL_REHEARSAL","legacy_runtime_dependencies":False,"registered_api_paths":48,"registered_api_operations":operations,
             "self_profile_password_and_session_rotation":True,
             "private_preferences_and_lifecycle":True,
             "private_favorites_and_lifecycle":True,
@@ -449,8 +402,6 @@ def run(environ):
             cleanup_failed=False
             try:cleanup_owned(processes,stop)
             except Exception:cleanup_failed=True
-            if unavailable_upstream is not None:
-                unavailable_upstream.close();state["unavailable_upstream_closed"]=True
             state["all_owned_processes_stopped"]=all(p.poll() is not None for p,_ in processes)
             try:
                 save()

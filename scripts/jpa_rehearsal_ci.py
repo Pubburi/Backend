@@ -81,8 +81,8 @@ def local_release(environ, cutover_environment):
     local.operation_lock = lambda: local_stack.operation_lock(directory)
     release = directory / 'release'
     env = {key: environ[key] for key in pg.REQUIRED if not key.endswith('_PORT')}
-    with socket.socket() as one, socket.socket() as two, socket.socket() as three:
-        for listener, key in zip((one,two,three), ('PUBBURI_SERVER_PORT','PUBBURI_FRONTEND_PORT','PUBBURI_RECOMMENDATION_PORT')):
+    with socket.socket() as one, socket.socket() as two:
+        for listener, key in zip((one,two), ('PUBBURI_SERVER_PORT','PUBBURI_FRONTEND_PORT')):
             listener.bind(('127.0.0.1',0))
             env[key] = str(listener.getsockname()[1])
     config = directory / 'config.json'
@@ -175,8 +175,6 @@ def runtime_grants(runtime):
             "GRANT SELECT,INSERT,DELETE ON pubburi.t_comment_taste_tag TO "+runtime+"; "
             "GRANT USAGE ON SEQUENCE pubburi.t_comment_id_seq TO "+runtime+"; "
             "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_favorite TO "+runtime+"; "
-            "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_recommendation_feedback TO "+runtime+"; "
-            "GRANT UPDATE(feedback) ON pubburi.t_user_recommendation_feedback TO "+runtime+"; "
             "GRANT SELECT,INSERT,DELETE ON pubburi.t_user_notebook TO "+runtime+"; "
             "GRANT UPDATE(experience,rating,taste_tags,aroma_tags,memo,version,updated_at) ON pubburi.t_user_notebook TO "+runtime+"; "
             "GRANT SELECT,INSERT ON pubburi.t_user_cart TO "+runtime+"; GRANT UPDATE(version,updated_at) ON pubburi.t_user_cart TO "+runtime+"; "
@@ -195,8 +193,8 @@ def run(environ,snapshot,directory,*,recovery_control=None):
     metadata=json.loads((snapshot/"snapshot.json").read_text());receipt=json.loads((snapshot/"receipt.json").read_text())
     roles={"PUBBURI_JPA_ADMIN_ID":"ci_jpa_"+secrets.token_hex(8)+"_admin","PUBBURI_JPA_USER_ID":"ci_jpa_"+secrets.token_hex(8)+"_member",
            "PUBBURI_JPA_ADMIN_PASSWORD":secrets.token_hex(24),"PUBBURI_JPA_USER_PASSWORD":secrets.token_hex(24)}
-    normal=None;failure=None;recommendation=None;relay_business=None
-    purposes=["JPA","JPA_FAILURE","JPA_RECOMMENDATION"]
+    normal=None;failure=None;relay_business=None
+    purposes=["JPA","JPA_FAILURE"]
     if environ.get("PUBBURI_PG_RELAY_CI")=="1":purposes.append("RELAY_BUSINESS")
     for purpose in purposes:
         database=environ["PUBBURI_PG_"+purpose+"_DB_NAME"];token=environ["PUBBURI_PG_"+purpose+"_RUN_TOKEN"]
@@ -229,13 +227,8 @@ def run(environ,snapshot,directory,*,recovery_control=None):
                 dict(env,PUBBURI_JPA_PREPARE_FIXTURE="1"),directory/(purpose+"-fixture.log"))
         if purpose=="JPA":normal=env
         elif purpose=="JPA_FAILURE":failure=env
-        elif purpose=="JPA_RECOMMENDATION":recommendation=env
         else:relay_business=env
-    scratch=dict(recommendation,PUBBURI_JPA_RECOMMENDATION_DB_NAME=recommendation["PUBBURI_PG_DB_NAME"])
-    command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","-Dtest=JpaRecommendationPreparationTests","test"],
-            dict(scratch,PUBBURI_JPA_PREPARE_RECOMMENDATION="1"),directory/"JPA_RECOMMENDATION-empty-catalog.log")
-    normal.update(PUBBURI_JPA_FAILURE_DB_NAME=failure["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_FAILURE_RUN_TOKEN=failure["PUBBURI_PG_RUN_TOKEN"],
-                  PUBBURI_JPA_RECOMMENDATION_DB_NAME=recommendation["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_RECOMMENDATION_RUN_TOKEN=recommendation["PUBBURI_PG_RUN_TOKEN"])
+    normal.update(PUBBURI_JPA_FAILURE_DB_NAME=failure["PUBBURI_PG_DB_NAME"],PUBBURI_JPA_FAILURE_RUN_TOKEN=failure["PUBBURI_PG_RUN_TOKEN"])
     command([str(ROOT/"mvnw"),"--batch-mode","--no-transfer-progress","verify"],
             dict(normal,PUBBURI_JPA_INTEGRATION="1"),directory/"jpa-http.log")
     command(["python3","scripts/jpa_smoke.py"],dict(normal,PUBBURI_JPA_SMOKE_MUTATING="1"),directory/"jpa-packaged.log")

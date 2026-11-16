@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """Check tracked and newly added files without printing secret values."""
 
+import argparse
 import pathlib
 import re
 import subprocess
 import sys
 
 root = pathlib.Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--staged", action="store_true", help="Check only added or changed Git index contents.")
+options = parser.parse_args()
+listed = (["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"] if options.staged
+          else ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"])
 names = (
-    subprocess.check_output(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=root
-    )
+    subprocess.check_output(listed, cwd=root)
     .decode()
     .split("\0")
 )
-blocked_dirs = {".venv", "node_modules", "target", "dist", "__pycache__", ".cache", ".pubburi"}
+blocked_dirs = {".venv", ".venv-relay", "node_modules", "target", "dist", "__pycache__", ".cache", ".pubburi"}
 patterns = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
@@ -27,7 +31,7 @@ errors = []
 for name in sorted(set(filter(None, names))):
     path = pathlib.PurePosixPath(name)
     file = root / name
-    if not file.is_file():
+    if not options.staged and not file.is_file():
         continue
     secret_env = path.name == ".env" or (
         path.name.startswith(".env.") and path.name != ".env.example"
@@ -40,7 +44,8 @@ for name in sorted(set(filter(None, names))):
         errors.append(f"{name}: local secret or generated artifact must not be tracked")
         continue
     try:
-        content = file.read_text(encoding="utf-8")
+        raw = subprocess.check_output(["git", "cat-file", "blob", ":" + name], cwd=root) if options.staged else file.read_bytes()
+        content = raw.decode("utf-8")
     except UnicodeDecodeError:
         continue
     for line, value in enumerate(content.splitlines(), 1):

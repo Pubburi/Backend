@@ -22,7 +22,7 @@ def server(env, directory, name, jar):
     verify_owned_postgres(env)
     verify_jar(jar)
     log=directory/(name+'.log')
-    child=dict(child_environment(env),PUBBURI_JPA_PORT='0',PUBBURI_RECOMMENDATION_BASE_URL='http://127.0.0.1:1')
+    child=dict(child_environment(env),PUBBURI_JPA_PORT='0')
     java=str(Path(child['JAVA_HOME'])/'bin/java') if child.get('JAVA_HOME') else 'java'
     with cleanup_on_termination(),log.open('x') as output:
         log.chmod(0o600)
@@ -81,10 +81,6 @@ def run(environ, runtime, recovery_control, selected_release):
         review=request(user,base,'POST','/api/comments',{'productId':pid,'rating':3.75,'comment':'Recovery 후기\n🌾','tasteTags':['dry,fruit\none','🌾']},201)
         order=request(user,base,'POST','/api/orders',{'details':[{'productId':pid,'quantity':3}]},201)
         request(user,base,'PUT','/api/users/me/favorites/'+str(pid))
-        feedback_path='/api/users/me/recommendations/feedback/'+str(pid)
-        feedback_headers={'X-Pubburi-Feedback-Owner':actor}
-        retained_feedback=request(user,base,'PUT',feedback_path,{'feedback':'MATCHED'},headers=feedback_headers)
-        if retained_feedback!={'productId':pid,'feedback':'MATCHED'}:raise ValueError('recovery_ci_feedback_write_changed')
         notification_path='/api/users/me/notifications'
         notification_headers={'X-Pubburi-Account-Owner':actor}
         request(admin_cookie,base,'PATCH','/api/admin/orders/'+str(order['oId'])+'/complete')
@@ -124,8 +120,9 @@ def run(environ, runtime, recovery_control, selected_release):
         retained_reviews=request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')
         retained_notebook=request(user,base,'GET',notebook_path,headers=notebook_headers)
         retained_cart=request(user,base,'GET',cart_path,headers=notebook_headers)
-    # These are explicit authored control fixtures, not claims that a real relay ACK happened.
+    # Preserve historical feedback as stored data without reintroducing its former API.
     with recovery.connect(control) as connection:
+        connection.execute("INSERT INTO pubburi.t_user_recommendation_feedback(user_id,product_id,feedback) VALUES (%s,%s,'MATCHED')", (actor,pid))
         event=connection.execute('SELECT max(event_id) FROM pubburi.t_product_search_outbox WHERE product_id=%s',(pid,)).fetchone()[0]
         first=connection.execute('SELECT min(event_id) FROM pubburi.t_product_search_outbox WHERE product_id=%s',(pid,)).fetchone()[0]
         if first==event:raise ValueError('recovery_ci_distinct_delivery_states_required')
@@ -315,7 +312,6 @@ def run(environ, runtime, recovery_control, selected_release):
         if request(user,base,'GET','/api/orders/'+str(order['oId']))!=retained_order:raise ValueError('recovery_ci_order_not_restored')
         if request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')!=retained_reviews:raise ValueError('recovery_ci_reviews_not_restored')
         if not request(user,base,'GET','/api/users/me/favorites/'+str(pid))['favorited']:raise ValueError('recovery_ci_favorite_not_restored')
-        if request(user,base,'GET',feedback_path,headers=feedback_headers)!=retained_feedback:raise ValueError('recovery_ci_feedback_not_restored')
         if request(user,base,'GET',notebook_path,headers=notebook_headers)!=retained_notebook:raise ValueError('recovery_ci_notebook_not_restored')
         if request(user,base,'GET',notification_path,headers=notification_headers)!=retained_notifications:raise ValueError('recovery_ci_notifications_not_restored')
         if request(user,base,'PUT',notification_path+'/'+notification_id+'/read',headers=notification_headers)!=retained_read:raise ValueError('recovery_ci_first_read_time_changed')

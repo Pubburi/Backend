@@ -56,9 +56,6 @@ jobs:
       PUBBURI_DB_ROOT_PASSWORD: ci_root_only
       PUBBURI_DB_URL: jdbc:mysql://127.0.0.1:3306/pubburi_ci
       PUBBURI_SERVER_PORT: '9987'
-      # This job intentionally starts no recommendation server; the web API must still work.
-      PUBBURI_RECOMMENDATION_BASE_URL: http://127.0.0.1:8000
-      PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE: FALLBACK
       PUBBURI_SMOKE_RUN_TOKEN: pubburi-ci-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_RELAY_DB_CA: .pubburi/mysql-ca.pem
       # PostgreSQL is an isolated migration target; the current API baseline remains separately verified.
@@ -88,8 +85,6 @@ jobs:
       PUBBURI_PG_JPA_RUN_TOKEN: pubburi-pg-jpa-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_JPA_FAILURE_DB_NAME: pubburi_pg_jpa_failure_ci
       PUBBURI_PG_JPA_FAILURE_RUN_TOKEN: pubburi-pg-jpa-failure-${{ github.run_id }}-${{ github.run_attempt }}
-      PUBBURI_PG_JPA_RECOMMENDATION_DB_NAME: pubburi_pg_jpa_recommendation_ci
-      PUBBURI_PG_JPA_RECOMMENDATION_RUN_TOKEN: pubburi-pg-jpa-recommendation-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_JPA_RUNTIME_USER: ci_jpa_runtime
       PUBBURI_PG_JPA_RUNTIME_PASSWORD: ci_jpa_runtime_only
       PUBBURI_PG_RELAY_DB_NAME: pubburi_pg_relay_queue_ci

@@ -19,7 +19,6 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 FRONTEND = BACKEND.parent / "Frontend"
-RECOMMENDATION = BACKEND.parent / "Recommendation"
 STATE = BACKEND / ".pubburi"
 
 
@@ -46,7 +45,6 @@ def environment():
             env.setdefault(key, value)
     for key, default in [("PUBBURI_SERVER_PORT", "9987"),
                          ("PUBBURI_FRONTEND_PORT", "5173"),
-                         ("PUBBURI_RECOMMENDATION_PORT", "8000"),
                          ("PUBBURI_DB_PORT", "3306")]:
         value = env.get(key) or default
         if not value.isdigit() or not 1 <= int(value) <= 65535:
@@ -60,7 +58,8 @@ def environment():
     if not re.fullmatch(local_url, env["PUBBURI_DB_URL"]):
         raise RuntimeError("Local stack requires a loopback JDBC URL matching the local DB name and port.")
     env["VITE_API_PROXY_TARGET"] = "http://127.0.0.1:" + env["PUBBURI_SERVER_PORT"]
-    return env
+    return {key: value for key, value in env.items() if not key.startswith(
+        ("PUBBURI_RECOMMENDATION_", "PUBBURI_CONTENT_", "PUBBURI_REVIEWED_"))}
 
 
 def compose(*args, env):
@@ -70,10 +69,9 @@ def compose(*args, env):
 
 
 def doctor(env):
-    for repo in [FRONTEND, RECOMMENDATION]:
-        if not (repo / ".git").exists():
-            raise RuntimeError("Clone Frontend and Recommendation beside Backend.")
-    for tool in ["java", "node", "npm", "uv", "docker"]:
+    if not (FRONTEND / ".git").exists():
+        raise RuntimeError("Clone Frontend beside Backend.")
+    for tool in ["java", "node", "npm", "docker"]:
         if not shutil.which(tool):
             raise RuntimeError(f"Install {tool} and add it to PATH.")
     java = run(["java", "-version"], env=env, capture=True).stdout
@@ -82,11 +80,9 @@ def doctor(env):
         raise RuntimeError("Select Java 17 using JAVA_HOME and PATH.")
     if not node.strip().startswith("v24."):
         raise RuntimeError("Select Node.js 24 in PATH.")
-    run(["uv", "python", "find", "--no-python-downloads", "3.12"],
-        cwd=RECOMMENDATION, env=env, capture=True)
     run(["docker", "info", "--format", "{{.ServerVersion}}"], env=env, capture=True)
     compose("config", "--quiet", env=env)
-    print("Local prerequisites passed: Java 17, Node 24, Python 3.12, uv, Docker.")
+    print("Local prerequisites passed: Java 17, Node 24 and Docker.")
 
 
 def initialize():
@@ -98,7 +94,7 @@ def initialize():
         "PUBBURI_DB_PORT": "3306",
         "PUBBURI_DB_URL": "jdbc:mysql://127.0.0.1:3306/pubburi_local",
         "PUBBURI_SERVER_PORT": "9987", "PUBBURI_FRONTEND_PORT": "5173",
-        "PUBBURI_RECOMMENDATION_PORT": "8000", "PUBBURI_LOG_LEVEL": "INFO",
+        "PUBBURI_LOG_LEVEL": "INFO",
     }
     try:
         with (BACKEND / ".env").open("x", encoding="utf-8") as output:
@@ -114,7 +110,6 @@ def endpoints(env):
     return {
         "frontend": f"http://127.0.0.1:{env['PUBBURI_FRONTEND_PORT']}/",
         "backend": f"http://127.0.0.1:{env['PUBBURI_SERVER_PORT']}/api/products?page=1&size=1",
-        "recommendation": f"http://127.0.0.1:{env['PUBBURI_RECOMMENDATION_PORT']}/health",
     }
 
 
@@ -127,10 +122,6 @@ def probe(name, url):
             if ("error" not in envelope or envelope["error"] is not None
                     or not isinstance(data, dict) or not isinstance(data.get("items"), list)):
                 raise RuntimeError("Product API returned an error or an invalid page.")
-        elif name == "recommendation":
-            result = json.loads(body)
-            if result != {"status": "ok", "service": "pubburi-recommendation"}:
-                raise RuntimeError("Recommendation health contract changed.")
         elif b'<div id="app">' not in body:
             raise RuntimeError("Frontend did not return the application document.")
 
@@ -202,18 +193,17 @@ def operation_lock(state=None):
 
 def start(env, smoke):
     doctor(env)
-    if not (FRONTEND / "node_modules").is_dir() or not (RECOMMENDATION / ".venv").is_dir():
+    if not (FRONTEND / "node_modules").is_dir():
         raise RuntimeError("Run ./scripts/local-stack.sh install first.")
     # The same atomic lock serializes up, down and reset-db.
     with operation_lock(), ExitStack() as stack:
-        for key in ["PUBBURI_FRONTEND_PORT", "PUBBURI_SERVER_PORT", "PUBBURI_RECOMMENDATION_PORT"]:
+        for key in ["PUBBURI_FRONTEND_PORT", "PUBBURI_SERVER_PORT"]:
             with socket.socket() as candidate:
                 candidate.bind(("127.0.0.1", int(env[key])))
         compose("up", "-d", "--wait", "db", env=env)
         commands = {
             "backend": (BACKEND, ["./mvnw", "--batch-mode", "--no-transfer-progress", "-f", "tools/mysql-baseline/pom.xml", "spring-boot:run"]),
             "frontend": (FRONTEND, ["./scripts/dev.sh"]),
-            "recommendation": (RECOMMENDATION, ["./scripts/dev.sh"]),
         }
         children = []
         for name, (cwd, command) in commands.items():
@@ -240,7 +230,7 @@ def start(env, smoke):
             raise RuntimeError("Timed out waiting for: " + ", ".join(pending))
         # Check the session-compatible /api proxy, not only the Vite HTML page.
         probe("backend", f"http://127.0.0.1:{env['PUBBURI_FRONTEND_PORT']}/api/products?page=1&size=1")
-        print("Local integration passed. Recommendation currently provides health only.", flush=True)
+        print("Local frontend and API integration passed.", flush=True)
         if not smoke:
             print("Ctrl+C stops only these application processes; database data is retained.", flush=True)
             while all(child.poll() is None for child in children):
@@ -289,7 +279,6 @@ def main():
         doctor(env)
         run(["./mvnw", "--batch-mode", "--no-transfer-progress", "-f", "tools/mysql-baseline/pom.xml", "verify"], env=env)
         run(["npm", "ci"], cwd=FRONTEND, env=env)
-        run(["uv", "sync", "--locked", "--python", "3.12"], cwd=RECOMMENDATION, env=env)
     elif args.command in ["up", "smoke"]:
         start(env, args.command == "smoke")
     elif args.command == "status":

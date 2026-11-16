@@ -195,11 +195,6 @@ def documentation_contract(port):
     verify_feature_openapi(document)
     verify_preference_openapi(document)
     verify_favorite_openapi(document)
-    verify_default_recommendation_openapi(document)
-    verify_search_phrase_openapi(document)
-    verify_content_recommendation_openapi(document)
-    verify_similar_products_openapi(document)
-    assert "/api/users/me/recommendations/feedback/{productId}" not in document["paths"]
     verify_product_filter_openapi(document)
     verify_product_suggestions_openapi(document)
     with opener.open(root + "/docs", timeout=15) as response:
@@ -266,25 +261,6 @@ def verify_favorite_openapi(document):
         assert set(resolve(envelope["properties"]["data"])["properties"]) == {"productId", "favorited"}
 
 
-def verify_default_recommendation_openapi(document):
-    def resolve(schema):
-        while "$ref" in schema:
-            target = document
-            for part in schema["$ref"].removeprefix("#/").split("/"):
-                target = target[part]
-            schema = target
-        return schema
-    operation = document["paths"]["/api/recommendations/default"]["get"]
-    assert "requestBody" not in operation
-    envelope = resolve(operation["responses"]["200"]["content"]["application/json"]["schema"])
-    data = resolve(envelope["properties"]["data"])
-    assert set(data["properties"]) == {"items", "source"}
-    assert set(resolve(data["properties"]["source"])["enum"]) == {"BASELINE", "FALLBACK"}
-    product = resolve(data["properties"]["items"]["items"])
-    assert set(product["properties"]) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
-
-
-
 def verify_product_filter_openapi(document):
     operation = document["paths"]["/api/products"]["get"]
     response = operation["responses"]["200"]
@@ -316,53 +292,6 @@ def product_page_offset_contract(client):
         assert client.request("GET", query, 200)["data"] == client.request("GET", expected, 200)["data"]
 
 
-def verify_search_phrase_openapi(document):
-    operation = document["paths"]["/api/users/me/search-phrases"]["post"]
-    schemas = document["components"]["schemas"]
-    request = operation["requestBody"]["content"]["application/json"]["schema"]
-    request = schemas[request["$ref"].split("/")[-1]]
-    assert request["additionalProperties"] is False
-    assert set(request["properties"]) == {"searchOptInFields", "limit"}
-    assert not operation.get("parameters"), "The owner cannot be chosen with query parameters"
-    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    envelope = schemas[response["$ref"].split("/")[-1]]
-    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    assert set(data["properties"]) == {"source", "result"}
-    assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
-
-
-def verify_content_recommendation_openapi(document):
-    path = document["paths"]["/api/users/me/recommendations/content"]
-    assert {method for method in path if method in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"post"}
-    operation = path["post"]; schemas = document["components"]["schemas"]
-    request = operation["requestBody"]["content"]["application/json"]["schema"]
-    request = schemas[request["$ref"].split("/")[-1]]
-    assert request["additionalProperties"] is False and set(request["properties"]) == {"limit", "includeActivity"}
-    assert request["properties"]["limit"]["minimum"] == 1 and request["properties"]["limit"]["maximum"] == 12
-    activity = request["properties"]["includeActivity"]
-    assert activity["type"] == "boolean" and activity["default"] is False
-    assert "includeActivity" not in request.get("required", [])
-    parameters = operation.get("parameters", [])
-    assert len(parameters) == 1
-    (confirmation,) = parameters
-    assert confirmation["in"] == "header" and confirmation["name"] == "X-Pubburi-Feedback-Owner"
-    assert not confirmation.get("required"), "Owned content must preserve requests without feedback opt-in"
-    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    envelope = schemas[response["$ref"].split("/")[-1]]
-    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    assert set(data["properties"]) == {"source", "catalogScope", "result", "products", "activityEvidence", "feedbackEvidence"}
-    assert {"activityEvidence", "feedbackEvidence"}.isdisjoint(data.get("required", []))
-    evidence = schemas[data["properties"]["activityEvidence"]["$ref"].split("/")[-1]]
-    assert set(evidence["properties"]) == {"favoriteCategories", "highlyRatedCategories"}
-    assert all(value["type"] == "array" and value["items"]["type"] == "string" for value in evidence["properties"].values())
-    feedback = schemas[data["properties"]["feedbackEvidence"]["$ref"].split("/")[-1]]
-    assert set(feedback["properties"]) == {"rankingMode", "excludedNotInterestedCount", "positiveReferences"}
-    reference = schemas[feedback["properties"]["positiveReferences"]["items"]["$ref"].split("/")[-1]]
-    assert set(reference["properties"]) == {"productId", "name"}
-    assert set(data["properties"]["source"]["enum"]) == {"PROVIDER", "UNAVAILABLE"}
-    assert data["properties"]["catalogScope"]["enum"] == ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO", "REVIEWED_LOCAL_CATALOG"]
-
-
 def verify_product_suggestions_openapi(document):
     path = document["paths"]["/api/products/suggestions"]
     assert {method for method in path if method in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"get"}
@@ -381,86 +310,6 @@ def verify_product_suggestions_openapi(document):
     assert {name: prop["type"] for name, prop in product["properties"].items()} == {
         "id": "integer", "name": "string", "type": "string", "price": "integer",
     }
-
-
-def verify_similar_products_openapi(document):
-    path = document["paths"]["/api/products/{id}/similar"]
-    assert {key for key in path if key in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}} == {"get"}
-    operation = path["get"]
-    parameters = {(parameter["name"], parameter["in"]): parameter for parameter in operation["parameters"]}
-    assert len(operation["parameters"]) == 2 and set(parameters) == {("id", "path"), ("includeExplanations", "query")}
-    selector = parameters[("includeExplanations", "query")]
-    assert selector.get("required", False) is False
-    assert selector["schema"]["type"] == "boolean" and selector["schema"]["default"] is False
-    assert "requestBody" not in operation
-    schemas = document["components"]["schemas"]
-    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    envelope = schemas[response["$ref"].split("/")[-1]]
-    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    assert set(data["properties"]) == {"items", "catalogScope", "explanations"}
-    assert "catalogScope" not in data.get("required", [])
-    assert "explanations" not in data.get("required", [])
-    assert set(data["properties"]["catalogScope"]["enum"]) == {"REVIEWED_LOCAL_CATALOG"}
-    assert data["properties"]["items"] == {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}
-    reasons = data["properties"]["explanations"]
-    assert reasons["type"] == "array"
-    explanation = schemas[reasons["items"]["$ref"].split("/")[-1]]
-    assert set(explanation["properties"]) == {"productId", "explanation"}
-    assert set(explanation["required"]) == {"productId", "explanation"}
-
-
-def verify_order_recommendation_openapi(document):
-    path = document["paths"]["/api/users/me/orders/{id}/recommendations"]
-    assert set(path) == {"post"}
-    operation = path["post"]
-    parameters = {(value["name"], value["in"]): value for value in operation["parameters"]}
-    assert set(parameters) == {("id", "path"), ("X-Pubburi-Account-Owner", "header")}
-    assert parameters[("X-Pubburi-Account-Owner", "header")]["required"] is True
-    schemas = document["components"]["schemas"]
-    request = operation["requestBody"]["content"]["application/json"]["schema"]
-    request = schemas[request["$ref"].split("/")[-1]]
-    assert request["additionalProperties"] is False and set(request["properties"]) == {"limit"}
-    assert "limit" not in request.get("required", [])
-    assert request["properties"]["limit"]["minimum"] == 1 and request["properties"]["limit"]["maximum"] == 12
-    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    envelope = schemas[response["$ref"].split("/")[-1]]
-    data = schemas[envelope["properties"]["data"]["$ref"].split("/")[-1]]
-    fields = {"source", "catalogScope", "orderId", "referenceCount", "references", "unavailableReason", "result", "products"}
-    assert set(data["properties"]) == fields and set(data["required"]) == fields
-    assert set(data["properties"]["catalogScope"]["enum"]) == {"REVIEWED_DEMO", "REVIEWED_LOCAL_CATALOG"}
-    reference = schemas[data["properties"]["references"]["items"]["$ref"].split("/")[-1]]
-    assert set(reference["properties"]) == {"detailId", "productId", "name", "quantity", "state"}
-    assert set(reference["required"]) == set(reference["properties"])
-    for field, kind in (("productId", "integer"), ("name", "string")):
-        assert set(reference["properties"][field]["type"]) == {kind, "null"}
-    assert reference["properties"]["quantity"]["maximum"] == 2147483647
-
-
-def default_recommendation_contract(client, expected_source=None):
-    total = client.request("GET", "/products?size=1", 200)["data"]["total"]
-    for query, size in (("", 4), ("?size=1", 1), ("?size=12", 12)):
-        data = client.request("GET", "/recommendations/default" + query, 200)["data"]
-        assert set(data) == {"items", "source"}
-        assert data["source"] in {"BASELINE", "FALLBACK"}
-        if expected_source is not None:
-            assert data["source"] == expected_source, "Unexpected configured recommendation source"
-        assert len(data["items"]) == min(total, size)
-        ids = [item["id"] for item in data["items"]]
-        assert ids == sorted(set(ids)), "Default selection must remain unique and ID-ordered"
-        for item in data["items"]:
-            assert set(item) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
-            assert client.request("GET", f"/products/{item['id']}", 200)["data"] == item
-    for size in ("0", "13", "abc", "1.5", "2147483648"):
-        client.request("GET", "/recommendations/default?size=" + size, 400, error_code="BAD_REQUEST")
-    if total:
-        first = client.request("GET", "/products?size=1", 200)["data"]["items"][0]
-        similar = client.request("GET", f"/products/{first['id']}/similar", 200)["data"]
-        assert set(similar) == {"items"} and len(similar["items"]) <= 4
-        ids = {item["id"] for item in similar["items"]}
-        assert len(ids) == len(similar["items"]) and first["id"] not in ids
-        for item in similar["items"]:
-            assert client.request("GET", f"/products/{item['id']}", 200)["data"] == item
-    client.request("GET", "/products/0/similar", 404, error_code="NOT_FOUND")
 
 
 def change_ci_product(environ, product_id, price, name):
@@ -804,6 +653,10 @@ def product_feature_contract(environ):
     assert saved == dict(values, productId=product_id, description="Synthetic validation data",
                          tasteTags=["dry", "sweet"], sourceName="Synthetic CI fixture")
     assert saved["aromaTags"] == [] and saved["tasteTags"] != []
+    themes = public.request("GET", "/products/themes", 200)["data"]
+    assert themes["source"] == "REVIEWED_LOCAL_CATALOG"
+    table = next(theme for theme in themes["themes"] if theme["id"] == "TABLE")
+    assert {"product": created, "volumeMl": 750} in table["items"]
     assert public.request("GET", path, 200)["data"] == saved
     assert admin.request("PUT", write_path, 200, values)["data"] == saved
     assert public.request("GET", f"/products/{product_id}", 200)["data"] == created
@@ -1136,32 +989,7 @@ def private_preference_contract(environ):
     assert saved["softPreferences"] == dict(declared["softPreferences"], categories=["탁주"], tasteTags=["dry", "sweet"])
     assert saved["hardConstraints"] == declared["hardConstraints"]
     assert owner.request("GET", path, 200)["data"] == saved
-    # The caller reads only this already-stored snapshot; it never accepts another owner's data.
-    phrase_path = "/users/me/search-phrases"
-    public.request("POST", phrase_path, 401, {}, "UNAUTHORIZED")
-    phrases = owner.request("POST", phrase_path, 200, {"searchOptInFields": ["tasteTags"], "limit": 5})["data"]
-    assert set(phrases) == {"source", "result"}
-    assert phrases["source"] in {"PROVIDER", "UNAVAILABLE"}
-    if phrases["source"] == "UNAVAILABLE":
-        assert phrases["result"] is None
-    else:
-        assert phrases["result"]["algorithm"] == "r06-explicit-search-phrases-v1"
-        assert phrases["result"]["product_count"] is None
-    for invalid in ({"userId": user_id}, {"preferences": saved}, {"limit": True}, {"limit": "1"},
-                    {"limit": 1.0}, {"limit": 0}, {"searchOptInFields": None},
-                    {"searchOptInFields": [None]}, {"searchOptInFields": ["tasteTags", "tasteTags"]}):
-        owner.request("POST", phrase_path, 400, invalid, "VALIDATION_FAILED")
-    owner.request("POST", phrase_path + "?userId=other", 400, {}, "BAD_REQUEST")
-    assert owner.request("GET", path, 200)["data"] == saved
     assert owner.request("PUT", path, 200, declared)["data"] == saved
-    content_path = "/users/me/recommendations/content"
-    public.request("POST", content_path, 401, {}, "UNAUTHORIZED")
-    assert owner.request("POST", content_path, 200, {})["data"] == {
-        "source": "UNAVAILABLE", "catalogScope": "REVIEWED_DEMO", "result": None, "products": []}
-    for invalid in ({"profile": {}}, {"preferences": saved}, {"catalog": []}, {"limit": True}, {"limit": "1"}, {"limit": 1.0}, {"limit": 0}, {"limit": 13}):
-        owner.request("POST", content_path, 400, invalid, "VALIDATION_FAILED")
-    owner.request("POST", content_path + "?userId=other", 400, {}, "BAD_REQUEST")
-    assert owner.request("GET", path, 200)["data"] == saved
     assert other.request("GET", path, 200)["data"] == empty()
     assert admin.request("GET", path + "?userId=" + user_id, 200)["data"] == empty()
     admin.request("PUT", path, 200, {"surveyStatus": "COMPLETED", "userId": user_id,
@@ -1443,15 +1271,10 @@ def main():
         client = ApiClient(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         product = read_only_contract(client)
         report["completed"].append("read-only HTTP envelope, pagination, auth and validation")
-        feedback_path = "/users/me/recommendations/feedback/1"
-        for method in ("GET", "PUT", "DELETE"):
-            client.request(method, feedback_path, 404, {"feedback": "MATCHED"} if method == "PUT" else None, "NOT_FOUND")
         product_page_offset_contract(client)
         report["completed"].append("checked product page offsets and preserved normalization")
         documentation_contract(os.environ.get("PUBBURI_SERVER_PORT", "9987"))
         report["completed"].append("runtime OpenAPI feature paths/schemas and Swagger UI")
-        default_recommendation_contract(client, os.environ.get("PUBBURI_SMOKE_EXPECT_RECOMMENDATION_SOURCE"))
-        report["completed"].append("public default recommendation envelope, current products and fallback availability")
         if mutating:
             multipart_security_contract(os.environ)
             report["completed"].append("bounded multipart headers, safe client errors and unchanged media rejection")

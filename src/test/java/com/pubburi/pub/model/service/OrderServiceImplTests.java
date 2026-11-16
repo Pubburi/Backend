@@ -381,7 +381,7 @@ class OrderServiceImplTests {
 	}
 
 	private static class FakeProductDao implements ProductDao {
-		@Override public List<Product> selectDefaultCandidates(int limit) { throw new UnsupportedOperationException(); }
+		@Override public List<com.pubburi.pub.model.dto.ProductThemeRow> selectThemeProducts(String theme, int limit) { throw new UnsupportedOperationException(); }
 		@Override public List<Product> selectCurrentByIds(List<Integer> ids) { throw new UnsupportedOperationException(); }
 		@Override public List<com.pubburi.pub.model.dto.ProductSuggestion> selectNameSuggestions(String pattern, int limit) { throw new UnsupportedOperationException(); }
 		private Map<Integer, Integer> orderCountIncrements = new LinkedHashMap<>();
@@ -442,14 +442,6 @@ class OrderServiceImplTests {
 			return 1;
 		}
 
-		@Override
-		public Product selectByExactName(String name) {
-			return null;
-		}
 
-		@Override
-		public List<Product> selectTopNByTypeExcludeName(String type, String excludeName, int n) {
-			return List.of();
-		}
 	}
 }

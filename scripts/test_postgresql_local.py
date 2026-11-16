@@ -25,7 +25,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
             PUBBURI_PG_RUN_TOKEN='owned-fixture-token', PUBBURI_PG_CA='/tmp/public-ca.pem',
             PUBBURI_PG_CONTAINER_ID='a'*64, PUBBURI_PG_VALIDATION_LABEL='owned-fixture',
             PUBBURI_JPA_SOURCE_ID='12345678-1234-1234-1234-123456789abc', PUBBURI_JPA_REHEARSAL='1',
-            PUBBURI_SERVER_PORT='15001', PUBBURI_FRONTEND_PORT='15002', PUBBURI_RECOMMENDATION_PORT='15003')
+            PUBBURI_SERVER_PORT='15001', PUBBURI_FRONTEND_PORT='15002')
 
     def config(self, root, env=None):
         path = root / 'config.json'
@@ -50,7 +50,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
     def test_duplicate_unknown_nonfinite_nonstring_and_shared_ports_fail(self):
         for mutation in ({'PUBBURI_PG_ADMIN_PASSWORD':'no'}, {'JAVA_TOOL_OPTIONS':'-Dsecret=no'},
                          {'SPRING_DATASOURCE_URL':'remote'}, {'PUBBURI_SERVER_PORT':True},
-                         {'PUBBURI_FRONTEND_PORT':'15001'}, {'PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED':'yes'}, {'PUBBURI_RECOMMENDATION_BASE_URL':'https://remote.invalid'}, {'PUBBURI_SEARCH_ENDPOINT':'http://127.0.0.1:9200/private'}, {'PUBBURI_SEARCH_READ_ALIAS':'wildcard*'}, {'PUBBURI_JPA_REHEARSAL':'0'}):
+                         {'PUBBURI_FRONTEND_PORT':'15001'}, {'PUBBURI_SEARCH_ENDPOINT':'http://127.0.0.1:9200/private'}, {'PUBBURI_SEARCH_READ_ALIAS':'wildcard*'}, {'PUBBURI_JPA_REHEARSAL':'0'}):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 with self.assertRaises(RuntimeError):pg.configuration(self.config(Path(temporary), dict(self.env(), **mutation)))
         for text in ('{"a":1,"a":2}', '{"a":NaN}', '{"a":1} true'):
@@ -62,32 +62,26 @@ class PostgreSQLLocalTests(unittest.TestCase):
              'JAVA_TOOL_OPTIONS':'-javaagent:secret', 'JDK_JAVA_OPTIONS':'-Dsecret=1'}, clear=True):
             self.assertEqual(pg.base_environment(), {'PATH':'/tools', 'HOME':'/user'})
 
-    def test_three_children_receive_only_their_owned_runtime_settings(self):
+    def test_two_children_receive_only_their_owned_runtime_settings(self):
         with patch.dict(os.environ, {'PATH':'/tools','PGPASSWORD':'control','PUBBURI_DB_ROOT_PASSWORD':'root',
                 'PUBBURI_CONTENT_CATALOG_PATH':'inherited-private-file'}, clear=True):
-            backend, frontend, recommendation = pg.child_environments(dict(self.env(),PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED='true'))
+            backend, frontend = pg.child_environments(dict(self.env(),PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED='true'))
         self.assertEqual(backend['PUBBURI_PG_PASSWORD'],'runtime-secret')
-        self.assertEqual(backend['PUBBURI_CONTENT_FAMILY_BROWSE_DEMO_ENABLED'],'true')
         self.assertEqual(backend['PUBBURI_JPA_PORT'],'15001')
         self.assertEqual(frontend,{'PATH':'/tools','PUBBURI_FRONTEND_PORT':'15002','VITE_API_PROXY_TARGET':'http://127.0.0.1:15001'})
-        self.assertEqual(recommendation,{'PATH':'/tools','PUBBURI_RECOMMENDATION_PORT':'15003'})
-        for env in (backend,frontend,recommendation):
+        for env in (backend,frontend):
             self.assertNotIn('PGPASSWORD',env);self.assertNotIn('PUBBURI_DB_ROOT_PASSWORD',env)
             self.assertNotIn('PUBBURI_CONTENT_CATALOG_PATH',env)
 
-    def test_reviewed_authority_pins_are_explicit_backend_only_settings(self):
-        reviewed = {'PUBBURI_REVIEWED_CATALOG_PATH':'private-authority.json',
-            'PUBBURI_REVIEWED_CATALOG_SHA256':'a'*64, 'PUBBURI_REVIEWED_MAPPING_PATH':'private-mapping.json',
-            'PUBBURI_REVIEWED_MAPPING_SHA256':'b'*64}
-        with patch.dict(os.environ, dict(PATH='/tools', **reviewed), clear=True):
-            inherited = pg.child_environments(self.env())
-            configured = pg.child_environments(dict(self.env(), **reviewed))
-        for environment in inherited:
-            self.assertFalse(set(reviewed) & environment.keys())
-        for key, value in reviewed.items():
-            self.assertEqual(configured[0][key], value)
-        for environment in configured[1:]:
-            self.assertFalse(set(reviewed) & environment.keys())
+    def test_existing_config_ignores_retired_service_and_does_not_forward_settings(self):
+        legacy = {'PUBBURI_RECOMMENDATION_PORT': '15001',
+                  'PUBBURI_RECOMMENDATION_BASE_URL': 'http://127.0.0.1:18888',
+                  'PUBBURI_REVIEWED_CATALOG_PATH': 'private-retired-path'}
+        with tempfile.TemporaryDirectory() as temporary:
+            file = self.config(Path(temporary), dict(self.env(), **legacy))
+            self.assertEqual(pg.configuration(file, pg.sha(file)), self.env())
+        for child in pg.child_environments(dict(self.env(), **legacy)):
+            self.assertFalse(set(legacy) & child.keys())
 
     def test_pg_destructive_commands_reject_before_env_or_docker(self):
         for name in ('init','install','down','reset-db'):
@@ -374,7 +368,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
                 jar.writestr('META-INF/MANIFEST.MF',manifest)
                 for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar'):
                     jar.writestr(name,b'fixture')
-            for forbidden in ('BOOT-INF/classes/mappers/product.xml','BOOT-INF/classes/com/pubburi/pub/controller/rest/UnavailableRecommendationFeedbackController.class'):
+            for forbidden in ('BOOT-INF/classes/mappers/product.xml','BOOT-INF/classes/com/pubburi/pub/controller/rest/UnavailableNotebookController.class'):
                 with zipfile.ZipFile(path,'w') as jar:
                     jar.writestr('META-INF/MANIFEST.MF',manifest)
                     for name in (entry,'BOOT-INF/lib/spring-data-jpa-fixture.jar','BOOT-INF/lib/hibernate-core-fixture.jar',forbidden):
@@ -478,7 +472,7 @@ class PostgreSQLLocalTests(unittest.TestCase):
             jar.chmod(0o600)
             value={'schema_version':1,'completed':True,'provider':'JPA_POSTGRESQL_REHEARSAL','source_commit':first,
                 'source_files':pg.source_files(scope),'jar_sha256':pg.sha(jar),'java_feature':17,'postgresql_version':'18.6',
-                'api_paths':56,'api_operations':70,'preparation':'database-independent-maven-verify'}
+                'api_paths':48,'api_operations':60,'preparation':'database-independent-maven-verify'}
             def manifest(commit):
                 (directory/'manifest.json').unlink(missing_ok=True)
                 pg.write_json(directory/'manifest.json',dict(value,source_commit=commit))

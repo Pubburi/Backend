@@ -1,11 +1,11 @@
 package com.pubburi.rehearsal.persistence;
 
-import com.pubburi.pub.controller.api.*;
+import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.ProductSuggestion;
+import com.pubburi.pub.model.dto.ProductThemeRow;
 import com.pubburi.pub.model.dto.ProductFeatures;
 import com.pubburi.pub.model.dto.ProductFeatureTag;
-import com.pubburi.pub.model.dto.ProductFeatureTagRow;
 import jakarta.persistence.*;
 import jakarta.persistence.criteria.*;
 import java.util.*;
@@ -48,6 +48,20 @@ public class JpaProductQueries {
         return entityManager.createQuery(query).getResultList();
     }
 
+    public List<ProductThemeRow> themeProducts(String theme, int limit) {
+        String rule = switch (theme) {
+            case "BEGINNER" -> "p.abv between 0 and 7 order by p.abv, p.id";
+            case "GIFT" -> "f.volumeMl between 300 and 500 order by f.volumeMl, p.id";
+            case "TABLE" -> "f.volumeMl >= 500 order by f.volumeMl desc, p.id";
+            default -> throw new IllegalArgumentException("Unknown product theme");
+        };
+        return entityManager.createQuery("""
+            select new com.pubburi.pub.model.dto.ProductThemeRow(p.id,p.name,p.type,p.price,p.img,p.abv,p.orderCount,f.volumeMl)
+            from RehearsalProduct p join RehearsalProductFeature f on f.productId=p.id
+            where f.volumeMl is not null and length(trim(f.sourceName)) > 0 and p.abv between 0 and 100 and
+            """ + rule, ProductThemeRow.class).setMaxResults(limit).getResultList();
+    }
+
     public List<ProductSuggestion> nameSuggestions(String pattern, int limit) {
         var cb = entityManager.getCriteriaBuilder();
         var query = cb.createQuery(ProductSuggestion.class);
@@ -57,18 +71,6 @@ public class JpaProductQueries {
         query.select(cb.construct(ProductSuggestion.class, product.get("id"), name, product.get("type"), product.get("price")))
             .where(cb.like(name, prefix, '!')).orderBy(cb.asc(name), cb.asc(product.get("id")));
         return entityManager.createQuery(query).setParameter(prefix, pattern).setMaxResults(limit).getResultList();
-    }
-
-    public Product exactName(String name) {
-        var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
-        query.select(projection(cb,product)).where(cb.equal(product.get("name"),name));
-        return entityManager.createQuery(query).setMaxResults(1).getResultList().stream().findFirst().orElse(null);
-    }
-
-    public List<Product> topByTypeExcludingName(String type,String name,int limit) {
-        var cb=entityManager.getCriteriaBuilder();var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
-        query.select(projection(cb,product)).where(cb.equal(product.get("type"),type),cb.notEqual(product.get("name"),name)).orderBy(order(cb,product,"popular"));
-        return entityManager.createQuery(query).setMaxResults(limit).getResultList();
     }
 
     public List<Product> popular() {
@@ -89,7 +91,7 @@ public class JpaProductQueries {
         return featureHeaders(List.of(id)).stream().findFirst().orElse(null);
     }
 
-    public List<ProductFeatures> featureHeaders(List<Integer> ids) {
+    private List<ProductFeatures> featureHeaders(List<Integer> ids) {
         if(ids.isEmpty())return List.of();
         var rows=entityManager.createQuery("""
             select new com.pubburi.rehearsal.persistence.ProductFeatureView(p.id,f.volumeMl,f.description,
@@ -97,14 +99,6 @@ public class JpaProductQueries {
             from RehearsalProduct p left join RehearsalProductFeature f on f.productId=p.id where p.id in :ids
             """,ProductFeatureView.class).setParameter("ids",ids).getResultList();
         return rows.stream().map(ProductFeatureView::dto).toList();
-    }
-
-    public List<ProductFeatureTagRow> tagsByProductIds(List<Integer> ids) {
-        if(ids.isEmpty())return List.of();
-        return entityManager.createQuery("""
-            select new com.pubburi.pub.model.dto.ProductFeatureTagRow(t.productId,t.kind,t.tag)
-            from RehearsalProductTag t where t.productId in :ids
-            """,ProductFeatureTagRow.class).setParameter("ids",ids).getResultList();
     }
 
     public List<ProductFeatureTag> tags(int id) {
