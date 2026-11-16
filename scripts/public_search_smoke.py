@@ -17,7 +17,8 @@ import urllib.request
 import uuid
 
 from jpa_smoke import child_environment, cleanup_on_termination, defer_termination, verify_jar
-from search_index import Engine, document
+from search_cutover import move_alias, read_alias_index
+from search_index import Engine, READ_ALIAS, checked_stored, document
 from search_relay import Relay, Store, connect_database, database_settings
 
 
@@ -53,7 +54,7 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         raise ValueError("public_search_new_private_output_required")
     deadline=time.monotonic()+160
     if dialect == "postgresql":
-        from postgresql_relay_smoke import fixture, validate_business_events
+        from postgresql_relay_smoke import PG_CUTOVER_STAGE, fixture, validate_business_events
         store, owner, _ = fixture(environ)
         jar = Path(environ.get("PUBBURI_PG_RELAY_JPA_JAR", ROOT / "target/pubburi-server-0.0.1-SNAPSHOT.jar"))
         verify_jar(jar); base_env = child_environment(environ)
@@ -103,6 +104,10 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             assert result["status"] == "delivered", "Owned public-search delivery failed"
         raise AssertionError("Owned public-search delivery limit")
     drain()
+    if dialect == "postgresql":
+        if read_alias_index(http) is None:
+            move_alias(http, None, index)
+        assert read_alias_index(http) == index, "Unexpected existing public search read generation"
     process_rows = []; handles = []; processes = []; products = []; views = []; fixture_hash_upgrade=False
     record = private / ("public-search-" + dialect + "-processes.json")
     progress = private / ("public-search-" + dialect + "-observations.json")
@@ -116,7 +121,8 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
     def start(name, enabled, origin=endpoint, artifact=jar):
         port = available_port(); child = dict(base_env, PUBBURI_SEARCH_ENABLED=str(enabled).lower(), PUBBURI_SEARCH_ENDPOINT=origin, PUBBURI_SEARCH_INDEX=index)
         child.update({"PUBBURI_JPA_PORT" if dialect == "postgresql" else "PUBBURI_SERVER_PORT": str(port)})
-        if dialect == "postgresql": child["PUBBURI_JPA_REHEARSAL"] = "1"
+        if dialect == "postgresql":
+            child.update(PUBBURI_JPA_REHEARSAL="1", PUBBURI_SEARCH_READ_ALIAS=READ_ALIAS)
         log = private / ("public-search-" + dialect + "-" + name + ".log"); output = log.open("xb"); handles.append(output)
         with defer_termination():
             process = subprocess.Popen([java, "-Duser.timezone=UTC", "-Dserver.address=127.0.0.1", "-jar", str(artifact)], env=child, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT)
@@ -181,6 +187,21 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             assert compare(root,"ENGINE_VERIFIED","first-current-product")["total"]==1
             name_prefix="ci_jpa_search_"+token
             assert [row["id"] for row in suggestions(name_prefix,"ENGINE_VERIFIED","first-current-product")]==[a]
+            if dialect == "postgresql":
+                # Copy the exact visible fact so matching result IDs alone cannot prove a generation.
+                staged = Engine(http, PG_CUTOVER_STAGE, "backend_product_events", source)
+                assert http.request("GET", f"/{staged.index}/_mapping")[0] == 404, "Disposable staged index already exists"
+                staged.ready(create=True)
+                status, current = http.request("GET", f"/{index}/_doc/{a}")
+                assert status == 200 and staged.apply(checked_stored(current["_source"])) == "applied"
+                move_alias(http, index, staged.index)
+                try:
+                    assert compare(root, "DATABASE_FALLBACK", "read-alias-ahead-of-db-binding")["total"] == 1
+                    assert [row["id"] for row in suggestions(name_prefix, "DATABASE_FALLBACK", "read-alias-ahead-of-db-binding")] == [a]
+                finally:
+                    move_alias(http, staged.index, index)
+                compare(root, "ENGINE_VERIFIED", "read-alias-restored")
+                suggestions(name_prefix, "ENGINE_VERIFIED", "read-alias-restored")
             b, _ = create("B",2000,0)
             assert compare(root,"DATABASE_FALLBACK","missing-pending-product")["total"]==2
             assert len(suggestions(name_prefix,"DATABASE_FALLBACK","missing-pending-product"))==2

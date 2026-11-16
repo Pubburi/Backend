@@ -28,6 +28,9 @@ from jpa_smoke import child_environment, request_json, verify_jar, cleanup_on_te
 from api_smoke import verify_product_suggestions_openapi
 
 
+PG_CUTOVER_STAGE = "pubburi-products-v1-pgstage"
+
+
 def verify_business_api(spec):
     methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
     operations = sum(method in methods for path in spec["paths"].values() for method in path)
@@ -549,7 +552,7 @@ def business_cutover(http, state):
 
     environ = state["environ"]
     store, owner, _ = fixture(environ)
-    source, old_index, new_index = state["source_id"], state["index"], "pubburi-products-v1-pgstage"
+    source, old_index, new_index = state["source_id"], state["index"], PG_CUTOVER_STAGE
     old = Engine(http, old_index, "backend_product_events", source, refresh="false")
     new = Engine(http, new_index, "backend_product_events", source, refresh="false")
     new.ready(create=True)
@@ -559,7 +562,9 @@ def business_cutover(http, state):
     binding = "SELECT source_id::text, fingerprint, identity_json::text, bound_at FROM t_product_search_relay_target"
     immutable = "SELECT payload::text AS payload FROM t_product_search_outbox ORDER BY event_id"
     before_binding, before_events, before_acks = sql(owner, binding), sql(owner, immutable), completed_ack_snapshot(owner)
-    move_alias(http, None, old_index)
+    if read_alias_index(http) is None:
+        move_alias(http, None, old_index)
+    assert read_alias_index(http) == old_index
 
     with owner.transaction() as writer:
         writer.execute("LOCK TABLE pubburi.t_product IN ROW EXCLUSIVE MODE")
