@@ -179,6 +179,34 @@ def activation_selection(local, environment):
     return previous
 
 
+def runtime_ports(environment):
+    database_port = urlsplit(environment['PUBBURI_PG_URL'][5:]).port
+    ports = [int(environment[key]) for key in ('PUBBURI_SERVER_PORT', 'PUBBURI_FRONTEND_PORT')]
+    ports.append(database_port)
+    if environment.get('PUBBURI_SEARCH_ENABLED') == 'true':
+        engine = environment.get('PUBBURI_SEARCH_ENDPOINT', 'http://127.0.0.1:9200')
+        ports.append(urlsplit(engine).port)
+    return ports
+
+
+def require_demo_separation(local, environment):
+    if environment.get('PUBBURI_SEARCH_ENABLED') == 'true' and 'PUBBURI_SEARCH_ENDPOINT' not in environment:
+        raise RuntimeError('Demo search requires its own explicit loopback endpoint.')
+    ports = runtime_ports(environment)
+    if None in ports or len(set(ports)) != len(ports):
+        raise RuntimeError('Demo requires distinct PostgreSQL, web, API and enabled search ports.')
+    selected = selection_record(local)
+    if selected is None:
+        return
+    operating = configuration(selected['pg_config'], selected['config_sha256'])
+    demo_container, operating_container = (env['PUBBURI_PG_CONTAINER_ID'] for env in (environment, operating))
+    if (demo_container.startswith(operating_container) or operating_container.startswith(demo_container)
+            or environment['PUBBURI_JPA_SOURCE_ID'] == operating['PUBBURI_JPA_SOURCE_ID']):
+        raise RuntimeError('Demo requires a separate PostgreSQL container and source from the selected database.')
+    if set(ports).intersection(runtime_ports(operating)):
+        raise RuntimeError('Demo ports overlap the selected PostgreSQL runtime.')
+
+
 def initial_cutover(path, environment, expected_sha256=None):
     import postgresql_import
     if not path:
@@ -321,8 +349,10 @@ def release(path, local):
     return directory, value
 
 
-def doctor(local, config, release_path, backend_only):
+def doctor(local, config, release_path, backend_only, *, demo=False):
     env = configuration(config)
+    if demo:
+        require_demo_separation(local, env)
     directory, manifest = release(release_path, local)
     base = java17(local)
     verify_owned_postgres(env, child_env=base)
@@ -365,7 +395,8 @@ def start(local, args):
     with local.operation_lock():
         guard_selection(local, args)
         pins = selection_pins(Path(args.pg_config), Path(args.release_dir)) if args.command == 'activate-pg' else None
-        env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only)
+        options = {'demo': True} if args.command == 'demo' else {}
+        env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only, **options)
         guard_selection(local, args)
         if pins is not None:
             if selection_pins(Path(args.pg_config), directory) != pins:
@@ -430,8 +461,9 @@ def start(local, args):
                     if pending:
                         time.sleep(0.25)
                 local.probe('backend', 'http://127.0.0.1:' + env['PUBBURI_FRONTEND_PORT'] + '/api/products?page=1&size=1')
-            print('PostgreSQL applications ready (48 paths / 60 operations); database retained on every exit.', flush=True)
-            if args.command == 'up':
+            label = 'PostgreSQL demo' if args.command == 'demo' else 'PostgreSQL applications'
+            print(label + ' ready (48 paths / 60 operations); database retained on every exit.', flush=True)
+            if args.command in ('up', 'demo'):
                 while all(child.poll() is None for child in children):
                     time.sleep(0.5)
                 reject()
@@ -450,9 +482,9 @@ def dispatch(local, args):
         if not args.output_dir or args.pg_config or args.release_dir or args.backend_only or args.confirm_delete_local_data:
             reject()
         return package(local, args.output_dir)
-    if args.command not in ('doctor', 'up', 'smoke', 'status', 'activate-pg') or not args.pg_config or not args.release_dir or args.output_dir or args.confirm_delete_local_data:
+    if args.command not in ('doctor', 'up', 'smoke', 'status', 'activate-pg', 'demo') or not args.pg_config or not args.release_dir or args.output_dir or args.confirm_delete_local_data:
         reject()
-    if args.command in ('up', 'smoke', 'activate-pg'):
+    if args.command in ('up', 'smoke', 'activate-pg', 'demo'):
         return start(local, args)
     # Observers must remain usable while up owns the lifecycle lock.
     guard_selection(local, args)

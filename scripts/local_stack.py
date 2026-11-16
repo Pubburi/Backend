@@ -240,7 +240,8 @@ def start(env, smoke):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "doctor", "install", "up", "smoke", "status", "down", "reset-db", "package-pg", "activate-pg", "dev"])
+    parser.add_argument("command", choices=["init", "doctor", "install", "up", "smoke", "status", "down", "reset-db", "package-pg", "activate-pg", "dev", "demo"],
+                        help="demo runs a separate PostgreSQL copy with explicit --pg-config and --release-dir.")
     parser.add_argument("--confirm-delete-local-data", action="store_true")
     parser.add_argument("--provider", choices=("mysql", "postgresql"))
     parser.add_argument("--pg-config")
@@ -254,7 +255,7 @@ def main():
         parser.error("Use ./scripts/dev.sh for a single backend or --provider mysql for the legacy runtime.")
     import postgresql_local
     local = types.SimpleNamespace(**globals())
-    if args.command in ("package-pg", "activate-pg"):
+    if args.command in ("package-pg", "activate-pg", "demo"):
         if args.provider == "mysql":
             postgresql_local.reject()
         return postgresql_local.dispatch(local, args)

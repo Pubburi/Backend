@@ -101,6 +101,67 @@ class PostgreSQLLocalTests(unittest.TestCase):
             local.main()
             env.assert_not_called();self.assertEqual(dispatch.call_args.args[1].provider,'postgresql')
 
+    def test_demo_requires_explicit_pg_config_and_never_loads_mysql(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(local, 'STATE', Path(temporary)), \
+                patch.object(local, 'environment') as legacy, patch.object(pg, 'start') as start:
+            for options in ([], ['--pg-config', 'demo-runtime'], ['--release-dir', 'release'],
+                            ['--provider', 'mysql', '--pg-config', 'demo-runtime', '--release-dir', 'release']):
+                with self.subTest(options=options), patch('sys.argv', ['local_stack.py', 'demo', *options]):
+                    with self.assertRaises(RuntimeError):
+                        local.main()
+            start.assert_not_called()
+            with patch('sys.argv', ['local_stack.py', 'demo', '--pg-config', 'demo-runtime', '--release-dir', 'release']):
+                local.main()
+            args = start.call_args.args[1]
+            self.assertEqual((args.command, args.pg_config, args.release_dir), ('demo', 'demo-runtime', 'release'))
+            legacy.assert_not_called()
+
+    def test_demo_rejects_operating_copies_and_ports_before_inspecting_docker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scope = types.SimpleNamespace(STATE=root)
+            operating, directory = self.selection_fixture(root)
+            current = dict(self.env(), PUBBURI_SEARCH_ENABLED='true')
+            operating.unlink()
+            pg.write_json(operating, {'schema_version': 1, 'environment': current})
+            pg.publish_selection(scope, operating, directory, pg.selection_pins(operating, directory))
+            selector = root / pg.DEFAULT_SELECTION
+            selected = selector.read_bytes()
+            demo = root / 'demo.json'
+            separate = dict(self.env(), PUBBURI_PG_CONTAINER_ID='b' * 64, PUBBURI_PG_DB_NAME='demo_ci',
+                PUBBURI_PG_URL='jdbc:postgresql://127.0.0.1:26432/demo_ci', PUBBURI_PG_RUN_TOKEN='authored-demo-marker',
+                PUBBURI_JPA_SOURCE_ID='87654321-1234-1234-1234-123456789abc',
+                PUBBURI_SERVER_PORT='16001', PUBBURI_FRONTEND_PORT='16002')
+
+            for change in (dict(PUBBURI_PG_CONTAINER_ID=current['PUBBURI_PG_CONTAINER_ID'][:12]),
+                           dict(PUBBURI_JPA_SOURCE_ID=current['PUBBURI_JPA_SOURCE_ID']),
+                           dict(PUBBURI_FRONTEND_PORT=current['PUBBURI_SERVER_PORT']),
+                           dict(PUBBURI_SERVER_PORT='25432'), dict(PUBBURI_FRONTEND_PORT='26432'),
+                           dict(PUBBURI_SEARCH_ENABLED='true'),
+                           dict(PUBBURI_SEARCH_ENABLED='true', PUBBURI_SEARCH_ENDPOINT='http://127.0.0.1:9200/')):
+                with self.subTest(change=change), patch.object(pg, 'release') as release, \
+                        patch.object(pg, 'verify_owned_postgres') as inspect:
+                    demo.unlink(missing_ok=True)
+                    pg.write_json(demo, {'schema_version': 1, 'environment': dict(separate, **change)})
+                    with self.assertRaises(RuntimeError):
+                        pg.doctor(scope, demo, directory, True, demo=True)
+                    release.assert_not_called()
+                    inspect.assert_not_called()
+
+            separate.update(PUBBURI_SEARCH_ENABLED='true', PUBBURI_SEARCH_ENDPOINT='http://127.0.0.1:19200')
+            demo.unlink()
+            pg.write_json(demo, {'schema_version': 1, 'environment': separate})
+            with patch.object(pg, 'release', return_value=(directory, {})), patch.object(pg, 'java17', return_value={}), \
+                    patch.object(pg, 'verify_owned_postgres') as inspect:
+                verified, artifact, _ = pg.doctor(scope, demo, directory, True, demo=True)
+                self.assertEqual((verified, artifact), (separate, directory))
+                inspect.assert_called_once_with(separate, child_env={})
+                self.assertEqual(selector.read_bytes(), selected)
+                selector.unlink()
+                verified, _, _ = pg.doctor(scope, demo, directory, True, demo=True)
+                self.assertEqual(verified, separate)
+                self.assertFalse(selector.exists())
+
     def test_dev_uses_selected_pg_backend_only_and_rejects_an_unreadable_selector(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
