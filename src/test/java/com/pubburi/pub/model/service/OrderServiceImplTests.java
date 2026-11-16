@@ -118,6 +118,18 @@ class OrderServiceImplTests {
 	}
 
 	@Test
+	void orderLocksProductsByIdAndPreservesTheSubmittedReceiptOrder() {
+		Order order = new Order();
+		order.setUserId("id01");
+
+		orderService.makeOrder(order, List.of(detail(2, 1), detail(1, 2), detail(2, 3)));
+
+		assertThat(productDao.lockedProductIds).containsExactly(1, 2);
+		assertThat(orderDetailDao.insertedDetails).extracting(OrderDetail::getProductId).containsExactly(2, 1);
+		assertThat(orderDetailDao.insertedDetails).extracting(OrderDetail::getQuantity).containsExactly(4, 2);
+	}
+
+	@Test
 	void pagedOrdersAttachDetailsWithOneBatchQuery() {
 		orderDao.orders = List.of(orderInfo(10), orderInfo(20));
 		orderDao.details = List.of(detailInfo(10, 1), detailInfo(20, 2), detailInfo(20, 3));
@@ -384,6 +396,7 @@ class OrderServiceImplTests {
 		@Override public List<com.pubburi.pub.model.dto.ProductThemeRow> selectThemeProducts(String theme, int limit) { throw new UnsupportedOperationException(); }
 		@Override public List<Product> selectCurrentByIds(List<Integer> ids) { throw new UnsupportedOperationException(); }
 		@Override public List<com.pubburi.pub.model.dto.ProductSuggestion> selectNameSuggestions(String pattern, int limit) { throw new UnsupportedOperationException(); }
+		private final List<Integer> lockedProductIds = new ArrayList<>();
 		private Map<Integer, Integer> orderCountIncrements = new LinkedHashMap<>();
 		private Set<Integer> missingProductIds = Set.of();
 		private int price = 1000;
@@ -410,6 +423,7 @@ class OrderServiceImplTests {
 
 		@Override
 		public Product selectByIdForUpdate(int id) {
+			lockedProductIds.add(id);
 			return selectById(id);
 		}
 

@@ -3,12 +3,15 @@ package com.pubburi.rehearsal;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.pubburi.pub.model.dao.OrderDao;
+import com.pubburi.pub.model.dto.Order;
+import com.pubburi.pub.model.dto.OrderDetail;
 import com.pubburi.pub.model.service.OrderService;
 import jakarta.persistence.EntityManagerFactory;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.LockSupport;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -131,6 +134,63 @@ class JpaOrderIntegrationTests extends JpaOrderTestSupport {
             deleteStart.countDown();
             assertEquals(Set.of(200, 404), Set.of(deleteOne.get(12, TimeUnit.SECONDS), deleteTwo.get(12, TimeUnit.SECONDS)));
         } finally { executor.shutdownNow(); assertTrue(executor.awaitTermination(3, TimeUnit.SECONDS)); clean(sql, user, product); }
+    }
+
+    @Test void concurrentOrdersInOppositeItemOrderBothCommitAndKeepReceiptOrder() throws Exception {
+        var sql = control();
+        var admin = loggedIn("ADMIN");
+        String ascendingOwner = addUser(), descendingOwner = addUser();
+        int lower = create(admin, ownName()), higher = create(admin, ownName());
+        var buyer = loginUser(descendingOwner);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var descendingBody = Map.of("details", List.of(Map.of("productId", higher, "quantity", 2),
+                Map.of("productId", lower, "quantity", 2)));
+            var ascending = new Order();
+            ascending.setUserId(ascendingOwner);
+            ascending.setOrderType("TAKEOUT");
+            var reverseRequest = new TransactionTemplate(transactions).execute(status -> {
+                int transactionPid = runtime.queryForObject("SELECT pg_backend_pid()", Integer.class);
+                runtime.queryForObject("SELECT id FROM pubburi.t_product WHERE id=? FOR UPDATE", Integer.class, lower);
+                var queued = executor.submit(() -> request(buyer, "POST", "/api/orders", descendingBody));
+                // Continue only after PostgreSQL confirms the other order is waiting on this transaction.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
+                boolean waiting = false;
+                while (!waiting && !queued.isDone() && System.nanoTime() < deadline) {
+                    waiting = Boolean.TRUE.equals(sql.queryForObject("""
+                        SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                        WHERE datname=current_database() AND ?=ANY(pg_blocking_pids(pid)))
+                        """, Boolean.class, transactionPid));
+                    if (!waiting) LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(25));
+                }
+                assertTrue(waiting, "The opposite order did not reach the reserved product");
+                assertEquals(1, service.makeOrder(ascending, List.of(orderDetail(lower), orderDetail(higher))));
+                return queued;
+            });
+            var descending = reverseRequest.get(8, TimeUnit.SECONDS);
+            assertEquals(201, descending.status());
+            var receipt = descending.body().path("data");
+            assertEquals(higher, receipt.path("details").get(0).path("productId").intValue());
+            assertEquals(lower, receipt.path("details").get(1).path("productId").intValue());
+            assertEquals(4800, receipt.path("totalPrice").intValue());
+            assertEquals(2400, service.getOrderInfo(ascending.getoId()).getTotalPrice());
+            for (int id : List.of(lower, higher)) {
+                assertEquals(3, sql.queryForObject("SELECT order_count FROM pubburi.t_product WHERE id=?", Integer.class, id));
+                assertEquals(List.of(1L, 2L, 3L), events(sql, id).stream().map(event -> event.get("source_version")).toList());
+            }
+        } finally {
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+            clean(sql, ascendingOwner, lower);
+            clean(sql, descendingOwner, higher);
+        }
+    }
+
+    private OrderDetail orderDetail(int productId) {
+        var detail = new OrderDetail();
+        detail.setProductId(productId);
+        detail.setQuantity(1);
+        return detail;
     }
 
     @Test void nullableImportedHistoryAndUtcMonthQueriesAndLeastPrivilegesArePreserved() throws Exception {

@@ -1,7 +1,8 @@
 package com.pubburi.pub.model.service;
 
-import java.util.List;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -60,7 +61,10 @@ public class OrderServiceImpl implements OrderService {
 		}
 		int totalQuantity = 0;
 		int totalPrice = 0;
-		for (OrderDetail detail : normalizedDetails) {
+		// Match the cart path's product lock order while retaining the submitted receipt order.
+		List<OrderDetail> lockOrder = normalizedDetails.stream()
+				.sorted(Comparator.comparingInt(OrderDetail::getProductId)).toList();
+		for (OrderDetail detail : lockOrder) {
 			detail.setOrderId(order.getoId());
 			Product product = productDao.selectByIdForUpdate(detail.getProductId());
 			if (product == null) {
