@@ -36,8 +36,29 @@
 		ORDER BY id
 	</select>
 
-	<select id="selectDefaultCandidates" resultMap="ProductResult">
-		SELECT id, name, type, price, img, abv, order_count FROM t_product ORDER BY id ASC LIMIT #{limit}
+	<resultMap id="ProductThemeResult" type="com.pubburi.pub.model.dto.ProductThemeRow">
+		<constructor>
+			<idArg column="id" javaType="_int" />
+			<arg column="name" javaType="string" />
+			<arg column="type" javaType="string" />
+			<arg column="price" javaType="_int" />
+			<arg column="img" javaType="string" />
+			<arg column="abv" javaType="_float" />
+			<arg column="order_count" javaType="_int" />
+			<arg column="volume_ml" javaType="_int" />
+		</constructor>
+	</resultMap>
+	<select id="selectThemeProducts" resultMap="ProductThemeResult">
+		SELECT p.id, p.name, p.type, p.price, p.img, p.abv, p.order_count, f.volume_ml
+		FROM t_product p JOIN t_product_feature f ON f.product_id = p.id
+		WHERE f.volume_ml IS NOT NULL AND LENGTH(TRIM(f.source_name)) &gt; 0 AND p.abv BETWEEN 0 AND 100
+		<choose>
+			<when test="theme == 'BEGINNER'">AND p.abv BETWEEN 0 AND 7 ORDER BY p.abv, p.id</when>
+			<when test="theme == 'GIFT'">AND f.volume_ml BETWEEN 300 AND 500 ORDER BY f.volume_ml, p.id</when>
+			<when test="theme == 'TABLE'">AND f.volume_ml &gt;= 500 ORDER BY f.volume_ml DESC, p.id</when>
+			<otherwise>AND 1 = 0</otherwise>
+		</choose>
+		LIMIT #{limit}
 	</select>
 	<select id="selectCurrentByIds" resultMap="ProductResult">
 		SELECT id, name, type, price, img, abv, order_count FROM t_product
@@ -134,19 +155,5 @@
 		WHERE id = #{productId}
 	</update>
 
-	<select id="selectByExactName" resultMap="ProductResult">
-		SELECT id, name, type, price, img, abv, order_count
-		FROM t_product
-		WHERE name = #{name}
-		LIMIT 1
-	</select>
 
-	<select id="selectTopNByTypeExcludeName" resultMap="ProductResult">
-		SELECT id, name, type, price, img, abv, order_count
-		FROM t_product
-		WHERE type = #{type}
-		  AND name != #{excludeName}
-		ORDER BY order_count DESC, id ASC
-		LIMIT #{n}
-	</select>
 </mapper>

@@ -70,12 +70,12 @@ class JpaHttpIntegrationTests {
         assertEquals(200,request(admin,"DELETE","/api/admin/markets/"+id,null).status());assertEquals(404,request(admin,"GET","/api/markets/"+id,null).status());
         var docs=request(admin,"GET","/v3/api-docs",null);assertEquals(200,docs.status());var paths=new HashSet<String>();docs.body().path("paths").fieldNames().forEachRemaining(paths::add);
         assertEquals(Set.of("/api/auth/login","/api/auth/logout","/api/auth/me","/api/markets","/api/markets/{id}","/api/admin/markets","/api/admin/markets/{id}",
-            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/themes","/api/products/{id}","/api/products/{id}/features","/api/products/{id}/similar",
+            "/api/products","/api/products/popular","/api/products/suggestions","/api/products/themes","/api/products/{id}","/api/products/{id}/features",
             "/api/admin/products","/api/admin/products/{id}","/api/admin/products/{id}/features",
             "/api/orders","/api/orders/{id}","/api/users/{userId}/orders","/api/admin/orders","/api/admin/orders/{id}","/api/admin/orders/{id}/complete",
             "/api/users","/api/users/id-available","/api/users/{id}/profile","/api/admin/users","/api/admin/users/{id}",
             "/api/products/{productId}/comments","/api/comments","/api/comments/{id}","/api/admin/comments",
-            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/recommendations/default","/api/users/me/profile","/api/users/me/password","/api/users/me/search-phrases","/api/users/me/recommendations/content","/api/users/me/recommendations/exploration","/api/users/me/recommendations/feedback/{productId}","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/recommendations","/api/users/me/orders/{id}/recommendations","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
+            "/api/users/me/favorites","/api/users/me/favorites/{productId}","/api/users/me/preferences","/api/users/me/profile","/api/users/me/password","/api/users/me/notebook","/api/users/me/notebook/{id}","/api/users/me/notebook/by-product/{productId}","/api/users/me/cart","/api/users/me/cart/items/{productId}","/api/users/me/cart/merge","/api/users/me/cart/checkout","/api/users/me/cart/operations/{operationId}","/api/users/me/cart/operations/{operationId}/resolve","/api/users/me/notifications","/api/users/me/notifications/{id}/read","/api/users/me/notifications/read"),paths);
         var schemas=docs.body().at("/components/schemas");
         var themeOperation = docs.body().at("/paths/~1api~1products~1themes/get");
         assertTrue(themeOperation.isObject());
@@ -84,33 +84,10 @@ class JpaHttpIntegrationTests {
         assertEquals(Set.of("id", "items"), keys(schemas.at("/ReviewedProductTheme/properties")));
         assertEquals(6, schemas.at("/ReviewedProductTheme/properties/items/maxItems").intValue());
         assertEquals(Set.of("product", "volumeMl"), keys(schemas.at("/ReviewedProductThemeItem/properties")));
-        var exploration = docs.body().at("/paths/~1api~1users~1me~1recommendations~1exploration/post");
-        var ownerHeader = exploration.path("parameters");
-        assertEquals(1, ownerHeader.size());
-        assertEquals("X-Pubburi-Feedback-Owner", ownerHeader.at("/0/name").textValue());
-        assertEquals("header", ownerHeader.at("/0/in").textValue());
-        assertTrue(ownerHeader.at("/0/required").booleanValue());
-        var explorationInput = schemas.path("ExplorationRecommendationRequest");
-        assertEquals(Set.of("limit"), keys(explorationInput.path("properties")));
-        assertFalse(explorationInput.path("additionalProperties").booleanValue());
-        assertEquals(4, explorationInput.at("/properties/limit/default").intValue());
-        assertEquals(Set.of("source", "catalogScope", "result", "products"),
-            keys(schemas.at("/ExplorationRecommendationResponse/properties")));
-        assertEquals(Set.of("algorithm", "fit_scope", "representation_fitted", "model_fingerprint", "items",
-            "eligible_count", "supported_profile_tokens", "unknown_profile_tokens", "active_numeric_preferences",
-            "fallback_reason", "exploration_reason", "selections"), keys(schemas.at("/ExplorationRecommendationResult/properties")));
-        assertEquals(Set.of("product_id", "basis"), keys(schemas.at("/ExplorationRecommendationSelection/properties")));
         assertEquals(Set.of("productId","quantity"),keys(schemas.path("CartInputItem").path("properties")));
         assertEquals(Set.of("productId","productName","currentProduct","quantity"),keys(schemas.path("CartItem").path("properties")));
         assertEquals(Set.of("version","items"),keys(schemas.path("AccountCart").path("properties")));
         assertEquals(Set.of("operationId","replayed","status","cart","orderId"),keys(schemas.path("CartOperationResult").path("properties")));
-        assertEquals(Set.of("expectedVersion","limit"),keys(schemas.path("CartRecommendationInput").path("properties")));
-        assertEquals(Set.of("source","catalogScope","cartVersion","references","unavailableReason","result","products"),keys(schemas.path("CartRecommendationResponse").path("properties")));
-        assertEquals(Set.of("productId","name","quantity","state"),keys(schemas.path("CartRecommendationReference").path("properties")));
-        assertEquals(Set.of("post"),keys(docs.body().at("/paths/~1api~1users~1me~1cart~1recommendations")));
-        assertEquals(Set.of("limit"),keys(schemas.path("OrderRecommendationInput").path("properties")));
-        assertEquals(Set.of("source","catalogScope","orderId","referenceCount","references","unavailableReason","result","products"),keys(schemas.path("OrderRecommendationResponse").path("properties")));
-        assertEquals(Set.of("detailId","productId","name","quantity","state"),keys(schemas.path("OrderRecommendationReference").path("properties")));
         assertEquals(200,request(admin,"POST","/api/auth/logout",null).status());assertEquals(401,request(admin,"GET","/api/auth/me",null).status());
     }
     private Set<String> keys(com.fasterxml.jackson.databind.JsonNode node){var keys=new HashSet<String>();node.fieldNames().forEachRemaining(keys::add);return keys;}

@@ -58,15 +58,13 @@ class LocalToolsTests(unittest.TestCase):
     def test_occupied_port_is_preserved_and_startup_lock_is_released(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket() as listener:
             root = Path(directory)
-            frontend, recommendation = root / "Frontend", root / "Recommendation"
+            frontend = root / "Frontend"
             (frontend / "node_modules").mkdir(parents=True)
-            (recommendation / ".venv").mkdir(parents=True)
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             env = {"PUBBURI_FRONTEND_PORT": str(listener.getsockname()[1])}
             with patch.object(local, "STATE", root / ".pubburi"), \
                  patch.object(local, "FRONTEND", frontend), \
-                 patch.object(local, "RECOMMENDATION", recommendation), \
                  patch.object(local, "doctor"), patch.object(local, "compose") as compose:
                 with self.assertRaises(OSError):
                     local.start(env, smoke=True)

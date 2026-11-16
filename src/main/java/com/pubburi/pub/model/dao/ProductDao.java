@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.ProductSuggestion;
+import com.pubburi.pub.model.dto.ProductThemeRow;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 
 public interface ProductDao {
@@ -17,8 +18,8 @@ public interface ProductDao {
 	 */
 	List<Product> selectAll();
 
-	List<Product> selectDefaultCandidates(@Param("limit") int limit);
 	List<Product> selectCurrentByIds(@Param("ids") List<Integer> ids);
+	List<ProductThemeRow> selectThemeProducts(@Param("theme") String theme, @Param("limit") int limit);
 
 	List<Product> selectFiltered(@Param("type") String type, @Param("q") String q, @Param("sort") String sort,
 			@Param("filters") ProductSearchFilters filters, @Param("limit") int limit, @Param("offset") int offset);
@@ -77,8 +78,6 @@ public interface ProductDao {
 	 */
 	int incrementOrderCount(@Param("productId") int productId, @Param("quantity") int quantity);
 
-	Product selectByExactName(@Param("name") String name);
 
-	List<Product> selectTopNByTypeExcludeName(@Param("type") String type, @Param("excludeName") String excludeName, @Param("n") int n);
 
 }

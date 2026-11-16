@@ -12,11 +12,6 @@ import com.pubburi.pub.controller.rest.UserRestController;
 import com.pubburi.pub.controller.rest.CommentRestController;
 import com.pubburi.pub.controller.rest.FavoriteRestController;
 import com.pubburi.pub.controller.rest.UserPreferenceRestController;
-import com.pubburi.pub.controller.rest.DefaultRecommendationController;
-import com.pubburi.pub.controller.rest.SearchPhraseController;
-import com.pubburi.pub.controller.rest.OwnedContentRecommendationController;
-import com.pubburi.pub.controller.rest.SimilarProductController;
-import com.pubburi.pub.config.RecommendationConfig;
 import com.pubburi.pub.config.ProductSearchConfig;
 import com.pubburi.pub.model.service.*;
 import org.springframework.boot.SpringApplication;
@@ -30,10 +25,7 @@ import org.springframework.context.annotation.Import;
     UserServiceImpl.class,PasswordHasher.class,MarketServiceImpl.class,OrderRestController.class,OrderServiceImpl.class,
     UserRestController.class,GradeService.class,CommentRestController.class,CommentServiceImpl.class,
     FavoriteRestController.class,FavoriteServiceImpl.class,UserPreferenceRestController.class,UserPreferenceServiceImpl.class,
-    DefaultRecommendationController.class,DefaultRecommendationService.class,RecommendationConfig.class,
-    SearchPhraseController.class,SearchPhraseService.class,PublicProductSearchService.class,ProductSearchConfig.class,
-    OwnedContentRecommendationController.class,OwnedContentRecommendationService.class,OwnedContentSnapshotService.class,
-    SimilarProductController.class,SimilarProductService.class})
+    PublicProductSearchService.class,ProductSearchConfig.class})
 public class JpaRehearsalApplication {
     public static void main(String[] args){SpringApplication.run(JpaRehearsalApplication.class,args);}
 }

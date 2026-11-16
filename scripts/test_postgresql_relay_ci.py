@@ -15,24 +15,12 @@ from search_index import SearchError
 class PostgreSQLRelayPreparationTests(unittest.TestCase):
     def business_api(self):
         # Authored cardinality fixture; real route names and runtime schemas remain checked by packaged CI.
-        paths = {"/authored/" + str(index): {"get": {}} for index in range(35)}
+        paths = {"/authored/" + str(index): {"get": {}} for index in range(34)}
         for index in range(7): paths["/authored/" + str(index)]["put"] = {}
-        paths["/api/users/me/search-phrases"] = {"post": {
-            "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Input"}}}},
-            "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}}}
-        paths["/api/users/me/recommendations/content"] = {"post": {
-            "parameters": [{"name": "X-Pubburi-Feedback-Owner", "in": "header"}],
-            "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentInput"}}}},
-            "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContentEnvelope"}}}}}}}
-        paths["/api/products/{id}/similar"] = {"get": {
-            "parameters": [{"name": "id", "in": "path"}, {"name": "includeExplanations", "in": "query", "schema": {"type": "boolean", "default": False}}],
-            "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SimilarEnvelope"}}}}}}}
         paths["/api/products/suggestions"] = {"get": {
             "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}],
             "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/SuggestionEnvelope"}}}}}}}
         paths["/api/products/themes"] = {"get": {}}
-        paths["/api/users/me/recommendations/exploration"] = {"post": {}}
-        paths["/api/users/me/recommendations/feedback/{productId}"] = {"get": {}, "put": {}, "delete": {}}
         paths["/api/users/me/notebook"]={"get":{},"post":{}}
         paths["/api/users/me/notebook/{id}"]={"get":{},"put":{},"delete":{}}
         paths["/api/users/me/notebook/by-product/{productId}"]={"get":{}}
@@ -40,68 +28,30 @@ class PostgreSQLRelayPreparationTests(unittest.TestCase):
         paths["/api/users/me/cart/items/{productId}"]={"put":{},"delete":{}}
         paths["/api/users/me/cart/merge"]={"post":{}}
         paths["/api/users/me/cart/checkout"]={"post":{}}
-        paths["/api/users/me/cart/recommendations"]={"post":{}}
-        paths["/api/users/me/orders/{id}/recommendations"]={"post":{
-            "parameters":[{"name":"id","in":"path"},{"name":"X-Pubburi-Account-Owner","in":"header","required":True}],
-            "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/OrderInput"}}}},
-            "responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/OrderEnvelope"}}}}}}}
         paths["/api/users/me/cart/operations/{operationId}"]={"get":{}}
         paths["/api/users/me/cart/operations/{operationId}/resolve"]={"post":{}}
         paths["/api/users/me/notifications"]={"get":{}}
         paths["/api/users/me/notifications/{id}/read"]={"put":{}}
         paths["/api/users/me/notifications/read"]={"post":{}}
         return {"paths": paths, "components": {"schemas": {
-            "ContentInput": {"additionalProperties": False, "properties": {"limit": {"minimum": 1, "maximum": 12}, "includeActivity": {"type": "boolean", "default": False}}},
-            "ContentEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/ContentResponse"}}},
-            "ContentResponse": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "catalogScope": {"enum": ["REVIEWED_DEMO", "REVIEWED_FAMILY_BROWSE_DEMO", "REVIEWED_LOCAL_CATALOG"]}, "result": {}, "products": {}, "activityEvidence": {"$ref": "#/components/schemas/ActivityEvidence"}, "feedbackEvidence": {"$ref": "#/components/schemas/FeedbackEvidence"}}},
-            "FeedbackEvidence": {"properties": {"rankingMode": {}, "excludedNotInterestedCount": {}, "positiveReferences": {"items": {"$ref": "#/components/schemas/PositiveReference"}}}},
-            "PositiveReference": {"properties": {"productId": {}, "name": {}}},
-            "ActivityEvidence": {"properties": {key: {"type": "array", "items": {"type": "string"}}
-                for key in ("favoriteCategories", "highlyRatedCategories")}},
             "SuggestionEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SuggestionResponse"}}},
             "SuggestionResponse": {"properties": {"items": {"type": "array", "maxItems": 8, "items": {"$ref": "#/components/schemas/SuggestionItem"}}}},
             "SuggestionItem": {"properties": {name: {"type": kind} for name, kind in
                 (("id", "integer"), ("name", "string"), ("type", "string"), ("price", "integer"))}},
-            "SimilarEnvelope": {"properties": {"data": {"$ref": "#/components/schemas/SimilarProductsResponse"}}},
-            "SimilarProductsResponse": {"required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ProductResponse"}}, "catalogScope": {"type": "string", "enum": ["REVIEWED_LOCAL_CATALOG"]}, "explanations": {"type": "array", "items": {"$ref": "#/components/schemas/SimilarProductExplanation"}}}},
-            "SimilarProductExplanation": {"required": ["productId", "explanation"], "properties": {"productId": {"type": "integer"}, "explanation": {"type": "object"}}},
-            "OrderInput":{"additionalProperties":False,"properties":{"limit":{"type":"integer","minimum":1,"maximum":12}}},
-            "OrderEnvelope":{"properties":{"data":{"$ref":"#/components/schemas/OrderContext"}}},
-            "OrderContext":{"required":["source","catalogScope","orderId","referenceCount","references","unavailableReason","result","products"],"properties":{
-                "source":{},"catalogScope":{"enum":["REVIEWED_DEMO","REVIEWED_LOCAL_CATALOG"]},"orderId":{},"referenceCount":{},"references":{"items":{"$ref":"#/components/schemas/OrderRef"}},"unavailableReason":{},"result":{},"products":{}}},
-            "OrderRef":{"required":["detailId","productId","name","quantity","state"],"properties":{"detailId":{},"productId":{"type":["integer","null"]},"name":{"type":["string","null"]},"quantity":{"maximum":2147483647},"state":{}}},
-            "Input": {"additionalProperties": False, "properties": {"searchOptInFields": {}, "limit": {}}},
-            "Envelope": {"properties": {"data": {"$ref": "#/components/schemas/Response"}}},
-            "Response": {"properties": {"source": {"enum": ["PROVIDER", "UNAVAILABLE"]}, "result": {}}}}}}
+        }}}
 
-    def test_current_scope_requires_the_exact_private_post_even_when_totals_match(self):
-        spec = self.business_api(); self.assertEqual(verify_business_api(spec), {"api_paths": 56, "api_operations": 70})
+    def test_scope_requires_the_maintained_paths_and_suggestion_schema(self):
+        spec = self.business_api()
+        self.assertEqual(verify_business_api(spec), {"api_paths": 48, "api_operations": 60})
         missing = copy.deepcopy(spec)
-        missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/search-phrases")
+        missing["paths"]["/wrong-owner-path"] = missing["paths"].pop("/api/users/me/cart/checkout")
         extra_method = copy.deepcopy(spec)
-        extra_method["paths"]["/api/users/me/search-phrases"]["get"] = {}
+        extra_method["paths"]["/api/users/me/cart/checkout"]["get"] = {}
         del extra_method["paths"]["/authored/0"]["put"]
-        for invalid in (missing, extra_method):
+        changed_schema = copy.deepcopy(spec)
+        changed_schema["components"]["schemas"]["SuggestionItem"]["properties"]["why"] = {"type": "string"}
+        for invalid in (missing, extra_method, changed_schema):
             with self.assertRaises(AssertionError): verify_business_api(invalid)
-
-    def test_old_totals_and_owner_override_or_weaker_fallback_schemas_are_rejected(self):
-        spec = self.business_api()
-        old = copy.deepcopy(spec); del old["paths"]["/api/users/me/search-phrases"]
-        owner = copy.deepcopy(spec); owner["components"]["schemas"]["Input"]["properties"]["userId"] = {}
-        query = copy.deepcopy(spec); query["paths"]["/api/users/me/search-phrases"]["post"]["parameters"] = [{"name": "userId"}]
-        weaker = copy.deepcopy(spec); weaker["components"]["schemas"]["Response"]["properties"]["source"]["enum"].append("FALLBACK")
-        for invalid in (old, owner, query, weaker):
-            with self.assertRaises(AssertionError): verify_business_api(invalid)
-
-    def test_content_route_strict_ownerless_input_demo_scope_and_unavailable_policy_are_required(self):
-        spec = self.business_api()
-        path = copy.deepcopy(spec); path["paths"]["/foreign-content"] = path["paths"].pop("/api/users/me/recommendations/content")
-        owner = copy.deepcopy(spec); owner["components"]["schemas"]["ContentInput"]["properties"]["catalog"] = {}
-        scope = copy.deepcopy(spec); scope["components"]["schemas"]["ContentResponse"]["properties"]["catalogScope"]["enum"] = ["SERVICE_APPROVED"]
-        missing_family = copy.deepcopy(spec); missing_family["components"]["schemas"]["ContentResponse"]["properties"]["catalogScope"]["enum"] = ["REVIEWED_DEMO"]
-        weaker = copy.deepcopy(spec); weaker["components"]["schemas"]["ContentResponse"]["properties"]["source"]["enum"].append("FALLBACK")
-        for invalid in (path, owner, scope, missing_family, weaker):
-            with self.assertRaises((AssertionError, KeyError)): verify_business_api(invalid)
 
     def test_missing_opt_in_role_collision_and_reused_business_database_never_reach_database(self):
         with tempfile.TemporaryDirectory() as temporary:

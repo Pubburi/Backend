@@ -25,28 +25,21 @@ from search_index import Engine, Http, SearchError, document, decode
 from search_relay import PostgresStore, Relay, connect_database, database_settings, target_identity, relay_status, claim_document
 from relay_smoke import event
 from jpa_smoke import child_environment, request_json, verify_jar, cleanup_on_termination, defer_termination
-from api_smoke import verify_search_phrase_openapi, verify_content_recommendation_openapi, verify_similar_products_openapi, verify_product_suggestions_openapi, verify_order_recommendation_openapi
+from api_smoke import verify_product_suggestions_openapi
 
 
 def verify_business_api(spec):
     methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
     operations = sum(method in methods for path in spec["paths"].values() for method in path)
-    assert len(spec["paths"]) == 56 and operations == 70
+    assert len(spec["paths"]) == 48 and operations == 60
     for path, expected in (("/api/users/me/notebook",{"get","post"}),
             ("/api/users/me/notebook/{id}",{"get","put","delete"}),
             ("/api/users/me/notebook/by-product/{productId}",{"get"}),
             ("/api/users/me/cart",{"get","delete"}), ("/api/users/me/cart/items/{productId}",{"put","delete"}),
-            ("/api/users/me/cart/merge",{"post"}), ("/api/users/me/cart/checkout",{"post"}), ("/api/users/me/cart/recommendations",{"post"}), ("/api/users/me/cart/operations/{operationId}",{"get"}), ("/api/users/me/cart/operations/{operationId}/resolve",{"post"}), ("/api/users/me/notifications",{"get"}), ("/api/users/me/notifications/{id}/read",{"put"}), ("/api/users/me/notifications/read",{"post"})):
+            ("/api/users/me/cart/merge",{"post"}), ("/api/users/me/cart/checkout",{"post"}), ("/api/users/me/cart/operations/{operationId}",{"get"}), ("/api/users/me/cart/operations/{operationId}/resolve",{"post"}), ("/api/users/me/notifications",{"get"}), ("/api/users/me/notifications/{id}/read",{"put"}), ("/api/users/me/notifications/read",{"post"})):
         assert methods.intersection(spec["paths"].get(path,{}))==expected
-    assert methods.intersection(spec["paths"].get("/api/users/me/search-phrases", {})) == {"post"}
-    assert methods.intersection(spec["paths"].get("/api/users/me/recommendations/feedback/{productId}", {})) == {"get", "put", "delete"}
-    verify_search_phrase_openapi(spec)
-    verify_content_recommendation_openapi(spec)
-    assert methods.intersection(spec["paths"].get("/api/users/me/recommendations/exploration", {})) == {"post"}
-    verify_similar_products_openapi(spec)
     verify_product_suggestions_openapi(spec)
     assert methods.intersection(spec["paths"].get("/api/products/themes", {})) == {"get"}
-    verify_order_recommendation_openapi(spec)
     return {"api_paths": len(spec["paths"]), "api_operations": operations}
 
 
@@ -479,9 +472,7 @@ def consume_business(http, endpoint, private, environ, index="pubburi-products-v
         raise AssertionError("Owned bounded PostgreSQL queue did not drain")
     server_log = private / "pg-relay-business-server.log"
     watch_log = private / "pg-relay-business-watch.log"
-    with cleanup_on_termination(), server_log.open("wb") as server_output, watch_log.open("wb") as watch_output, socket.socket() as refusal:
-        refusal.bind(("127.0.0.1", 0))
-        child["PUBBURI_RECOMMENDATION_BASE_URL"] = "http://127.0.0.1:" + str(refusal.getsockname()[1])
+    with cleanup_on_termination(), server_log.open("wb") as server_output, watch_log.open("wb") as watch_output:
         try:
             with defer_termination():
                 process = subprocess.Popen([java, "-jar", str(immutable)], env=child, cwd=ROOT, stdout=server_output, stderr=subprocess.STDOUT)

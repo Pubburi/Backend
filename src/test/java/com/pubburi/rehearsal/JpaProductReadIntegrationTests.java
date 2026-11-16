@@ -85,6 +85,32 @@ class JpaProductReadIntegrationTests {
         @Override public void close() {for(int id:owned)sql.update("DELETE FROM pubburi.t_product WHERE id=? AND name LIKE ?",id,prefix+"%");}
     }
 
+    @Test void themesUseCurrentSourcedFactsWithoutAnExternalProvider() throws Exception {
+        try (var f = new Fixture()) {
+            int candidate = f.add(" Theme", "탁주", 1200, 0f, 0);
+            f.feature(candidate, false, false, 300, List.of(), List.of());
+            var reply = get("/api/products/themes");
+            assertEquals(200, reply.status());
+            var data = reply.body().path("data");
+            assertEquals("REVIEWED_LOCAL_CATALOG", data.path("source").asText());
+            assertEquals(List.of("BEGINNER", "GIFT", "TABLE"),
+                java.util.stream.StreamSupport.stream(data.path("themes").spliterator(), false)
+                    .map(theme -> theme.path("id").asText()).toList());
+            for (int theme : List.of(0, 1)) {
+                var items = data.path("themes").get(theme).path("items");
+                assertTrue(java.util.stream.StreamSupport.stream(items.spliterator(), false)
+                    .anyMatch(item -> item.path("product").path("id").asInt() == candidate
+                        && item.path("product").path("price").asInt() == 1200 && item.path("volumeMl").asInt() == 300));
+            }
+            f.sql.update("DELETE FROM pubburi.t_product_feature WHERE product_id=?", candidate);
+            var refreshed = get("/api/products/themes").body().path("data");
+            for (var theme : refreshed.path("themes")) for (var item : theme.path("items")) {
+                assertNotEquals(candidate, item.path("product").path("id").asInt());
+                assertNotEquals(f.b, item.path("product").path("id").asInt());
+            }
+        }
+    }
+
     @Test void actualDtoFiltersFloatStorageDomainAndAllTagsMatchTheSamePageCount()throws Exception {
         try(var f=new Fixture()) {
             var all=get(f.page("&size=100"));assertEquals(200,all.status());var page=all.body().path("data");

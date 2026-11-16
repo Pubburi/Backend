@@ -10,6 +10,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, urlunsplit
 
@@ -94,8 +95,8 @@ def exercise(http, endpoint, private, environ):
                 raise RuntimeError("Relay fixture schema is not empty; refusing to adopt or reset it")
     finally:
         connection.close()
-    ddl = Path("docs/migrations/007-product-search-outbox.sql").read_text().split("-- Current state only:")[0]
-    ddl += "\n" + Path("docs/migrations/008-search-outbox-delivery.sql").read_text()
+    ddl = Path("tools/mysql-baseline/migrations/007-product-search-outbox.sql").read_text().split("-- Current state only:")[0]
+    ddl += "\n" + Path("tools/mysql-baseline/migrations/008-search-outbox-delivery.sql").read_text()
     subprocess.run(["docker", "exec", "-i", "-e", "MYSQL_PWD", queue_env["PUBBURI_SMOKE_CONTAINER_ID"],
         "mysql", "-u" + queue_env["PUBBURI_DB_USER"], "--default-character-set=utf8mb4", queue_env["PUBBURI_DB_NAME"]],
         input=ddl, capture_output=True, text=True, check=True,
@@ -256,9 +257,12 @@ def consume_business(http, endpoint, private, environ):
     engine.ready(create=True)
     with store.transaction() as cursor:
         cursor.execute("SELECT COUNT(*) AS n FROM t_product_search_outbox o LEFT JOIN t_product_search_delivery d ON d.event_id=o.event_id WHERE d.event_id IS NULL")
-        assert cursor.fetchone()["n"] == 0
+        if cursor.fetchone()["n"] != 0:
+            raise SearchError("business_relay_missing_delivery_rows")
         cursor.execute("SELECT COUNT(*) AS n FROM t_product_search_delivery")
-        total = cursor.fetchone()["n"]; assert 0 < total <= 1000
+        total = cursor.fetchone()["n"]
+        if not 0 < total <= 1000:
+            raise SearchError("business_relay_fixture_count_out_of_bounds")
     child_env = dict(environ); child_env.pop("PUBBURI_DB_ROOT_PASSWORD", None); child_env.pop("MYSQL_PWD", None)
     with (private / "relay-business.log").open("wb") as log:
         process = subprocess.Popen([sys.executable, "scripts/search_relay.py", "watch", "--endpoint", endpoint, "--index", engine.index],
@@ -266,29 +270,36 @@ def consume_business(http, endpoint, private, environ):
         record = private / "relay-business-worker.json"
         record.write_text(json.dumps({"pid": process.pid, "phase": "running"}))
         try:
-            import time
             end = time.monotonic() + 120
             while True:
-                assert process.poll() is None, "Owned business relay exited; see private log"
+                if process.poll() is not None:
+                    raise SearchError("business_relay_worker_exited")
                 with store.transaction() as cursor:
                     cursor.execute("SELECT COUNT(*) AS n FROM t_product_search_delivery WHERE status!='DELIVERED'")
                     if cursor.fetchone()["n"] == 0: break
-                if time.monotonic() >= end: raise RuntimeError("Owned business relay did not drain its bounded fixture")
+                if time.monotonic() >= end:
+                    raise SearchError("business_relay_worker_drain_timeout")
                 time.sleep(.2)
             process.send_signal(signal.SIGINT)
-            assert process.wait(timeout=10) == 0
+            try:
+                if process.wait(timeout=10) != 0:
+                    raise SearchError("business_relay_worker_shutdown_failed")
+            except subprocess.TimeoutExpired:
+                raise SearchError("business_relay_worker_shutdown_timeout") from None
         finally:
             if process.poll() is None: process.terminate(); process.wait(timeout=10)
             record.write_text(json.dumps({"pid": None, "phase": "stopped"}))
     from smoke_search import outbox_fixture
     fixture = outbox_fixture(environ["PUBBURI_SEARCH_OUTBOX_INPUT"])
     final = fixture[-1]
-    assert http.request("GET", f"/{engine.index}/_doc/{final['product_id']}")[1]["_source"] == final
+    if http.request("GET", f"/{engine.index}/_doc/{final['product_id']}")[1]["_source"] != final:
+        raise SearchError("business_relay_final_document_mismatch")
     with store.transaction() as cursor:
         cursor.execute("""SELECT COUNT(*) AS n FROM t_product_search_outbox o
             JOIN t_product_search_delivery d ON d.event_id=o.event_id
             WHERE o.product_id=%s AND d.status='DELIVERED'""", (final["product_id"],))
-        assert cursor.fetchone()["n"] == len(fixture)
+        if cursor.fetchone()["n"] != len(fixture):
+            raise SearchError("business_relay_fixture_ack_count_mismatch")
     return dict(settings=settings, source_id=source_id, index=engine.index, final=final, delivered=total)
 
 

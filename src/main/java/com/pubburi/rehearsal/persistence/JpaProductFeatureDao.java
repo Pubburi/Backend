@@ -3,7 +3,6 @@ package com.pubburi.rehearsal.persistence;
 import com.pubburi.pub.model.dao.ProductFeatureDao;
 import com.pubburi.pub.model.dto.ProductFeatures;
 import com.pubburi.pub.model.dto.ProductFeatureTag;
-import com.pubburi.pub.model.dto.ProductFeatureTagRow;
 import java.util.List;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,8 +23,6 @@ public class JpaProductFeatureDao implements ProductFeatureDao {
 
     @Override public ProductFeatures selectByProductId(int id) { return reads.featureHeader(id); }
     @Override public List<ProductFeatureTag> selectTags(int id) { return reads.tags(id); }
-    @Override public List<ProductFeatures> selectByProductIds(List<Integer> ids) { return reads.featureHeaders(ids); }
-    @Override public List<ProductFeatureTagRow> selectTagsByProductIds(List<Integer> ids) { return reads.tagsByProductIds(ids); }
 
     @Override
     @Transactional
