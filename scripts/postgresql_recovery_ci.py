@@ -215,6 +215,29 @@ def run(environ, runtime, recovery_control, selected_release):
             else:raise ValueError('recovery_ci_default_drift_accepted')
         finally:
             with recovery.connect(control) as connection:connection.execute('ALTER TABLE pubburi.t_comment ALTER rating SET DEFAULT 1')
+        # The FK only covers delivery to event. An event without its delivery row
+        # would be preserved in the archive but would be invisible to the relay.
+        with recovery.connect(control) as connection:
+            missing = connection.execute("""DELETE FROM pubburi.t_product_search_delivery WHERE event_id=%s
+                RETURNING event_id,status,claim_token,lease_until,available_at,attempts,delivered_at,last_error""", (event,)).fetchone()
+        if missing is None:
+            raise ValueError('recovery_ci_search_delivery_fixture_missing')
+        refused = local.STATE/'refused-missing-search-delivery'
+        try:
+            try:
+                recovery.backup(control,refused,local=local)
+            except ValueError as error:
+                if str(error) != 'postgresql_recovery_search_delivery_missing':
+                    raise
+            else:
+                raise ValueError('recovery_ci_missing_search_delivery_accepted')
+            if (refused/'database.dump').exists() or (refused/'manifest.json').exists():
+                raise ValueError('recovery_ci_missing_search_delivery_archive_created')
+        finally:
+            with recovery.connect(control) as connection:
+                connection.execute("""INSERT INTO pubburi.t_product_search_delivery
+                    (event_id,status,claim_token,lease_until,available_at,attempts,delivered_at,last_error)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""", missing)
         pin=recovery.backup(control,archive,local=local)
         manifest=json.loads((archive/'manifest.json').read_text())
         # A wrong pin is rejected before target schema/sequence creation.
@@ -377,6 +400,7 @@ def run(environ, runtime, recovery_control, selected_release):
         'cart_retired_nonce_blocks_late_post_after_restore':True,
         'internal_notifications_snapshots_and_first_read_time_preserved':True,
         'preservation_rejects_sibling_copy_and_same_count_notification_change':True,
+        'backup_rejects_missing_search_delivery_before_archive':True,
         'explicit_promotion_and_stale_source_reactivation_guard_verified':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
