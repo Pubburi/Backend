@@ -25,6 +25,7 @@ final class ReverseOrderRehearsal {
                     ? new SourceContract.Column(column.name(), column.kind(), column.nullable(), column.sqlType(), "6")
                     : column).toList(), ORIGINAL_ORDERS.primary());
     private static final SourceContract.Table DETAILS = table("t_order_detail");
+    private static final SourceContract.Table STAMPS = table("t_stamp");
     private static final String ORDER_TIME = "2026-11-15T04:00:00.123456Z";
 
     private ReverseOrderRehearsal() { }
@@ -77,11 +78,11 @@ final class ReverseOrderRehearsal {
             ArrayNode duplicateDetail = details.get(1).deepCopy();
             duplicateDetail.set(0, beforeDetails.values().iterator().next().get(0));
             assertEquals(1062, assertThrows(SQLException.class,
-                    () -> copyOrder(legacy, order, List.of(details.get(0), duplicateDetail))).getErrorCode());
+                    () -> copyOrder(legacy, order, List.of(details.get(0), duplicateDetail), List.of())).getErrorCode());
             assertEquals(beforeOrders, legacyRows(mysql, ORDERS));
             assertEquals(beforeDetails, legacyRows(mysql, DETAILS));
 
-            copyOrder(legacy, order, details);
+            copyOrder(legacy, order, details, List.of());
             var expectedOrders = new TreeMap<>(beforeOrders);
             var expectedDetails = new TreeMap<>(beforeDetails);
             assertNull(expectedOrders.put(orderId, order));
@@ -90,15 +91,16 @@ final class ReverseOrderRehearsal {
             }
             assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
             assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
-            assertEquals(1062, assertThrows(SQLException.class, () -> copyOrder(legacy, order, details)).getErrorCode());
+            assertEquals(1062, assertThrows(SQLException.class, () -> copyOrder(legacy, order, details, List.of())).getErrorCode());
             assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
             assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
 
+            verifyLinkedOrder(pg, legacy, mysql, expectedOrders, expectedDetails);
             try (var sql = mysql.createStatement()) {
                 sql.execute("SET SESSION information_schema_stats_expiry=0");
             }
             var pgStates = SourceImportIntegrationTests.sequences(pg);
-            for (var shared : List.of(ORDERS, DETAILS)) {
+            for (var shared : List.of(ORDERS, DETAILS, STAMPS)) {
                 long next = Long.parseLong(pgStates.get(shared.name()).split(":")[0]) + 1;
                 assertEquals(next, SourceImportIntegrationTests.number(mysql,
                         "SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='" + shared.name() + "'"));
@@ -110,6 +112,70 @@ final class ReverseOrderRehearsal {
             assertOrderTimePrecision(current.connection, 0);
             SourceImportTool.compareSource(current, source);
             current.finish();
+        }
+    }
+
+    private static void verifyLinkedOrder(Connection pg, SourceSettings legacy, Connection mysql,
+            Map<Integer, JsonNode> expectedOrders, Map<Integer, JsonNode> expectedDetails) throws Exception {
+        var expectedStamps = legacyRows(mysql, STAMPS);
+        assertFalse(expectedStamps.isEmpty());
+        int orderId = authoredLinkedOrder(pg);
+        var order = pgRows(pg, ORDERS, "o_id", orderId).get(0);
+        var details = pgRows(pg, DETAILS, "order_id", orderId);
+        var stamps = pgRows(pg, STAMPS, "order_id", orderId);
+        assertEquals(1, details.size());
+        assertEquals(1, stamps.size());
+        var detail = details.get(0);
+        var stamp = stamps.get(0);
+        assertTrue(order.get(1).isTextual());
+        assertEquals(order.get(1), stamp.get(1));
+        assertEquals(order.get(0), detail.get(1));
+        assertEquals(order.get(0), stamp.get(2));
+        assertFalse(detail.get(2).isNull());
+        assertEquals(stamp.get(3), detail.get(3));
+        assertEquals(order.get(6), detail.get(8));
+
+        // The order and detail have been inserted when the final stamp ID collides.
+        ArrayNode duplicateStamp = stamp.deepCopy();
+        duplicateStamp.set(0, expectedStamps.values().iterator().next().get(0));
+        assertEquals(1062, assertThrows(SQLException.class,
+                () -> copyOrder(legacy, order, details, List.of(duplicateStamp))).getErrorCode());
+        assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
+        assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
+        assertEquals(expectedStamps, legacyRows(mysql, STAMPS));
+
+        copyOrder(legacy, order, details, stamps);
+        assertNull(expectedOrders.put(orderId, order));
+        assertNull(expectedDetails.put(Integer.parseInt(detail.get(0).textValue()), detail));
+        assertNull(expectedStamps.put(Integer.parseInt(stamp.get(0).textValue()), stamp));
+        assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
+        assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
+        assertEquals(expectedStamps, legacyRows(mysql, STAMPS));
+    }
+
+    private static int authoredLinkedOrder(Connection pg) throws SQLException {
+        try (var sql = pg.prepareStatement("""
+                WITH picked_product AS (SELECT * FROM pubburi.t_product WHERE price > 0 ORDER BY id LIMIT 1),
+                placed_order AS (
+                    INSERT INTO pubburi.t_order(user_id,order_type,order_time,total_price,price_basis)
+                    SELECT u.id,'TAKEOUT',?,p.price,'ORDER_SNAPSHOT'
+                    FROM (SELECT id FROM pubburi.t_user WHERE role='USER' ORDER BY id LIMIT 1) u CROSS JOIN picked_product p
+                    RETURNING o_id,user_id
+                ), order_line AS (
+                    INSERT INTO pubburi.t_order_detail
+                        (order_id,product_id,quantity,product_name,product_type,product_img,unit_price,sum_price)
+                    SELECT o.o_id,p.id,1,p.name,p.type,p.img,p.price,p.price FROM placed_order o CROSS JOIN picked_product p
+                    RETURNING order_id,quantity
+                )
+                INSERT INTO pubburi.t_stamp(user_id,order_id,quantity)
+                SELECT o.user_id,l.order_id,l.quantity FROM placed_order o JOIN order_line l ON l.order_id=o.o_id
+                RETURNING order_id
+                """)) {
+            sql.setObject(1, Instant.parse(ORDER_TIME).atOffset(ZoneOffset.UTC));
+            try (var rows = sql.executeQuery()) {
+                assertTrue(rows.next(), "Authored linked order requires an existing customer and product");
+                return rows.getInt(1);
+            }
         }
     }
 
@@ -162,11 +228,13 @@ final class ReverseOrderRehearsal {
         return String.join(",", table.columns().stream().map(column -> '`' + column.name() + '`').toList());
     }
 
-    private static void copyOrder(SourceSettings legacy, JsonNode order, List<JsonNode> details) throws Exception {
+    private static void copyOrder(SourceSettings legacy, JsonNode order, List<JsonNode> details,
+            List<JsonNode> stamps) throws Exception {
         ImportTransaction.run(legacy.connect(), mysql -> {
             SourceSession.guard(mysql, legacy);
             insert(mysql, ORDERS, order);
             for (var detail : details) insert(mysql, DETAILS, detail);
+            for (var stamp : stamps) insert(mysql, STAMPS, stamp);
             return null;
         });
     }
