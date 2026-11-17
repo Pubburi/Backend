@@ -28,6 +28,8 @@ final class ReverseOrderRehearsal {
     private static final SourceContract.Table STAMPS = table("t_stamp");
     private static final String ORDER_TIME = "2026-11-15T04:00:00.123456Z";
 
+    private record AwardedOrder(int id, String user, int before, int after) { }
+
     private ReverseOrderRehearsal() { }
 
     static void verify(Map<String, String> env, Connection pg, SourceArtifact.Snapshot source) throws Exception {
@@ -78,11 +80,11 @@ final class ReverseOrderRehearsal {
             ArrayNode duplicateDetail = details.get(1).deepCopy();
             duplicateDetail.set(0, beforeDetails.values().iterator().next().get(0));
             assertEquals(1062, assertThrows(SQLException.class,
-                    () -> copyOrder(legacy, order, List.of(details.get(0), duplicateDetail), List.of())).getErrorCode());
+                    () -> copyOrder(legacy, order, List.of(details.get(0), duplicateDetail), List.of(), null)).getErrorCode());
             assertEquals(beforeOrders, legacyRows(mysql, ORDERS));
             assertEquals(beforeDetails, legacyRows(mysql, DETAILS));
 
-            copyOrder(legacy, order, details, List.of());
+            copyOrder(legacy, order, details, List.of(), null);
             var expectedOrders = new TreeMap<>(beforeOrders);
             var expectedDetails = new TreeMap<>(beforeDetails);
             assertNull(expectedOrders.put(orderId, order));
@@ -91,7 +93,7 @@ final class ReverseOrderRehearsal {
             }
             assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
             assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
-            assertEquals(1062, assertThrows(SQLException.class, () -> copyOrder(legacy, order, details, List.of())).getErrorCode());
+            assertEquals(1062, assertThrows(SQLException.class, () -> copyOrder(legacy, order, details, List.of(), null)).getErrorCode());
             assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
             assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
 
@@ -119,7 +121,8 @@ final class ReverseOrderRehearsal {
             Map<Integer, JsonNode> expectedOrders, Map<Integer, JsonNode> expectedDetails) throws Exception {
         var expectedStamps = legacyRows(mysql, STAMPS);
         assertFalse(expectedStamps.isEmpty());
-        int orderId = authoredLinkedOrder(pg);
+        var award = authoredLinkedOrder(pg);
+        int orderId = award.id();
         var order = pgRows(pg, ORDERS, "o_id", orderId).get(0);
         var details = pgRows(pg, DETAILS, "order_id", orderId);
         var stamps = pgRows(pg, STAMPS, "order_id", orderId);
@@ -134,48 +137,96 @@ final class ReverseOrderRehearsal {
         assertFalse(detail.get(2).isNull());
         assertEquals(stamp.get(3), detail.get(3));
         assertEquals(order.get(6), detail.get(8));
+        assertEquals(award.user(), order.get(1).textValue());
+        assertEquals(award.before() + stamp.get(3).asInt(), award.after());
+        assertEquals(award.after(), balance(pg, "pubburi.t_user", award.user()));
+        assertEquals(award.before(), balance(mysql, "t_user", award.user()));
 
         // The order and detail have been inserted when the final stamp ID collides.
         ArrayNode duplicateStamp = stamp.deepCopy();
         duplicateStamp.set(0, expectedStamps.values().iterator().next().get(0));
         assertEquals(1062, assertThrows(SQLException.class,
-                () -> copyOrder(legacy, order, details, List.of(duplicateStamp))).getErrorCode());
+                () -> copyOrder(legacy, order, details, List.of(duplicateStamp), award)).getErrorCode());
         assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
         assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
         assertEquals(expectedStamps, legacyRows(mysql, STAMPS));
+        assertEquals(award.before(), balance(mysql, "t_user", award.user()));
 
-        copyOrder(legacy, order, details, stamps);
+        // The target independently moved. Reject after writing all three rows and retain its balance.
+        int changedBalance = award.after() + 1;
+        replaceBalance(mysql, award.user(), award.before(), changedBalance);
+        try {
+            assertEquals("legacy_order_stamp_balance_changed", assertThrows(IllegalStateException.class,
+                    () -> copyOrder(legacy, order, details, stamps, award)).getMessage());
+            assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
+            assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
+            assertEquals(expectedStamps, legacyRows(mysql, STAMPS));
+            assertEquals(changedBalance, balance(mysql, "t_user", award.user()));
+            assertEquals(award.after(), balance(pg, "pubburi.t_user", award.user()));
+        } finally {
+            replaceBalance(mysql, award.user(), changedBalance, award.before());
+        }
+
+        copyOrder(legacy, order, details, stamps, award);
         assertNull(expectedOrders.put(orderId, order));
         assertNull(expectedDetails.put(Integer.parseInt(detail.get(0).textValue()), detail));
         assertNull(expectedStamps.put(Integer.parseInt(stamp.get(0).textValue()), stamp));
         assertEquals(expectedOrders, legacyRows(mysql, ORDERS));
         assertEquals(expectedDetails, legacyRows(mysql, DETAILS));
         assertEquals(expectedStamps, legacyRows(mysql, STAMPS));
+        assertEquals(award.after(), balance(mysql, "t_user", award.user()));
+        assertEquals(1062, assertThrows(SQLException.class,
+                () -> copyOrder(legacy, order, details, stamps, award)).getErrorCode());
+        assertEquals(award.after(), balance(mysql, "t_user", award.user()));
     }
 
-    private static int authoredLinkedOrder(Connection pg) throws SQLException {
+    private static AwardedOrder authoredLinkedOrder(Connection pg) throws SQLException {
         try (var sql = pg.prepareStatement("""
                 WITH picked_product AS (SELECT * FROM pubburi.t_product WHERE price > 0 ORDER BY id LIMIT 1),
+                picked_customer AS (SELECT id,stamps FROM pubburi.t_user WHERE role='USER' ORDER BY id LIMIT 1),
                 placed_order AS (
                     INSERT INTO pubburi.t_order(user_id,order_type,order_time,total_price,price_basis)
                     SELECT u.id,'TAKEOUT',?,p.price,'ORDER_SNAPSHOT'
-                    FROM (SELECT id FROM pubburi.t_user WHERE role='USER' ORDER BY id LIMIT 1) u CROSS JOIN picked_product p
+                    FROM picked_customer u CROSS JOIN picked_product p
                     RETURNING o_id,user_id
                 ), order_line AS (
                     INSERT INTO pubburi.t_order_detail
                         (order_id,product_id,quantity,product_name,product_type,product_img,unit_price,sum_price)
                     SELECT o.o_id,p.id,1,p.name,p.type,p.img,p.price,p.price FROM placed_order o CROSS JOIN picked_product p
                     RETURNING order_id,quantity
+                ), awarded AS (
+                    INSERT INTO pubburi.t_stamp(user_id,order_id,quantity)
+                    SELECT o.user_id,l.order_id,l.quantity FROM placed_order o JOIN order_line l ON l.order_id=o.o_id
+                    RETURNING user_id,order_id,quantity
                 )
-                INSERT INTO pubburi.t_stamp(user_id,order_id,quantity)
-                SELECT o.user_id,l.order_id,l.quantity FROM placed_order o JOIN order_line l ON l.order_id=o.o_id
-                RETURNING order_id
+                UPDATE pubburi.t_user u SET stamps=u.stamps+a.quantity
+                FROM awarded a JOIN picked_customer c ON c.id=a.user_id WHERE u.id=a.user_id
+                RETURNING a.order_id,u.id,c.stamps,u.stamps
                 """)) {
             sql.setObject(1, Instant.parse(ORDER_TIME).atOffset(ZoneOffset.UTC));
             try (var rows = sql.executeQuery()) {
                 assertTrue(rows.next(), "Authored linked order requires an existing customer and product");
+                return new AwardedOrder(rows.getInt(1), rows.getString(2), rows.getInt(3), rows.getInt(4));
+            }
+        }
+    }
+
+    private static int balance(Connection connection, String table, String user) throws SQLException {
+        try (var sql = connection.prepareStatement("SELECT stamps FROM " + table + " WHERE id=?")) {
+            sql.setString(1, user);
+            try (var rows = sql.executeQuery()) {
+                assertTrue(rows.next(), "Authored customer balance is missing");
                 return rows.getInt(1);
             }
+        }
+    }
+
+    private static void replaceBalance(Connection mysql, String user, int before, int after) throws SQLException {
+        try (var sql = mysql.prepareStatement("UPDATE t_user SET stamps=? WHERE id=? AND stamps=?")) {
+            sql.setInt(1, after);
+            sql.setString(2, user);
+            sql.setInt(3, before);
+            if (sql.executeUpdate() != 1) throw new IllegalStateException("legacy_order_stamp_balance_changed");
         }
     }
 
@@ -229,12 +280,13 @@ final class ReverseOrderRehearsal {
     }
 
     private static void copyOrder(SourceSettings legacy, JsonNode order, List<JsonNode> details,
-            List<JsonNode> stamps) throws Exception {
+            List<JsonNode> stamps, AwardedOrder award) throws Exception {
         ImportTransaction.run(legacy.connect(), mysql -> {
             SourceSession.guard(mysql, legacy);
             insert(mysql, ORDERS, order);
             for (var detail : details) insert(mysql, DETAILS, detail);
             for (var stamp : stamps) insert(mysql, STAMPS, stamp);
+            if (award != null) replaceBalance(mysql, award.user(), award.before(), award.after());
             return null;
         });
     }
