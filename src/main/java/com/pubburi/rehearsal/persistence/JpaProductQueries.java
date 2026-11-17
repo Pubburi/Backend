@@ -9,6 +9,8 @@ import com.pubburi.pub.model.dto.ProductFeatureTag;
 import jakarta.persistence.*;
 import jakarta.persistence.criteria.*;
 import java.util.*;
+import org.hibernate.query.criteria.HibernateCriteriaBuilder;
+import org.hibernate.query.sqm.tree.SqmJoinType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 
@@ -21,9 +23,15 @@ public class JpaProductQueries {
     public List<Product> filtered(String type,String q,String sort,ProductSearchFilters filters,int limit,int offset) {
         if(limit<0 || offset<0)throw new IllegalArgumentException("Product page bounds must be nonnegative");
         String safeType=blankToNull(type),safeQ=blankToNull(q),safeSort=blankToNull(sort);
-        var cb=entityManager.getCriteriaBuilder();
+        var cb=(HibernateCriteriaBuilder)entityManager.getCriteriaBuilder();
         var query=cb.createQuery(Product.class);var product=query.from(JpaProduct.class);
-        query.select(projection(cb,product)).where(predicates(cb,query,product,safeType,safeQ,filters));
+        var feature=product.join(JpaProductFeature.class,SqmJoinType.LEFT);
+        var volume=feature.<Integer>get("volumeMl");
+        feature.on(cb.equal(feature.get("productId"),product.get("id")),cb.between(volume,1,1_000_000),
+            cb.gt(cb.length(cb.trim(feature.<String>get("sourceName"))),0));
+        query.select(cb.construct(Product.class,product.get("id"),product.get("name"),product.get("type"),
+            product.get("price"),product.get("img"),product.get("abv"),product.get("orderCount"),volume))
+            .where(predicates(cb,query,product,safeType,safeQ,filters));
         query.orderBy(order(cb,product,safeSort));
         return entityManager.createQuery(query).setFirstResult(offset).setMaxResults(limit).getResultList();
     }

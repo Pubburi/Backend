@@ -39,7 +39,12 @@ class ProductSearchContractTests {
 		assertThat(seen.get().minPriceKrw()).isZero();
 		var page = new ObjectMapper().readTree(result).path("data");
 		assertThat(page.size()).isEqualTo(6); assertThat(page.path("page").intValue()).isEqualTo(1);
-		assertThat(page.path("size").intValue()).isEqualTo(12); assertThat(page.path("items").get(0).size()).isEqualTo(7);
+		assertThat(page.path("size").intValue()).isEqualTo(12);
+		var product = page.path("items").get(0);
+		var fields = new java.util.HashSet<String>();
+		product.fieldNames().forEachRemaining(fields::add);
+		assertThat(fields).containsExactlyInAnyOrder("id", "name", "type", "price", "img", "abv", "orderCount", "volumeMl");
+		assertThat(product.path("volumeMl").isNull()).isTrue();
 		mvc.perform(get("/api/products")).andExpect(status().isOk());
 		assertThat(seen.get()).isEqualTo(ProductSearchFilters.none());
 	}

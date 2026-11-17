@@ -39,7 +39,9 @@ class ProductSearchTests {
 				.isEqualTo(countSql.substring(countSql.indexOf(" WHERE ")));
 		assertThat(itemSql).contains("p.price >= ?", "p.price <= ?", "p.abv >= CAST(? AS FLOAT)", "p.abv <= CAST(? AS FLOAT)",
 				"pf.taste_known = TRUE", "pf.aroma_known = TRUE", "ft.kind = 'TASTE'", "ft.kind = 'AROMA'", "ORDER BY p.price ASC, p.id ASC");
-		assertThat(itemSql).doesNotContain("x' OR", " JOIN ", "CAST(p.abv");
+		assertThat(itemSql).doesNotContain("x' OR", "CAST(p.abv");
+		assertThat(itemSql).containsOnlyOnce(" JOIN ").contains("LEFT JOIN t_product_feature f ON f.product_id = p.id");
+		assertThat(countSql).doesNotContain(" JOIN ");
 		assertThat(items.getParameterMappings()).hasSize(count.getParameterMappings().size() + 2);
 	}
 

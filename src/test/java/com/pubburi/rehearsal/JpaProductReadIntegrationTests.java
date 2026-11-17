@@ -116,8 +116,14 @@ class JpaProductReadIntegrationTests {
             var all=get(f.page("&size=100"));assertEquals(200,all.status());var page=all.body().path("data");
             assertEquals(Set.of("items","page","size","total","totalPages","hasNext"),keys(page));assertEquals(6,page.path("total").intValue());
             assertEquals(List.of(f.a,f.b,f.c,f.d,f.e,f.f),ids(page.path("items")));
-            assertEquals(Set.of("id","name","type","price","img","abv","orderCount"),keys(page.path("items").get(0)));
-            assertEquals(Float.floatToIntBits(5.1f),Float.floatToIntBits((float)get("/api/products/"+f.a).body().path("data").path("abv").doubleValue()));
+            var items=page.path("items");
+            var productKeys=Set.of("id","name","type","price","img","abv","orderCount");
+            var catalogKeys=new HashSet<>(productKeys);catalogKeys.add("volumeMl");
+            for(var item:items)assertEquals(catalogKeys,keys(item));
+            assertEquals(750,items.get(0).path("volumeMl").intValue());
+            for(int index=1;index<items.size();index++)assertTrue(items.get(index).path("volumeMl").isNull());
+            var detail=get("/api/products/"+f.a).body().path("data");assertEquals(productKeys,keys(detail));
+            assertEquals(Float.floatToIntBits(5.1f),Float.floatToIntBits((float)detail.path("abv").doubleValue()));
             assertEquals(List.of(f.a,f.b),f.readIds("&tasteTag=dry&aromaTag=floral"));
             assertEquals(List.of(f.a),f.readIds("&tasteTag=fruity&tasteTag=dry&aromaTag=floral"));
             assertEquals(List.of(f.f),f.readIds("&tasteTag=dry%2Cfruity"));
@@ -277,6 +283,11 @@ class JpaProductReadIntegrationTests {
         assertEquals(Set.of("put","delete"),keys(paths.path("/api/admin/products/{id}")));
         assertEquals(Set.of("put"),keys(paths.path("/api/admin/products/{id}/features")));
         assertEquals(Set.of("id","name","type","price","img","abv","orderCount"),keys(spec.path("components").path("schemas").path("ProductResponse").path("properties")));
+        var catalog=spec.path("components").path("schemas").path("CatalogProductResponse");
+        assertTrue(java.util.stream.StreamSupport.stream(catalog.path("required").spliterator(),false)
+            .anyMatch(value -> value.asText().equals("volumeMl")));
+        var volume=catalog.path("properties").path("volumeMl");
+        assertEquals(1,volume.path("minimum").intValue());assertEquals(1_000_000,volume.path("maximum").intValue());
         assertEquals(Set.of("productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"),keys(spec.path("components").path("schemas").path("ProductFeaturesResponse").path("properties")));
         for(String name:List.of("tasteTag","aromaTag")) {
             JsonNode parameter=null;for(JsonNode candidate:paths.path("/api/products").path("get").path("parameters"))if(candidate.path("name").asText().equals(name))parameter=candidate;

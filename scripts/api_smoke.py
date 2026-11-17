@@ -277,6 +277,12 @@ def verify_product_filter_openapi(document):
     assert "400 BAD_REQUEST" in parameters["page"]["description"]
     assert parameters["minPriceKrw"]["schema"]["type"] == "integer"
     assert parameters["maxAbvPercent"]["schema"]["maximum"] == 100
+    catalog = document["components"]["schemas"]["CatalogProductResponse"]
+    assert set(catalog["properties"]) == {"id", "name", "type", "price", "img", "abv", "orderCount", "volumeMl"}
+    assert "volumeMl" in catalog["required"]
+    volume = catalog["properties"]["volumeMl"]
+    assert volume["minimum"] == 1 and volume["maximum"] == 1_000_000
+    assert volume.get("nullable") is True or set(volume.get("type", [])) == {"integer", "null"}
 
 
 
@@ -372,11 +378,12 @@ def read_only_contract(client):
     assert page["hasNext"] is (page["page"] < page["totalPages"])
     product = page["items"][0] if page["items"] else None
     if product is not None:
-        assert {"id", "name", "type", "price", "img", "abv", "orderCount"} == set(product)
+        assert {"id", "name", "type", "price", "img", "abv", "orderCount", "volumeMl"} == set(product)
         features = client.request("GET", f"/products/{product['id']}/features", 200)["data"]
         assert set(features) == {"productId", "volumeMl", "description", "tasteTags", "aromaTags",
                                  "sourceName", "sourceUrl", "sourceNote"}
         assert features["productId"] == product["id"]
+        assert product["volumeMl"] == features["volumeMl"]
     client.request("GET", "/products/0", 404, error_code="NOT_FOUND")
     client.request("GET", "/products/0/features", 404, error_code="NOT_FOUND")
     client.request("GET", "/auth/me", 401, error_code="UNAUTHORIZED")
@@ -644,6 +651,8 @@ def product_feature_contract(environ):
     unknown = {"productId": product_id, "volumeMl": None, "description": None, "tasteTags": None,
                "aromaTags": None, "sourceName": None, "sourceUrl": None, "sourceNote": None}
     assert public.request("GET", path, 200)["data"] == unknown
+    catalog = "/products?q=CI%20feature%20fixture"
+    assert public.request("GET", catalog, 200)["data"]["items"] == [dict(created, volumeMl=None)]
     values = {
         "volumeMl": 750, "description": " Synthetic validation data ", "tasteTags": [" Sweet ", "DRY"],
         "aromaTags": [], "sourceName": " Synthetic CI fixture ",
@@ -653,6 +662,7 @@ def product_feature_contract(environ):
     assert saved == dict(values, productId=product_id, description="Synthetic validation data",
                          tasteTags=["dry", "sweet"], sourceName="Synthetic CI fixture")
     assert saved["aromaTags"] == [] and saved["tasteTags"] != []
+    assert public.request("GET", catalog, 200)["data"]["items"] == [dict(created, volumeMl=750)]
     themes = public.request("GET", "/products/themes", 200)["data"]
     assert themes["source"] == "REVIEWED_LOCAL_CATALOG"
     table = next(theme for theme in themes["themes"] if theme["id"] == "TABLE")
@@ -677,6 +687,7 @@ def product_feature_contract(environ):
     assert public.request("GET", path, 200)["data"] == saved
     assert admin.request("PUT", write_path, 200, {})["data"] == unknown
     assert public.request("GET", path, 200)["data"] == unknown
+    assert public.request("GET", catalog, 200)["data"]["items"] == [dict(created, volumeMl=None)]
     assert count_ci_product_features(environ, product_id) == (1, 0)
     admin.request("PUT", write_path, 200, values)
     admin.request("DELETE", f"/admin/products/{product_id}", 200)
@@ -846,7 +857,8 @@ def product_filter_contract(environ):
         assert data["totalPages"] == (expected_total + size - 1) // size
         assert data["hasNext"] == (page < data["totalPages"])
         for row in data["items"]:
-            assert set(row) == {"id", "name", "type", "price", "img", "abv", "orderCount"}
+            assert set(row) == {"id", "name", "type", "price", "img", "abv", "orderCount", "volumeMl"}
+            assert row["volumeMl"] is None
         return data
 
     search([a, b, c, e, d])

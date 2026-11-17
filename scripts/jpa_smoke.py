@@ -260,16 +260,24 @@ def run(environ):
         if set(page)!={"items","page","size","total","totalPages","hasNext"} or len(page["items"])>12:
             raise ValueError("jpa_runtime_product_page_shape_changed")
         product_fields={"id","name","type","price","img","abv","orderCount"}
-        if any(set(item)!=product_fields for item in page["items"]):raise ValueError("jpa_runtime_product_shape_changed")
+        catalog_fields=product_fields|{"volumeMl"}
+        if any(set(item)!=catalog_fields for item in page["items"]):raise ValueError("jpa_runtime_product_shape_changed")
+        for item in page["items"]:
+            volume=item["volumeMl"]
+            if volume is not None and (type(volume) is not int or not 1<=volume<=1_000_000):
+                raise ValueError("jpa_runtime_product_volume_changed")
+        catalog_products=[{key:item[key] for key in product_fields} for item in page["items"]]
         status,popular=request(anonymous,base,"GET","/api/products/popular");expect(status,200)
-        if popular["data"]!=page["items"]:raise ValueError("jpa_runtime_product_order_changed")
-        if page["items"]:
-            first_product=page["items"][0]
+        if popular["data"]!=catalog_products:raise ValueError("jpa_runtime_product_order_changed")
+        if catalog_products:
+            first_product=catalog_products[0]
             status,detail=request(anonymous,base,"GET","/api/products/"+str(first_product["id"]));expect(status,200)
             if detail["data"]!=first_product:raise ValueError("jpa_runtime_product_detail_changed")
             status,features=request(anonymous,base,"GET","/api/products/"+str(first_product["id"])+"/features");expect(status,200)
             if set(features["data"])!={"productId","volumeMl","description","tasteTags","aromaTags","sourceName","sourceUrl","sourceNote"} or features["data"]["productId"]!=first_product["id"]:
                 raise ValueError("jpa_runtime_product_feature_shape_changed")
+            if features["data"]["volumeMl"]!=page["items"][0]["volumeMl"]:
+                raise ValueError("jpa_runtime_product_volume_changed")
         expect(request(anonymous,base,"GET","/api/products/0")[0],404)
         expect(request(anonymous,base,"GET","/api/products/0/features")[0],404)
         expect(request(anonymous,base,"GET","/api/products?page=2147483647&size=12")[0],400)
