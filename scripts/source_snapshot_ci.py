@@ -162,7 +162,8 @@ def run(environ):
                 "CREATE USER '" + reverse_writer + "'@'%' IDENTIFIED BY '" + reverse_password + "' REQUIRE SSL; "
                 "GRANT SELECT ON " + reverse_database + ".pubburi_source_snapshot_guard TO '" + reverse_writer + "'@'%'; "
                 "GRANT SELECT,INSERT ON " + reverse_database + ".t_order TO '" + reverse_writer + "'@'%'; "
-                "GRANT SELECT,INSERT ON " + reverse_database + ".t_order_detail TO '" + reverse_writer + "'@'%';")
+                "GRANT SELECT,INSERT ON " + reverse_database + ".t_order_detail TO '" + reverse_writer + "'@'%'; "
+                "GRANT SELECT,INSERT ON " + reverse_database + ".t_stamp TO '" + reverse_writer + "'@'%';")
             if sql(order_times_sql) != order_times_before:
                 raise ValueError("source_ci_reverse_existing_order_time_changed")
             source.update(PUBBURI_SOURCE_REVERSE_URL=reverse_url, PUBBURI_SOURCE_REVERSE_DB_NAME=reverse_database,
