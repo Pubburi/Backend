@@ -192,6 +192,11 @@ def schema_primary(shape, error):
 
 def state(connection):
     shape, primary_columns = inventory(connection)
+    if connection.execute("""SELECT EXISTS(
+        SELECT 1 FROM pubburi.t_product_search_outbox o
+        WHERE NOT EXISTS(SELECT 1 FROM pubburi.t_product_search_delivery d WHERE d.event_id=o.event_id)
+    )""").fetchone()[0]:
+        reject('search_delivery_missing')
     tables = {}
     for name, primary in sorted(primary_columns.items()):
         # Binary COPY preserves float bits, NULL, timestamps, text and json's original bytes.
