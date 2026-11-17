@@ -22,6 +22,11 @@ public final class ResponseMapper {
 				product.getImg(), product.getAbv(), product.getOrderCount());
 	}
 
+	public static CatalogProductResponse catalogProduct(Product product) {
+		return new CatalogProductResponse(product.getId(), product.getName(), product.getType(), product.getPrice(),
+				product.getImg(), product.getAbv(), product.getOrderCount(), product.getVolumeMl());
+	}
+
 	public static MarketResponse market(Market market) {
 		return new MarketResponse(market.getId(), market.getName(), market.getLatitude(), market.getLongitude(),
 				market.getImage());

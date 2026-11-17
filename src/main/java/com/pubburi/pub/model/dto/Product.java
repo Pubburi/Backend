@@ -8,12 +8,17 @@ public class Product {
 	private String img;
 	private float abv;
 	private int orderCount; // 누적 주문 수
+	private Integer volumeMl;
 
 	public Product(int id, String name, String type, int price, String img, float abv) {
 		this(id, name, type, price, img, abv, 0);
 	}
 
 	public Product(int id, String name, String type, int price, String img, float abv, int orderCount) {
+		this(id, name, type, price, img, abv, orderCount, null);
+	}
+
+	public Product(int id, String name, String type, int price, String img, float abv, int orderCount, Integer volumeMl) {
 		super();
 		this.id = id;
 		this.name = name;
@@ -22,6 +27,7 @@ public class Product {
 		this.img = img;
 		this.abv = abv;
 		this.orderCount = orderCount;
+		this.volumeMl = volumeMl;
 	}
 
 	public Product() {
@@ -81,6 +87,14 @@ public class Product {
 
 	public void setOrderCount(int orderCount) {
 		this.orderCount = orderCount;
+	}
+
+	public Integer getVolumeMl() {
+		return volumeMl;
+	}
+
+	public void setVolumeMl(Integer volumeMl) {
+		this.volumeMl = volumeMl;
 	}
 
 	@Override

@@ -120,7 +120,14 @@ class RuntimeDocumentationTests {
 		JsonNode page = resolve(document, resolve(document, operation.path("responses").path("200")
 				.path("content").path("application/json").path("schema")).path("properties").path("data"));
 		assertThat(fieldNames(page.path("properties"))).isEqualTo(Set.of("items", "page", "size", "total", "totalPages", "hasNext"));
-		assertThat(fieldNames(resolve(document, page.path("properties").path("items").path("items")).path("properties"))).hasSize(7);
+		JsonNode item = resolve(document, page.path("properties").path("items").path("items"));
+		assertThat(fieldNames(item.path("properties")))
+				.isEqualTo(Set.of("id", "name", "type", "price", "img", "abv", "orderCount", "volumeMl"));
+		assertThat(item.path("required")).anyMatch(key -> key.asText().equals("volumeMl"));
+		JsonNode volume = item.path("properties").path("volumeMl");
+		assertThat(volume.path("nullable").booleanValue() || volume.path("type").toString().contains("\"null\"")).isTrue();
+		assertThat(volume.path("minimum").asInt()).isEqualTo(1);
+		assertThat(volume.path("maximum").asInt()).isEqualTo(1_000_000);
 	}
 
 	@Test

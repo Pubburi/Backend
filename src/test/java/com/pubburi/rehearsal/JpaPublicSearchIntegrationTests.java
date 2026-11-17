@@ -46,18 +46,29 @@ class JpaPublicSearchIntegrationTests extends JpaAccountTestSupport {
     String token(){return UUID.randomUUID().toString().replace("-","");}
     void selected(List<Integer> ids,int total){engine.ids=ids;engine.total=total;}
     void remove(HttpClient admin,List<Integer> ids)throws Exception{for(int id:ids)assertTrue(Set.of(200,404).contains(request(admin,"DELETE","/api/admin/products/"+id,null).status()));}
-    JsonNode canonical(String q,String sort,ProductSearchFilters filters,PageCriteria page)throws Exception{return json.readTree(json.writeValueAsString(products.searchProducts(null,q,sort,filters,page).map(ResponseMapper::product)));}
+    JsonNode canonical(String q,String sort,ProductSearchFilters filters,PageCriteria page)throws Exception{return json.readTree(json.writeValueAsString(products.searchProducts(null,q,sort,filters,page).map(ResponseMapper::catalogProduct)));}
 
     @Test void existingPublicPageKeepsCurrentFieldsAndAllLiteralFiltersWhileTheRemoteIsOutsideTransactions()throws Exception{
         var admin=loggedIn("ADMIN");String token=token();var ids=new ArrayList<Integer>();
         try{
-            for(String suffix:List.of("a","b")){int id=create(admin,"ci_jpa_write_"+token+suffix);ids.add(id);assertEquals(200,request(admin,"PUT","/api/admin/products/"+id+"/features",Map.of("tasteTags",List.of("a,b","line\nx"),"aromaTags",List.of(),"sourceName","Authored search fixture")).status());}
+            var features=Map.of("tasteTags",List.of("a,b","line\nx"),"aromaTags",List.of(),"sourceName","Authored search fixture");
+            for(String suffix:List.of("a","b")){
+                int id=create(admin,"ci_jpa_write_"+token+suffix);ids.add(id);
+                var facts=new HashMap<String,Object>(features);if(suffix.equals("a"))facts.put("volumeMl",375);
+                assertEquals(200,request(admin,"PUT","/api/admin/products/"+id+"/features",facts).status());
+            }
             assertEquals(required("PUBBURI_JPA_SOURCE_ID"),identities.selectSourceId());var filters=ProductSearchFilters.fromQuery("0","2400","0","15.50",new String[]{"a,b","line\nx"},null);
             String query="?q="+token+"&minPriceKrw=0&maxPriceKrw=2400&minAbvPercent=0&maxAbvPercent=15.50&tasteTag=a%2Cb&tasteTag=line%0Ax&sort=priceAsc&size=1";
             for(int page:List.of(1,2)){
                 selected(List.of(ids.get(page-1)),2);var result=search(query+"&page="+page);assertEquals(200,result.status());assertEquals("ENGINE_VERIFIED",result.source());assertEquals(canonical(token,"priceAsc",filters,PageCriteria.of(page,1,12)),result.body().path("data"));
+                var volume=result.body().at("/data/items/0/volumeMl");
+                if(page==1)assertEquals(375,volume.intValue());else assertTrue(volume.isNull());
                 assertEquals(Boolean.FALSE,observed.insideTransaction.get());assertNull(engine.cookie.get());assertNull(engine.authorization.get());
             }
+            var changed=new HashMap<String,Object>(features);changed.put("volumeMl",500);
+            assertEquals(200,request(admin,"PUT","/api/admin/products/"+ids.get(0)+"/features",changed).status());
+            selected(List.of(ids.get(0)),2);var updated=search(query+"&page=1");
+            assertEquals("ENGINE_VERIFIED",updated.source());assertEquals(500,updated.body().at("/data/items/0/volumeMl").intValue());
             var sent=engine.last.get();assertTrue(sent.path("track_total_hits").booleanValue());assertFalse(sent.path("_source").booleanValue());String body=sent.toString();assertTrue(body.contains("taste_known"));assertTrue(body.contains("a,b"));assertTrue(body.contains("line\\nx"));assertFalse(body.contains("userId"));
             int calls=engine.calls.get();assertEquals(400,search("?tasteTag=a&tasteTag=A").status());assertEquals(400,search("?minPriceKrw=2&maxPriceKrw=1").status());assertEquals(400,search("?page=2147483647&size=100").status());assertEquals(calls,engine.calls.get());
         }finally{remove(admin,ids);}

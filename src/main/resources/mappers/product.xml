@@ -14,6 +14,9 @@
 		<result column="abv" property="abv" />
 		<result column="order_count" property="orderCount" />
 	</resultMap>
+	<resultMap id="CatalogProductResult" type="Product" extends="ProductResult">
+		<result column="volume_ml" property="volumeMl" />
+	</resultMap>
 
 	<resultMap id="ProductSuggestionResult" type="com.pubburi.pub.model.dto.ProductSuggestion">
 		<constructor>
@@ -92,8 +95,10 @@
 		</where>
 	</sql>
 
-	<select id="selectFiltered" resultMap="ProductResult">
-		SELECT p.id, p.name, p.type, p.price, p.img, p.abv, p.order_count FROM t_product p
+	<select id="selectFiltered" resultMap="CatalogProductResult">
+		SELECT p.id, p.name, p.type, p.price, p.img, p.abv, p.order_count, f.volume_ml FROM t_product p
+		LEFT JOIN t_product_feature f ON f.product_id = p.id AND f.volume_ml BETWEEN 1 AND 1000000
+			AND CHAR_LENGTH(TRIM(f.source_name)) &gt; 0
 		<include refid="SearchPredicates" />
 		<choose>
 			<when test="sort == 'priceAsc'">ORDER BY p.price ASC, p.id ASC</when>
