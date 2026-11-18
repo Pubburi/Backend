@@ -94,7 +94,7 @@ public class CommentRestController {
 		comment.setRating(request.rating());
 		comment.setComment(request.comment());
         comment.setTasteTags(request.tasteTags());
-		if (commentService.addComment(comment) <= 0) {
+		if (commentService.addComment(comment, user) <= 0) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Comment could not be created");
 		}
 		return ResponseEntity.status(HttpStatus.CREATED)
@@ -105,11 +105,11 @@ public class CommentRestController {
 	public ResponseEntity<ApiResponse<CommentResponse>> updateComment(@PathVariable int id,
 			@Valid @RequestBody CommentUpdateRequest request, HttpSession session) {
 		Comment existing = findComment(id);
-		accessGuard.requireSelfOrAdmin(session, existing.getUserId());
+		SessionUser actor = accessGuard.requireSelfOrAdmin(session, existing.getUserId());
 		existing.setRating(request.rating());
 		existing.setComment(request.comment());
         existing.setTasteTags(request.tasteTags());
-		if (commentService.updateComment(existing) <= 0) {
+		if (commentService.updateComment(existing, actor) <= 0) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Comment not found");
 		}
 		return ResponseEntity.ok(ApiResponse.ok(ResponseMapper.comment(existing)));

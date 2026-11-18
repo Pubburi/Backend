@@ -19,14 +19,19 @@ import com.pubburi.pub.controller.response.CommentPageResponse;
 import com.pubburi.pub.controller.response.CommentRatingSummary;
 import com.pubburi.pub.model.dao.CommentDao;
 import com.pubburi.pub.model.dto.Comment;
+import com.pubburi.pub.model.dto.User;
+import com.pubburi.pub.model.dao.UserDao;
+import com.pubburi.pub.controller.auth.SessionUser;
 
 @Service
 public class CommentServiceImpl implements CommentService {
 
 	private final CommentDao commentDao;
+	private final UserDao userDao;
 
-	public CommentServiceImpl(CommentDao commentDao) {
+	public CommentServiceImpl(CommentDao commentDao, UserDao userDao) {
 		this.commentDao = commentDao;
+		this.userDao = userDao;
 	}
 
 	@Override
@@ -90,11 +95,13 @@ public class CommentServiceImpl implements CommentService {
 
 	@Override
 	@Transactional
-	public int addComment(Comment comment) {
-		if (comment == null || comment.getUserId() == null || comment.getProductId() <= 0 || comment.getRating() < 0) {
+	public int addComment(Comment comment, SessionUser actor) {
+		if (comment == null || comment.getProductId() <= 0 || comment.getRating() < 0) {
 			return 0;
 		}
         var tags = CommentTasteTags.normalize(comment.getTasteTags());
+		User author = lockActor(actor);
+		comment.setUserId(author.getId());
         int changed = commentDao.insert(comment);
         if (changed > 0 && tags != null && !tags.isEmpty()) commentDao.insertTasteTags(comment.getId(), tags);
         return changed;
@@ -102,11 +109,19 @@ public class CommentServiceImpl implements CommentService {
 
 	@Override
 	@Transactional
-	public int updateComment(Comment comment) {
+	public int updateComment(Comment comment, SessionUser actor) {
 		if (comment == null || comment.getId() <= 0) {
 			return 0;
 		}
         var tags = CommentTasteTags.normalize(comment.getTasteTags());
+		User author = lockActor(actor);
+		Comment current = commentDao.select(comment.getId());
+		if (current == null) return 0;
+		if (!author.isAdmin() && !author.getId().equals(current.getUserId())) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+		}
+		comment.setUserId(current.getUserId());
+		comment.setProductId(current.getProductId());
         // The row UPDATE serializes competing opinion replacements in the same transaction.
         int changed = commentDao.update(comment);
         if (changed > 0 && tags != null) {
@@ -114,6 +129,17 @@ public class CommentServiceImpl implements CommentService {
             if (!tags.isEmpty()) commentDao.insertTasteTags(comment.getId(), tags);
         }
         return changed;
+	}
+
+	private User lockActor(SessionUser actor) {
+		if (actor == null || actor.authEpoch() == null || actor.authEpoch().isBlank()) {
+			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account session is no longer current");
+		}
+		User current = userDao.selectByIdForUpdate(actor.id());
+		if (current == null || !actor.authEpoch().equals(current.getAuthEpoch())) {
+			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account session is no longer current");
+		}
+		return current;
 	}
 
 	@Override
