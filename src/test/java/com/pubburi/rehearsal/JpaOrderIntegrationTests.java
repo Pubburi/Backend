@@ -157,6 +157,40 @@ class JpaOrderIntegrationTests extends JpaOrderTestSupport {
         }
     }
 
+    @Test void commonPageOffsetsRejectWrappedPagesAcrossUserAndAdminLists() throws Exception {
+        var sql = control(); var admin = loggedIn("ADMIN"); String user = addUser();
+        int product = create(admin, ownName()); var buyer = loginUser(user);
+        try {
+            var created = request(buyer, "POST", "/api/orders", order(product, 2));
+            assertEquals(201, created.status());
+            var receipt = created.body().path("data");
+            var before = orderState(sql, user, product);
+            String owned = "/api/users/" + user + "/orders";
+            for (String path : List.of(owned, "/api/admin/orders", "/api/admin/users", "/api/admin/comments")) {
+                var reader = path.equals(owned) ? buyer : admin;
+                var first = request(reader, "GET", path + "?page=1&size=4", null);
+                assertEquals(200, first.status());
+                for (String query : List.of("page=2147483647&size=100", "page=1073741825&size=4",
+                        "page=42949674&size=100", "page=21474838&size=100")) {
+                    var refused = request(reader, "GET", path + "?" + query, null);
+                    assertEquals(400, refused.status(), path + "?" + query);
+                    assertEquals("BAD_REQUEST", refused.body().at("/error/code").textValue());
+                    assertTrue(refused.body().path("data").isNull());
+                }
+                var high = request(reader, "GET", path + "?page=2147483647&size=1", null);
+                assertEquals(200, high.status());
+                assertTrue(high.body().at("/data/items").isEmpty());
+                assertEquals(first.body().at("/data/total"), high.body().at("/data/total"));
+                assertEquals(2147483647, high.body().at("/data/page").intValue());
+            }
+            var refreshed = request(buyer, "GET", owned + "?size=4", null);
+            assertEquals(1, refreshed.body().at("/data/total").intValue());
+            assertEquals(receipt, refreshed.body().at("/data/items/0"));
+            assertEquals(403, request(loggedIn("USER"), "GET", owned + "?page=1&size=4", null).status());
+            assertEquals(before, orderState(sql, user, product));
+        } finally { clean(sql, user, product); }
+    }
+
     @Test void concurrentOrdersKeepAtomicCountersAndProducerVersionsAndInvalidOrderRollsBack() throws Exception {
         var sql = control(); var admin = loggedIn("ADMIN"); String user = addUser(); int product = create(admin, ownName());
         var one = loginUser(user); var two = loginUser(user); var executor = Executors.newFixedThreadPool(2);
