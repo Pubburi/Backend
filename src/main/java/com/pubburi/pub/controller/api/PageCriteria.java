@@ -11,6 +11,10 @@ public record PageCriteria(int page, int size) {
 	}
 
 	public int offset() {
-		return (page - 1) * size;
+		long offset = ((long) page - 1) * size;
+		if (offset < 0 || offset > Integer.MAX_VALUE) {
+			throw new IllegalArgumentException("Page offset exceeds the supported range");
+		}
+		return (int) offset;
 	}
 }

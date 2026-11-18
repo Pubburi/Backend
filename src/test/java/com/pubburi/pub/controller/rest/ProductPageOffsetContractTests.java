@@ -1,6 +1,7 @@
 package com.pubburi.pub.controller.rest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -16,11 +17,19 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.pubburi.pub.controller.api.GlobalExceptionHandler;
+import com.pubburi.pub.controller.api.PageCriteria;
 import com.pubburi.pub.controller.api.ProductSearchFilters;
 import com.pubburi.pub.model.dao.ProductDao;
 import com.pubburi.pub.model.service.ProductServiceImpl;
 
 class ProductPageOffsetContractTests {
+	@ParameterizedTest(name = "shared unsupported page={0}, size={1}")
+	@CsvSource({"2147483647,100", "1073741825,4", "42949674,100", "21474838,100"})
+	void sharedOffsetsRejectNegativeZeroAndPositiveWraps(int page, int size) {
+		assertThatThrownBy(() -> PageCriteria.of(page, size, 12).offset())
+				.isInstanceOf(IllegalArgumentException.class).hasMessage("Page offset exceeds the supported range");
+	}
+
 	@ParameterizedTest(name = "unsupported page={0}, size={1}")
 	@CsvSource({"2147483647,100", "1073741825,4", "42949674,100", "21474838,100"})
 	void negativeZeroAndPositiveWrapsAreRejectedBeforeAnyProductDaoCall(int page, int size) throws Exception {
@@ -38,6 +47,7 @@ class ProductPageOffsetContractTests {
 		"1,1000,1,100,0", "-2147483648,2147483647,1,100,0", "2,2,2,2,2"})
 	void supportedOffsetsPreserveNormalizationFiltersSortAndPageContract(int page, int size, int normalizedPage,
 			int normalizedSize, int offset) throws Exception {
+		assertThat(PageCriteria.of(page, size, 12).offset()).isEqualTo(offset);
 		Fixture fixture = new Fixture();
 		fixture.mvc.perform(get("/api/products").param("page", Integer.toString(page)).param("size", Integer.toString(size))
 				.param("type", "맥주").param("q", "scope").param("sort", "priceDesc").param("minPriceKrw", "0")
