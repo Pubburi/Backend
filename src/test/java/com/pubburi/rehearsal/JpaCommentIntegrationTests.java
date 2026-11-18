@@ -7,10 +7,13 @@ import com.pubburi.pub.model.dto.Comment;
 import com.pubburi.pub.model.service.CommentService;
 import com.pubburi.pub.controller.api.CommentSort;
 import com.pubburi.pub.controller.api.PageCriteria;
+import com.pubburi.pub.controller.auth.AccessGuard;
+import com.pubburi.pub.controller.auth.SessionUser;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -27,6 +30,7 @@ import static org.mockito.ArgumentMatchers.*;
 @EnabledIfEnvironmentVariable(named = "PUBBURI_JPA_INTEGRATION", matches = "1")
 class JpaCommentIntegrationTests extends JpaAccountTestSupport {
     @MockitoSpyBean CommentDao comments;
+    @MockitoSpyBean AccessGuard access;
     @Autowired CommentService service;
     @Autowired UserDao users;
     @Autowired ProductDao products;
@@ -107,6 +111,83 @@ class JpaCommentIntegrationTests extends JpaAccountTestSupport {
             assertEquals(200, request(admin, "DELETE", "/api/admin/products/" + product, null).status()); assertNull(comments.select(cascadeId));
             assertEquals(0, request(client(), "GET", path(product), null).body().path("data").path("total").intValue());
         } finally { clean(sql, user, product, List.of()); clean(sql, other, null, List.of()); }
+    }
+
+    @Test void admittedCreateCannotAttachToARecreatedAccount() throws Exception {
+        var sql = control(); var admin = loggedIn("ADMIN"); String user = join();
+        int product = create(admin, ownName()); var owner = login(user, password);
+        var admitted = new CountDownLatch(1); var replacementCommitted = new CountDownLatch(1);
+        var paused = new AtomicBoolean(); var executor = Executors.newSingleThreadExecutor();
+        try {
+            doAnswer(call -> {
+                SessionUser actor = (SessionUser) call.callRealMethod();
+                if (actor.id().equals(user) && paused.compareAndSet(false, true)) {
+                    admitted.countDown(); assertTrue(replacementCommitted.await(5, TimeUnit.SECONDS));
+                }
+                return actor;
+            }).when(access).requireLogin(any());
+            var pending = executor.submit(() -> request(owner, "POST", "/api/comments", Map.of(
+                "productId", product, "rating", 3.75, "comment", "stale account", "tasteTags", List.of("stale"))));
+            assertTrue(admitted.await(5, TimeUnit.SECONDS));
+            assertEquals(200, request(admin, "DELETE", "/api/admin/users/" + user, null).status());
+            assertEquals(201, request(client(), "POST", "/api/users", registration(user)).status());
+            replacementCommitted.countDown();
+            var refused = pending.get(6, TimeUnit.SECONDS);
+            assertEquals(401, refused.status()); assertEquals("UNAUTHORIZED", refused.body().at("/error/code").textValue());
+            assertEquals(0, comments.countByProductId(product));
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM pubburi.t_comment_taste_tag t JOIN pubburi.t_comment c ON c.id=t.comment_id WHERE c.product_id=? AND t.tag='stale'", Integer.class, product));
+            reset(access);
+            var fresh = login(user, password);
+            var created = request(fresh, "POST", "/api/comments", Map.of(
+                "productId", product, "rating", 4.25, "comment", "new account", "tasteTags", List.of("fresh")));
+            assertEquals(201, created.status()); assertEquals(user, created.body().at("/data/userId").textValue());
+            assertEquals(1, comments.countByProductId(product));
+        } finally {
+            replacementCommitted.countDown(); reset(access); executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS)); clean(sql, user, product, List.of());
+        }
+    }
+
+    @Test void admittedEditsUseCurrentCredentialsAndModeratorRoleInsideTheWrite() throws Exception {
+        for (String change : List.of("password", "role")) {
+            var sql = control(); var admin = loggedIn("ADMIN"); String actorId = join();
+            String ownerId = change.equals("role") ? join() : actorId;
+            int product = create(admin, ownName()); var owner = login(ownerId, password);
+            if (change.equals("role")) assertEquals(200, request(admin, "PUT", "/api/admin/users/" + actorId, Map.of("role", "ADMIN")).status());
+            var actor = login(actorId, password);
+            var created = request(owner, "POST", "/api/comments", Map.of(
+                "productId", product, "rating", 2.5, "comment", "before", "tasteTags", List.of("before")));
+            assertEquals(201, created.status()); int id = created.body().at("/data/id").intValue();
+            var before = request(client(), "GET", path(product) + "?includeTasteTags=true&includeSummary=true", null).body();
+            var admitted = new CountDownLatch(1); var changed = new CountDownLatch(1);
+            var paused = new AtomicBoolean(); var executor = Executors.newSingleThreadExecutor();
+            try {
+                doAnswer(call -> {
+                    SessionUser current = (SessionUser) call.callRealMethod();
+                    if (current.id().equals(actorId) && paused.compareAndSet(false, true)) {
+                        admitted.countDown(); assertTrue(changed.await(5, TimeUnit.SECONDS));
+                    }
+                    return current;
+                }).when(access).requireLogin(any());
+                var pending = executor.submit(() -> request(actor, "PUT", "/api/comments/" + id,
+                    Map.of("rating", 1.25, "comment", "stale edit", "tasteTags", List.of("stale"))));
+                assertTrue(admitted.await(5, TimeUnit.SECONDS));
+                var update = change.equals("password") ? Map.of("pass", "Authored-replacement-password-42") : Map.of("role", "USER");
+                assertEquals(200, request(admin, "PUT", "/api/admin/users/" + actorId, update).status());
+                changed.countDown();
+                var refused = pending.get(6, TimeUnit.SECONDS);
+                assertEquals(change.equals("password") ? 401 : 403, refused.status(), change);
+                assertEquals(before, request(client(), "GET", path(product) + "?includeTasteTags=true&includeSummary=true", null).body());
+                reset(access);
+                var freshOwner = login(ownerId, change.equals("password") ? "Authored-replacement-password-42" : password);
+                var updated = request(freshOwner, "PUT", "/api/comments/" + id, Map.of("rating", 4.25, "comment", "fresh edit"));
+                assertEquals(200, updated.status()); assertEquals(ownerId, updated.body().at("/data/userId").textValue());
+                assertEquals(List.of("before"), comments.selectTasteTags(List.of(id)).stream().map(tag -> tag.tag()).toList());
+            } finally {
+                changed.countDown(); reset(access); executor.shutdownNow(); assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+                clean(sql, actorId, product, List.of()); if (!ownerId.equals(actorId)) clean(sql, ownerId, null, List.of());
+            }
+        }
     }
 
     @Test void wholeSummaryAndRatingOrderRemainStableAcrossPagesEditsAndDeletes() throws Exception {

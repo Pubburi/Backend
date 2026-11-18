@@ -7,6 +7,7 @@ import com.pubburi.pub.controller.api.PageResponse;
 import com.pubburi.pub.controller.api.CommentSort;
 import com.pubburi.pub.controller.response.CommentPageResponse;
 import com.pubburi.pub.model.dto.Comment;
+import com.pubburi.pub.controller.auth.SessionUser;
 
 public interface CommentService {
 
@@ -36,7 +37,7 @@ public interface CommentService {
 	 * @param comment 리뷰 정보
 	 * @return 처리 결과
 	 */
-	int addComment(Comment comment);
+	int addComment(Comment comment, SessionUser actor);
 
 	/**
 	 * 리뷰를 수정한다.
@@ -44,7 +45,7 @@ public interface CommentService {
 	 * @param comment 리뷰 정보
 	 * @return 처리 결과
 	 */
-	int updateComment(Comment comment);
+	int updateComment(Comment comment, SessionUser actor);
 
 	/**
 	 * 리뷰를 삭제한다.

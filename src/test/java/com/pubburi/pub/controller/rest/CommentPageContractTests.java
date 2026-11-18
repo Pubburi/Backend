@@ -24,7 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class CommentPageContractTests {
     final CommentDao dao = mock(CommentDao.class);
-    final MockMvc mvc = MockMvcBuilders.standaloneSetup(new CommentRestController(new CommentServiceImpl(dao), null))
+    final MockMvc mvc = MockMvcBuilders.standaloneSetup(new CommentRestController(new CommentServiceImpl(dao, mock(com.pubburi.pub.model.dao.UserDao.class)), null))
             .setControllerAdvice(new GlobalExceptionHandler()).build();
     final ObjectMapper mapper = new ObjectMapper();
 
