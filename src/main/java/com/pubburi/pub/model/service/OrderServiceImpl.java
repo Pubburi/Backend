@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pubburi.pub.controller.api.PageCriteria;
@@ -24,6 +25,7 @@ import com.pubburi.pub.model.dto.Product;
 import com.pubburi.pub.model.dto.Stamp;
 
 @Service
+@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class OrderServiceImpl implements OrderService {
 
 	private final OrderDao orderDao;

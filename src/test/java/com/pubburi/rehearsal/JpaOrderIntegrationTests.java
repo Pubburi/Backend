@@ -1,6 +1,9 @@
 package com.pubburi.rehearsal;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
 import com.pubburi.pub.model.dao.OrderDao;
 import com.pubburi.pub.model.dto.Order;
@@ -20,11 +23,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "server.port=0")
 @EnabledIfEnvironmentVariable(named = "PUBBURI_JPA_INTEGRATION", matches = "1")
 class JpaOrderIntegrationTests extends JpaOrderTestSupport {
-    @Autowired OrderDao orders;
+    @MockitoSpyBean OrderDao orders;
     @Autowired OrderService service;
     @Autowired EntityManagerFactory entities;
     @Autowired PlatformTransactionManager transactions;
@@ -102,6 +106,55 @@ class JpaOrderIntegrationTests extends JpaOrderTestSupport {
             assertEquals(3, sql.queryForObject("SELECT stamps FROM pubburi.t_user WHERE id=?", Integer.class, user));
             assertEquals(3, sql.queryForObject("SELECT order_count FROM pubburi.t_product WHERE id=?", Integer.class, product));
         } finally { clean(sql, user, product); }
+    }
+
+    @Test void committedDeleteCannotMixOrderHeadersDetailsAndPageTotal() throws Exception {
+        for (String route : List.of("user", "admin", "detail")) {
+            var sql = control(); var admin = loggedIn("ADMIN"); String user = addUser();
+            int product = create(admin, ownName()); var buyer = loginUser(user);
+            var executor = Executors.newSingleThreadExecutor();
+            var headersRead = new CountDownLatch(1); var deletionCommitted = new CountDownLatch(1);
+            try {
+                var created = request(buyer, "POST", "/api/orders", order(product, 2));
+                assertEquals(201, created.status());
+                int id = created.body().at("/data/oId").intValue();
+                String path = switch (route) {
+                    case "user" -> "/api/users/" + user + "/orders?size=100";
+                    case "admin" -> "/api/admin/orders?size=100";
+                    default -> "/api/orders/" + id;
+                };
+                var reader = route.equals("admin") ? admin : buyer;
+                var before = request(reader, "GET", path, null);
+                assertEquals(200, before.status());
+                doAnswer(call -> {
+                    headersRead.countDown();
+                    assertTrue(deletionCommitted.await(5, TimeUnit.SECONDS));
+                    return call.callRealMethod();
+                }).when(orders).getOrderDetailInfoByOrderIds(anyList());
+                var reading = executor.submit(() -> request(reader, "GET", path, null));
+                assertTrue(headersRead.await(5, TimeUnit.SECONDS));
+                assertEquals(200, request(admin, "DELETE", "/api/admin/orders/" + id, null).status());
+                assertEquals(0, sql.queryForObject("SELECT count(*) FROM pubburi.t_order WHERE o_id=?", Integer.class, id));
+                deletionCommitted.countDown();
+                var during = reading.get(5, TimeUnit.SECONDS);
+                assertEquals(200, during.status());
+                assertEquals(before.body(), during.body(), route + " must retain its original complete receipt snapshot");
+                reset(orders);
+                var after = request(reader, "GET", path, null);
+                if (route.equals("detail")) {
+                    assertEquals(404, after.status());
+                } else {
+                    assertEquals(200, after.status());
+                    assertEquals(before.body().at("/data/total").intValue() - 1, after.body().at("/data/total").intValue());
+                    for (var row : after.body().at("/data/items")) assertNotEquals(id, row.path("oId").intValue());
+                    if (route.equals("user")) assertTrue(after.body().at("/data/items").isEmpty());
+                }
+            } finally {
+                deletionCommitted.countDown(); reset(orders); executor.shutdownNow();
+                assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+                clean(sql, user, product);
+            }
+        }
     }
 
     @Test void concurrentOrdersKeepAtomicCountersAndProducerVersionsAndInvalidOrderRollsBack() throws Exception {
