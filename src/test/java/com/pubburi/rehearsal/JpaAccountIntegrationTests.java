@@ -82,6 +82,50 @@ class JpaAccountIntegrationTests extends JpaAccountTestSupport {
         } finally { clean(sql, id, null, List.of()); }
     }
 
+    @Test void adminNamesRejectBlankWholeUpdatesAndKeepNullablePartialChanges() throws Exception {
+        var sql = control(); var admin = loggedIn("ADMIN"); String id = join();
+        int product = create(admin, ownName()); String path = "/api/admin/users/" + id;
+        try {
+            var owner = login(id, password); children(sql, id, product);
+            var before = accountState(sql, id);
+            var credentials = sql.queryForMap("SELECT password_hash,auth_epoch,role FROM pubburi.t_user WHERE id=?", id);
+            var administrator = sql.queryForMap("SELECT * FROM pubburi.t_user WHERE id=?", required("PUBBURI_JPA_ADMIN_ID"));
+            assertEquals(401, request(client(), "PUT", path, Map.of("name", "forbidden", "stamps", 99)).status());
+            assertEquals(403, request(owner, "PUT", path, Map.of("name", "forbidden", "stamps", 99)).status());
+            for (String blank : List.of("", " \t\r\n", "\u3000", "\u00A0", "\u0085", "\u2007\u202F",
+                    "\u2028\u2029", "\u001C", "\uFEFF", "\uFEFF\u3000\u00A0\t\n")) {
+                var refused = request(admin, "PUT", path, Map.of("name", blank,
+                    "pass", "Authored-rejected-replacement-42", "role", "ADMIN", "stamps", 99));
+                assertEquals(400, refused.status());
+                assertEquals("VALIDATION_FAILED", refused.body().at("/error/code").textValue());
+                assertTrue(refused.body().at("/error/fields").has("name"));
+                assertEquals(before, accountState(sql, id));
+            }
+            assertEquals(200, request(owner, "GET", "/api/auth/me", null).status());
+            assertEquals(401, request(client(), "POST", "/api/auth/login",
+                Map.of("id", id, "pass", "Authored-rejected-replacement-42")).status());
+            assertEquals(200, profile(login(id, password), id).status());
+
+            String literal = " \uFEFF검증 회원\n! \u00A0";
+            assertEquals(200, request(admin, "PUT", path, Map.of("name", literal, "stamps", 7)).status());
+            assertEquals(literal, sql.queryForObject("SELECT name FROM pubburi.t_user WHERE id=?", String.class, id));
+            assertEquals(literal, request(owner, "GET", "/api/auth/me", null).body().at("/data/name").textValue());
+            String maximum = "가".repeat(100);
+            assertEquals(200, request(admin, "PUT", path, Map.of("name", maximum)).status());
+            var nullable = new HashMap<String, Object>(); nullable.put("name", null); nullable.put("stamps", 8);
+            assertEquals(200, request(admin, "PUT", path, nullable).status());
+            assertEquals(200, request(admin, "PUT", path, Map.of("stamps", 9)).status());
+            var current = request(owner, "GET", "/api/auth/me", null);
+            assertEquals(200, current.status()); assertEquals(maximum, current.body().at("/data/name").textValue());
+            assertEquals(9, current.body().at("/data/stamps").intValue());
+            assertEquals(credentials, sql.queryForMap("SELECT password_hash,auth_epoch,role FROM pubburi.t_user WHERE id=?", id));
+            var after = accountState(sql, id);
+            for (String child : List.of("orders", "details", "stamps", "preference", "values", "favorites"))
+                assertEquals(before.get(child), after.get(child));
+            assertEquals(administrator, sql.queryForMap("SELECT * FROM pubburi.t_user WHERE id=?", required("PUBBURI_JPA_ADMIN_ID")));
+        } finally { clean(sql, id, product, List.of()); }
+    }
+
     @Test void selfPasswordRotationKeepsOnlyTheUpdatingAdminSessionAndRejectsSelfDestruction() throws Exception {
         var sql = control(); var root = loggedIn("ADMIN"); String id = join(); String fresh = "Authored-fresh-password-84";
         try {

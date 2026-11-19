@@ -5,7 +5,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record AdminUserRequest(
-		@Size(max = 100) String name,
+		@Size(max = 100)
+		@Pattern(regexp = ".*[^\\p{IsWhite_Space}\\p{javaWhitespace}\\x{FEFF}].*", flags = Pattern.Flag.DOTALL,
+				message = "name must contain non-whitespace text") String name,
 		@Size(min = 4, max = 100) String pass,
 		@Min(0) Integer stamps,
 		@Pattern(regexp = "USER|ADMIN", message = "role must be USER or ADMIN") String role) {
