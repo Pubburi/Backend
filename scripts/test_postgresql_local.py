@@ -504,6 +504,127 @@ class PostgreSQLLocalTests(unittest.TestCase):
                 self.assertEqual(doctor.call_count,2);ready.assert_called_once()
                 self.assertTrue((root/'local-stack-lock').is_dir())
 
+    def test_runtime_identity_pins_the_canonical_inspected_container(self):
+        environment = dict(self.env(), PUBBURI_PG_CONTAINER_ID='a' * 12,
+            PUBBURI_SEARCH_ENABLED='true', PUBBURI_SEARCH_ENDPOINT='http://127.0.0.1:19200')
+        with patch.object(local, 'run', return_value=types.SimpleNamespace(stdout='a' * 64 + '\n')) as inspected:
+            identity = pg.runtime_identity(local, environment)
+        self.assertEqual(identity['container_id'], 'a' * 64)
+        self.assertEqual(set(identity['ports']), {25432, 15001, 15002, 19200})
+        self.assertNotIn(environment['PUBBURI_PG_PASSWORD'], json.dumps(identity))
+        self.assertEqual(inspected.call_args.kwargs['env'], pg.base_environment())
+        with patch.object(local, 'run', return_value=types.SimpleNamespace(stdout='b' * 64 + '\n')):
+            with self.assertRaises(RuntimeError):
+                pg.runtime_identity(local, environment)
+
+    def test_up_and_demo_use_the_scoped_owner_until_owned_children_stop(self):
+        for command in ('up', 'demo'):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); private = root / 'private'; directory = root / 'release'
+                private.mkdir(mode=0o700); directory.mkdir(mode=0o700)
+                (directory / 'runtime.jar').write_bytes(b'authored isolated lifecycle artifact')
+                environment = self.env(); args = argparse.Namespace(command=command, pg_config='fixture',
+                    release_dir='fixture', backend_only=True)
+                scope = types.SimpleNamespace(**vars(local)); scope.STATE = private
+                scope.operation_lock = lambda: local.operation_lock(private)
+                scope.run = MagicMock(return_value=types.SimpleNamespace(stdout='a' * 64 + '\n'))
+                child = MagicMock(); child.poll.return_value = None
+                def spawn(*a, **kw):
+                    kw['stdout'].write('Tomcat started on port 15001 ready\n'); kw['stdout'].flush()
+                    return child
+                def stop(owned):
+                    self.assertIs(owned, child)
+                    with local.operation_gate(private) as parent:
+                        self.assertEqual(set(local.runtime_records(parent, live=True)),
+                                         {'demo' if command == 'demo' else 'operating'})
+                scope.stop = MagicMock(side_effect=stop)
+                with patch.object(local, 'STATE', root / 'forbidden'), \
+                        patch.object(pg, 'doctor', return_value=(environment, directory,
+                            {'jar_sha256': pg.sha(directory / 'runtime.jar')})), \
+                        patch.object(pg, 'api_ready'), patch.object(pg.subprocess, 'Popen', side_effect=spawn), \
+                        patch.object(pg.time, 'sleep', side_effect=KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt):
+                        pg.start(scope, args)
+                scope.stop.assert_called_once_with(child)
+                self.assertFalse((root / 'forbidden').exists())
+                with local.operation_lock(private):
+                    pass
+
+    def test_live_demo_without_a_selector_blocks_conflicting_operating_before_spawn(self):
+        for conflict in ('canonical-container', 'source', 'database-port', 'api-port', 'web-port', 'search-port'):
+            with self.subTest(conflict=conflict), tempfile.TemporaryDirectory() as temporary:
+                state = Path(temporary)
+                environment = dict(self.env(), PUBBURI_PG_CONTAINER_ID='a' * 12,
+                    PUBBURI_SEARCH_ENABLED='true', PUBBURI_SEARCH_ENDPOINT='http://127.0.0.1:19200')
+                peer = dict(container_id='b' * 64, source_id='87654321-1234-1234-1234-123456789abc',
+                    database_name='owned_ci', database_port=26432, ports=[26432, 16001, 16002, 29200], marker_sha256='d' * 64)
+                if conflict == 'canonical-container': peer['container_id'] = 'a' * 64
+                elif conflict == 'source': peer['source_id'] = environment['PUBBURI_JPA_SOURCE_ID']
+                elif conflict == 'database-port': peer.update(database_port=25432, ports=[25432, 16001, 16002, 29200])
+                elif conflict == 'api-port': peer['ports'][1] = 15001
+                elif conflict == 'web-port': peer['ports'][2] = 15002
+                else: peer['ports'][3] = 19200
+                scope = types.SimpleNamespace(**vars(local)); scope.STATE = state
+                scope.run = MagicMock(return_value=types.SimpleNamespace(stdout='a' * 64 + '\n'))
+                args = argparse.Namespace(command='up', pg_config='fixture', release_dir='fixture', backend_only=True)
+                with local.runtime_lock(state, 'demo', lambda: (peer, None)), \
+                        patch.object(pg, 'doctor', return_value=(environment, state, {})), \
+                        patch.object(pg.subprocess, 'Popen') as spawn:
+                    with self.assertRaisesRegex(RuntimeError, 'separate containers'):
+                        pg.start(scope, args)
+                    spawn.assert_not_called()
+                    self.assertFalse((state / pg.DEFAULT_SELECTION).exists())
+
+    def test_live_runtime_fences_existing_exclusive_entrypoints_without_touching_their_resources(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary); scope = types.SimpleNamespace(**vars(local)); scope.STATE = state
+            scope.operation_lock = lambda: local.operation_lock(state)
+            identity = dict(container_id='a' * 64, source_id=self.env()['PUBBURI_JPA_SOURCE_ID'],
+                database_name='owned_ci', database_port=25432, ports=[25432, 15001, 15002], marker_sha256='d' * 64)
+            with local.runtime_lock(state, 'operating', lambda: (identity, None)), \
+                    patch.object(pg, 'doctor') as doctor, patch.object(pg, 'private_directory') as directory:
+                for command in ('smoke', 'activate-pg'):
+                    args = argparse.Namespace(command=command, pg_config='fixture', release_dir='fixture', backend_only=True)
+                    with self.subTest(command=command), self.assertRaisesRegex(RuntimeError, 'already owned'):
+                        pg.start(scope, args)
+                with self.assertRaisesRegex(RuntimeError, 'already owned'):
+                    pg.package(scope, state / 'release')
+                doctor.assert_not_called(); directory.assert_not_called()
+                import postgresql_recovery as recovery
+                with patch.object(recovery.private, 'selection_record') as selected, \
+                        patch.object(recovery, 'verify_owned_postgres') as owned:
+                    with self.assertRaisesRegex(RuntimeError, 'already owned'):
+                        recovery.verify_preserved(scope, {}, {}, state / 'archive', 'a' * 64,
+                            state / 'restored', 'b' * 64)
+                    with self.assertRaisesRegex(RuntimeError, 'already owned'):
+                        recovery.promote(scope, {}, {}, state / 'archive', 'a' * 64,
+                            state / 'restored', 'b' * 64, state / 'config', state / 'release')
+                    selected.assert_not_called(); owned.assert_not_called()
+                for command in ('down', 'reset-db', 'up'):
+                    with self.subTest(command=command), patch.object(local, 'STATE', state), \
+                            patch.object(local, 'environment', return_value={}), patch.object(local, 'doctor'), \
+                            patch.object(local, 'FRONTEND', state), patch.object(local, 'compose') as compose, \
+                            patch('sys.argv', ['local_stack.py', command, '--provider', 'mysql', '--confirm-delete-local-data']):
+                        (state / 'node_modules').mkdir(exist_ok=True)
+                        with self.assertRaisesRegex(RuntimeError, 'already owned'):
+                            local.main()
+                        compose.assert_not_called()
+
+    def test_doctor_and_status_do_not_adopt_or_change_a_live_durable_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary); scope = types.SimpleNamespace(**vars(local)); scope.STATE = state
+            identity = dict(container_id='a' * 64, source_id=self.env()['PUBBURI_JPA_SOURCE_ID'],
+                database_name='owned_ci', database_port=25432, ports=[25432, 15001, 15002], marker_sha256='d' * 64)
+            args = argparse.Namespace(command='status', pg_config='fixture', release_dir='fixture',
+                output_dir=None, backend_only=True, confirm_delete_local_data=False)
+            with local.runtime_lock(state, 'operating', lambda: (identity, None)), \
+                    patch.object(pg, 'doctor', return_value=(self.env(), state, {})) as doctor, \
+                    patch.object(pg, 'api_ready') as ready:
+                original = (state / local.RUNTIME_REGISTRY).read_bytes()
+                pg.dispatch(scope, args); args.command = 'doctor'; pg.dispatch(scope, args)
+                self.assertEqual((state / local.RUNTIME_REGISTRY).read_bytes(), original)
+                self.assertEqual(doctor.call_count, 2); ready.assert_called_once()
+
     def test_readiness_rejects_missing_error_and_wrong_registered_scope(self):
         response=MagicMock();response.__enter__.return_value=response
         response.read.return_value=json.dumps({'data':{'items':[]}}).encode()
