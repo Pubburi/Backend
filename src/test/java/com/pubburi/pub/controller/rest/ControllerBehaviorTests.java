@@ -34,6 +34,21 @@ class ControllerBehaviorTests {
 	}
 
 	@Test
+	void adminUserNameIsOptionalButProvidedTextCannotBeOnlyWhitespace() {
+		assertThat(validator.validate(new AdminUserRequest(null, null, 7, null))).isEmpty();
+		for (String valid : List.of("회원", "!", " \n회원\r\n! ", "\uFEFF회원\u00A0", "가".repeat(100))) {
+			assertThat(validator.validate(new AdminUserRequest(valid, null, null, null))).isEmpty();
+		}
+		for (String blank : List.of("", " \t\r\n", "\u3000", "\u00A0", "\u0085", "\u2007\u202F",
+				"\u2028\u2029", "\u001C", "\uFEFF", "\uFEFF\u3000\u00A0\t\n")) {
+			assertThat(validator.validate(new AdminUserRequest(blank, "replacement", 99, "ADMIN")))
+					.anyMatch(violation -> "name".equals(violation.getPropertyPath().toString()));
+		}
+		assertThat(validator.validate(new AdminUserRequest("가".repeat(101), null, null, null)))
+				.anyMatch(violation -> "name".equals(violation.getPropertyPath().toString()));
+	}
+
+	@Test
 	void missingProductDeleteReturnsNotFound() {
 		ProductService productService = new MissingProductService();
 		AccessGuard accessGuard = SessionFixtures.guard(SessionFixtures.user("admin", "ADMIN"));
