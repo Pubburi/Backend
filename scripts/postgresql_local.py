@@ -391,12 +391,34 @@ def child_environments(env):
     return backend, frontend
 
 
+def runtime_identity(local, environment):
+    # The existing doctor verified this publication/label. Pin Docker's full ID,
+    # rather than treating two accepted short forms as different containers.
+    identity = local.run(['docker', 'inspect', '--type', 'container', '--format', '{{.Id}}',
+        environment['PUBBURI_PG_CONTAINER_ID']], env=base_environment(), capture=True).stdout.strip()
+    if not re.fullmatch(r'[0-9a-f]{64}', identity) or not identity.startswith(environment['PUBBURI_PG_CONTAINER_ID']):
+        reject()
+    return dict(container_id=identity, source_id=environment['PUBBURI_JPA_SOURCE_ID'],
+        database_name=environment['PUBBURI_PG_DB_NAME'],
+        database_port=urlsplit(environment['PUBBURI_PG_URL'][5:]).port,
+        ports=runtime_ports(environment), marker_sha256=hashlib.sha256(environment['PUBBURI_PG_RUN_TOKEN'].encode()).hexdigest())
+
+
 def start(local, args):
-    with local.operation_lock():
+    runtime = args.command in ('up', 'demo')
+    def prepare_runtime():
+        guard_selection(local, args)
+        options = {'demo': True} if args.command == 'demo' else {}
+        prepared = doctor(local, args.pg_config, args.release_dir, args.backend_only, **options)
+        guard_selection(local, args)
+        return runtime_identity(local, prepared[0]), prepared
+    owner = (local.runtime_lock(local.STATE, 'demo' if args.command == 'demo' else 'operating', prepare_runtime)
+             if runtime else local.operation_lock())
+    with owner as prepared:
         guard_selection(local, args)
         pins = selection_pins(Path(args.pg_config), Path(args.release_dir)) if args.command == 'activate-pg' else None
         options = {'demo': True} if args.command == 'demo' else {}
-        env, directory, manifest = doctor(local, args.pg_config, args.release_dir, args.backend_only, **options)
+        env, directory, manifest = prepared if runtime else doctor(local, args.pg_config, args.release_dir, args.backend_only, **options)
         guard_selection(local, args)
         if pins is not None:
             if selection_pins(Path(args.pg_config), directory) != pins:
