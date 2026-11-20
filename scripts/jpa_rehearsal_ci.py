@@ -97,7 +97,9 @@ except KeyboardInterrupt:pass
         up = None
         try:
             with defer_termination():
-                up = subprocess.Popen([*args,'dev'],cwd=ROOT,env=child_env,stdout=log,
+                # With backend-only set, a missing PostgreSQL selection is
+                # rejected before reaching legacy MySQL config or services.
+                up = subprocess.Popen([*args,'up','--backend-only'],cwd=ROOT,env=child_env,stdout=log,
                     stderr=subprocess.STDOUT,start_new_session=True)
             deadline=time.monotonic()+90
             while 'PostgreSQL applications ready' not in log_path.read_text():
