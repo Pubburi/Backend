@@ -49,7 +49,7 @@ def server(env, directory, name, jar):
 
 
 def run(environ, runtime, recovery_control, selected_release):
-    from jpa_rehearsal_ci import runtime_grants
+    from jpa_rehearsal_ci import runtime_grants, selected_runtime
     if environ.get('PUBBURI_JPA_CI')!='1':raise ValueError('recovery_ci_explicit_fixture_required')
     directory=local_stack.STATE/('worker-recovery-'+secrets.token_hex(16));directory.mkdir(mode=0o700)
     local, source_config, release = selected_release
@@ -328,7 +328,7 @@ def run(environ, runtime, recovery_control, selected_release):
         raise ValueError('recovery_ci_restored_target_not_selected')
     promoted_selection = pg.private_file(selector, 16384)
     restored = dict(runtime, **pg.configuration(selected.pg_config))
-    with server(restored,directory,'after',Path(selected.release_dir)/'runtime.jar') as base:
+    with selected_runtime(local, 'restored') as base:
         user=http.cookiejar.CookieJar()
         request(user,base,'POST','/api/auth/login',{'id':actor,'pass':password},expected=401)
         request(user,base,'POST','/api/auth/login',{'id':actor,'pass':new_password})
@@ -402,6 +402,7 @@ def run(environ, runtime, recovery_control, selected_release):
         'preservation_rejects_sibling_copy_and_same_count_notification_change':True,
         'backup_rejects_missing_search_delivery_before_archive':True,
         'explicit_promotion_and_stale_source_reactivation_guard_verified':True,
+        'promoted_native_selected_runtime_and_owned_cleanup_verified':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],
