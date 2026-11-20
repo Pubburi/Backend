@@ -59,6 +59,24 @@ class SearchInputTests(unittest.TestCase):
         for index in ("other-index", "pubburi-products-v1/_all", "pubburi-products-v1-*"):
             with self.assertRaises(search.SearchError): search.Engine(None, index)
 
+    def test_java17_tag_whitespace_preserves_raw_values_without_weakening_other_text_or_limits(self):
+        raw = ["dry", "\u00a0", "\u00a0dry\u00a0", "\u2007dry\u2007", "\u202fdry\u202f", "\u0085", "a+b", "🍋"]
+        row = event(); row["document"]["tasteTags"] = raw
+        original = copy.deepcopy(row)
+        self.assertEqual(search.document(row)["taste_tags"], sorted(raw))
+        self.assertEqual(row, original)
+        for accepted in ("x" * 40, "🍋" * 20):
+            row = event(); row["document"]["tasteTags"] = [accepted]
+            self.assertEqual(search.document(row)["taste_tags"], [accepted])
+        for invalid in ([""], [" \tdry"], ["dry\u2000"], ["\u1680"], ["\u3000"],
+                        ["DRY"], ["dry", "dry"], ["\u00a0", "\u00a0"], ["x" * 41], ["🍋" * 21], ["\ud800"]):
+            row = event(); row["document"]["tasteTags"] = invalid
+            with self.subTest(invalid=repr(invalid)), self.assertRaises(search.SearchError):
+                search.document(row)
+        # Only tag validation follows Java's whitespace set; product text keeps its existing contract.
+        self.assertEqual(search.text("\u00a0name\u00a0", 100), "\u00a0name\u00a0")
+        with self.assertRaises(search.SearchError): search.text("\u00a0", 100)
+
 
 class FakeHttp:
     def __init__(self, replies): self.replies, self.calls = list(replies), []

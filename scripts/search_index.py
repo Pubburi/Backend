@@ -24,6 +24,9 @@ MAX_INPUT_BYTES = 4 * 1024 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 SCHEMA = Path(__file__).resolve().parents[1] / "search" / "products-v1.json"
 KINDS = {"authored_fixture", "backend_product_events"}
+# Java17 String.strip()/isBlank(), used by the product-feature producer.
+# NBSP, figure space, narrow NBSP and NEL are intentionally not in this set.
+JAVA17_STRIP_WHITESPACE = "\t\n\v\f\r\x1c\x1d\x1e\x1f \u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2008\u2009\u200a\u2028\u2029\u205f\u3000"
 
 
 class SearchError(ValueError):
@@ -60,8 +63,8 @@ def integer(value, maximum):
     return value
 
 
-def text(value, maximum):
-    if not isinstance(value, str) or not value.strip():
+def text(value, maximum, *, strip_chars=None):
+    if not isinstance(value, str) or not value.strip(strip_chars):
         raise SearchError("invalid_text")
     try:
         if len(value.encode("utf-16-le")) // 2 > maximum:
@@ -78,8 +81,8 @@ def tags(value):
         raise SearchError("invalid_tags")
     normalized = []
     for tag in value:
-        text(tag, 40)
-        if tag != tag.strip().lower() or tag in normalized:
+        text(tag, 40, strip_chars=JAVA17_STRIP_WHITESPACE)
+        if tag != tag.strip(JAVA17_STRIP_WHITESPACE).lower() or tag in normalized:
             raise SearchError("noncanonical_or_duplicate_tag")
         normalized.append(tag)
     return sorted(normalized)
