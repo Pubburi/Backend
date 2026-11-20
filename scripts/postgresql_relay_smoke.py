@@ -503,16 +503,19 @@ def consume_business(http, endpoint, private, environ, index="pubburi-products-v
             payload = {"name": "ci_jpa_relay_" + uuid.uuid4().hex, "type": "증류주", "price": 1200, "img": "authored.png", "abv": 5.555, "orderCount": 0}
             product_id = expect("POST", "/api/admin/products", payload, 201)["id"]
             payload["price"] = 2300; expect("PUT", "/api/admin/products/" + str(product_id), payload)
-            expect("PUT", "/api/admin/products/" + str(product_id) + "/features", {"tasteTags": ["dry"], "aromaTags": [], "sourceName": "Authored relay verification"})
+            tags = ["a+b", "\u00a0", "\u00a0dry\u00a0", "🍋"]
+            features = expect("PUT", "/api/admin/products/" + str(product_id) + "/features", {"tasteTags": tags, "aromaTags": [], "sourceName": "Authored relay verification"})
+            assert features["tasteTags"] == sorted(tags) and features["aromaTags"] == []
             drained()
             rows = sql(owner, "SELECT payload::text AS payload FROM t_product_search_outbox WHERE product_id=%s ORDER BY source_version", (product_id,))
-            latest = document(json.loads(rows[-1]["payload"]))
-            assert len(rows) == 3 and latest["price_krw"] == 2300 and latest["taste_tags"] == ["dry"] and latest["aroma_tags"] == []
+            retained_feature_payload = rows[-1]["payload"]
+            latest = document(json.loads(retained_feature_payload))
+            assert len(rows) == 3 and latest["price_krw"] == 2300 and latest["taste_tags"] == sorted(tags) and latest["aroma_tags"] == []
             assert http.request("GET", f"/{index}/_doc/{product_id}")[1]["_source"] == latest
             expect("DELETE", "/api/admin/products/" + str(product_id)); drained()
             rows = sql(owner, "SELECT payload::text AS payload FROM t_product_search_outbox WHERE product_id=%s ORDER BY source_version", (product_id,))
             final = document(json.loads(rows[-1]["payload"]))
-            assert len(rows) == 4 and final["deleted"] is True
+            assert len(rows) == 4 and final["deleted"] is True and rows[2]["payload"] == retained_feature_payload
             assert http.request("GET", f"/{index}/_doc/{product_id}")[1]["_source"] == final
             assert engine.apply(document(json.loads(rows[0]["payload"]))) == "stale_ignored"
             assert sql(owner, "SELECT COUNT(*) AS n FROM t_product_search_delivery d JOIN t_product_search_outbox o USING(event_id) WHERE o.product_id=%s AND d.status='DELIVERED'", (product_id,))[0]["n"] == 4
