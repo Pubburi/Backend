@@ -2,6 +2,7 @@
 """Run JPA only in newly prepared import targets; called from the owned source CI lifecycle."""
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import secrets
 import re
@@ -67,6 +68,72 @@ def command(args,env,log,budget=180):
         if write is not None:os.close(write)
     if code:raise ValueError("jpa_ci_rehearsal_failed")
 
+@contextmanager
+def selected_runtime(local, name):
+    import local_stack
+    import postgresql_local as pg
+    selected = pg.selection(local)
+    if selected is None:
+        raise ValueError('jpa_ci_selected_source_required')
+    env = pg.configuration(selected['pg_config'], selected['config_sha256'])
+    directory = local.STATE
+    # Only the test-owned STATE is injected. Native argparse/selection/dispatch,
+    # startup guards and child cleanup still run without provider/config options.
+    cli = """import signal,sys
+from pathlib import Path
+sys.path.insert(0,'scripts')
+import local_stack as local
+local.STATE=Path(sys.argv[1])
+signal.signal(signal.SIGTERM,local.interrupted)
+sys.argv=['local_stack.py',*sys.argv[2:]]
+try:local.main()
+except KeyboardInterrupt:pass
+"""
+    child_env = pg.base_environment()
+    args = [sys.executable,'-B','-c',cli,str(directory)]
+    log_path = directory/(name+'-up.log')
+    with cleanup_on_termination(), log_path.open('x') as log:
+        log_path.chmod(0o600)
+        up = None
+        try:
+            with defer_termination():
+                # With backend-only set, a missing PostgreSQL selection is
+                # rejected before reaching legacy MySQL config or services.
+                up = subprocess.Popen([*args,'up','--backend-only'],cwd=ROOT,env=child_env,stdout=log,
+                    stderr=subprocess.STDOUT,start_new_session=True)
+            deadline=time.monotonic()+90
+            while 'PostgreSQL applications ready' not in log_path.read_text():
+                if up.poll() is not None or time.monotonic()>=deadline:
+                    raise ValueError('jpa_ci_selected_up_failed')
+                time.sleep(.1)
+            base = 'http://127.0.0.1:'+env['PUBBURI_SERVER_PORT']
+            pg.api_ready(base)
+            with local_stack.operation_gate(directory) as parent:
+                owners = local_stack.runtime_records(parent, live=True)
+                if (set(owners) != {'operating'} or owners['operating']['value']['pid'] != up.pid
+                        or owners['operating']['value']['source_id'] != env['PUBBURI_JPA_SOURCE_ID']):
+                    raise ValueError('jpa_ci_selected_owner_mismatch')
+            # Status observes a live runtime without adopting its owner.
+            command([*args,'status','--backend-only'],child_env,directory/(name+'-status.log'),budget=30)
+            if pg.selection(local) != selected:
+                raise ValueError('jpa_ci_selected_input_changed')
+            yield base
+        finally:
+            if up is not None:
+                local_stack.stop(up)
+                if up.returncode != 0:
+                    raise ValueError('jpa_ci_selected_cleanup_failed')
+                # The durable registry may remain empty. Its exclusive gate must
+                # accept no live/stale owner after all owned children have exited.
+                with local.operation_lock():
+                    pass
+                with socket.socket() as probe:
+                    probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                    probe.bind(('127.0.0.1',int(env['PUBBURI_SERVER_PORT'])))
+                if pg.selection(local) != selected:
+                    raise ValueError('jpa_ci_selected_input_changed')
+
+
 def local_release(environ, cutover_environment):
     import local_stack
     import postgresql_local as pg
@@ -116,41 +183,8 @@ def local_release(environ, cutover_environment):
             raise ValueError('jpa_ci_sibling_activation_accepted')
         if selector.read_bytes() != selected_bytes:
             raise ValueError('jpa_ci_existing_selection_changed')
-        # Exercise the developer launcher route in a separate owner process. Its
-        # TERM handler unwinds the launcher's child sessions before it exits.
-        cli = """import signal,sys
-from pathlib import Path
-sys.path.insert(0,'scripts')
-import local_stack as local
-local.STATE=Path(sys.argv[1])
-signal.signal(signal.SIGTERM,local.interrupted)
-sys.argv=['local_stack.py',*sys.argv[2:]]
-try:local.main()
-except KeyboardInterrupt:pass
-"""
-        child_env = pg.base_environment()
-        args = [sys.executable,'-B','-c',cli,str(directory)]
-        log_path = directory/'selected-up.log'
-        with log_path.open('x') as log:
-            log_path.chmod(0o600)
-            with defer_termination():
-                up = subprocess.Popen([*args,'dev'],cwd=ROOT,env=child_env,stdout=log,
-                    stderr=subprocess.STDOUT,start_new_session=True)
-            try:
-                deadline=time.monotonic()+90
-                while 'PostgreSQL applications ready' not in log_path.read_text():
-                    if up.poll() is not None or time.monotonic()>=deadline:
-                        raise ValueError('jpa_ci_selected_up_failed')
-                    time.sleep(.1)
-                # A live up holds the exclusive lock; status must still observe it.
-                command([*args,'status','--backend-only'],child_env,directory/'selected-status.log',budget=30)
-            finally:
-                local_stack.stop(up)
-        if up.returncode!=0 or (directory/'local-stack-lock').exists():
-            raise ValueError('jpa_ci_selected_cleanup_failed')
-        with socket.socket() as probe:
-            probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-            probe.bind(('127.0.0.1',int(env['PUBBURI_SERVER_PORT'])))
+        with selected_runtime(local, 'selected'):
+            pass
     print('Owned PostgreSQL activation and selected-default restart passed; database retained.')
     return local, config, release
 
