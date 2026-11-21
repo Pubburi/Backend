@@ -17,8 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** Writes only the authored order slice into a separately fenced legacy MySQL fixture. */
-final class ReverseOrderRehearsal {
+/** Copies only authored order/review slices into a separately fenced legacy MySQL fixture. */
+final class LegacyReverseRehearsal {
     private static final SourceContract.Table ORIGINAL_ORDERS = table("t_order");
     private static final SourceContract.Table ORDERS = new SourceContract.Table(ORIGINAL_ORDERS.name(),
             ORIGINAL_ORDERS.columns().stream().map(column -> column.name().equals("order_time")
@@ -26,11 +26,12 @@ final class ReverseOrderRehearsal {
                     : column).toList(), ORIGINAL_ORDERS.primary());
     private static final SourceContract.Table DETAILS = table("t_order_detail");
     private static final SourceContract.Table STAMPS = table("t_stamp");
+    private static final SourceContract.Table COMMENTS = table("t_comment");
     private static final String ORDER_TIME = "2026-11-15T04:00:00.123456Z";
 
     private record AwardedOrder(int id, String user, int before, int after) { }
 
-    private ReverseOrderRehearsal() { }
+    private LegacyReverseRehearsal() { }
 
     static void verify(Map<String, String> env, Connection pg, SourceArtifact.Snapshot source) throws Exception {
         var reverse = new HashMap<>(env);
@@ -107,6 +108,7 @@ final class ReverseOrderRehearsal {
                 assertEquals(next, SourceImportIntegrationTests.number(mysql,
                         "SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='" + shared.name() + "'"));
             }
+            verifyReviews(pg, legacy, mysql);
         }
 
         // The separate read-only MySQL source still matches every accepted row and all seven highwaters.
@@ -115,6 +117,156 @@ final class ReverseOrderRehearsal {
             SourceImportTool.compareSource(current, source);
             current.finish();
         }
+    }
+
+    private static void verifyReviews(Connection pg, SourceSettings legacy, Connection mysql) throws Exception {
+        try (var sql = mysql.createStatement(); var rows = sql.executeQuery("""
+                SELECT c.COLLATION_NAME,k.PAD_ATTRIBUTE FROM information_schema.COLUMNS c
+                JOIN information_schema.COLLATIONS k ON k.COLLATION_NAME=c.COLLATION_NAME
+                WHERE c.TABLE_SCHEMA=DATABASE() AND c.TABLE_NAME='t_comment_taste_tag' AND c.COLUMN_NAME='tag'
+                """)) {
+            assertTrue(rows.next());
+            assertEquals("utf8mb4_bin", rows.getString(1));
+            assertEquals("PAD SPACE", rows.getString(2));
+        }
+        try (var sql = mysql.createStatement(); var rows = sql.executeQuery("""
+                SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',')
+                FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE()
+                  AND TABLE_NAME='t_comment_taste_tag' AND INDEX_NAME='PRIMARY'
+                """)) {
+            assertTrue(rows.next());
+            assertEquals("comment_id,tag", rows.getString(1));
+        }
+        assertEquals(0, SourceImportIntegrationTests.number(pg, "SELECT ('dry' COLLATE \"C\" = 'dry ' COLLATE \"C\")::int"));
+        var beforeReviews = reviewRows(mysql, COMMENTS, false);
+        var beforeTags = reviewRows(mysql, SourceContract.REVIEW_TAGS, false);
+        assertFalse(beforeReviews.isEmpty());
+        assertFalse(beforeTags.isEmpty());
+        var sourceReviews = reviewRows(pg, COMMENTS, true);
+        var sourceTags = reviewRows(pg, SourceContract.REVIEW_TAGS, true);
+        var privateBefore = privateState(pg);
+
+        int incompatible = authoredReview(pg, List.of("dry", "dry "));
+        var rawTags = List.of("  SWEET  ", "Dry,Fruit", "Line\nBreak", "🌾".repeat(40));
+        int compatible = authoredReview(pg, rawTags);
+        var rejected = pgRows(pg, COMMENTS, "id", incompatible).get(0);
+        var rejectedTags = pgRows(pg, SourceContract.REVIEW_TAGS, "comment_id", incompatible);
+        var review = pgRows(pg, COMMENTS, "id", compatible).get(0);
+        var tags = pgRows(pg, SourceContract.REVIEW_TAGS, "comment_id", compatible);
+        assertFalse(beforeReviews.containsKey(TargetValues.key(COMMENTS, rejected)));
+        assertFalse(beforeReviews.containsKey(TargetValues.key(COMMENTS, review)));
+        assertEquals(2, rejectedTags.size());
+        assertEquals(rawTags.size(), tags.size());
+        assertEquals(java.util.Set.copyOf(rawTags), tags.stream().map(row -> row.get(1).textValue())
+                .collect(java.util.stream.Collectors.toSet()));
+        assertEquals(String.format(java.util.Locale.ROOT, "%08x", Float.floatToRawIntBits(3.7f)), review.get(3).textValue());
+        assertEquals("원문 후기\n🌾", review.get(4).textValue());
+        assertNull(sourceReviews.put(TargetValues.key(COMMENTS, rejected), rejected));
+        assertNull(sourceReviews.put(TargetValues.key(COMMENTS, review), review));
+        for (var tag : rejectedTags) assertNull(sourceTags.put(TargetValues.key(SourceContract.REVIEW_TAGS, tag), tag));
+        for (var tag : tags) assertNull(sourceTags.put(TargetValues.key(SourceContract.REVIEW_TAGS, tag), tag));
+        assertEquals(sourceReviews, reviewRows(pg, COMMENTS, true));
+        assertEquals(sourceTags, reviewRows(pg, SourceContract.REVIEW_TAGS, true));
+
+        // PG C retains both values. The legacy PAD SPACE key rejects the second
+        // child after the new header and first child were inserted in this TX.
+        assertEquals(1062, assertThrows(SQLException.class,
+                () -> copyReview(legacy, rejected, rejectedTags)).getErrorCode());
+        assertEquals(beforeReviews, reviewRows(mysql, COMMENTS, false));
+        assertEquals(beforeTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(sourceReviews, reviewRows(pg, COMMENTS, true));
+        assertEquals(sourceTags, reviewRows(pg, SourceContract.REVIEW_TAGS, true));
+
+        copyReview(legacy, review, tags);
+        var expectedReviews = new TreeMap<>(beforeReviews);
+        var expectedTags = new TreeMap<>(beforeTags);
+        assertNull(expectedReviews.put(TargetValues.key(COMMENTS, review), review));
+        for (var tag : tags) assertNull(expectedTags.put(TargetValues.key(SourceContract.REVIEW_TAGS, tag), tag));
+        assertEquals(expectedReviews, reviewRows(mysql, COMMENTS, false));
+        assertEquals(expectedTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(1062, assertThrows(SQLException.class, () -> copyReview(legacy, review, tags)).getErrorCode());
+        assertEquals(expectedReviews, reviewRows(mysql, COMMENTS, false));
+        assertEquals(expectedTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
+
+        long next = SourceImportIntegrationTests.number(mysql,
+                "SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t_comment'");
+        assertTrue(next > compatible && next > incompatible);
+        // Failed InnoDB inserts may consume IDs. Observe the actual highwater,
+        // then prove a normal next insert never reuses either authored ID.
+        try (var sql = mysql.prepareStatement("INSERT INTO t_comment(user_id,product_id,rating,comment) VALUES(?,?,?,?)",
+                java.sql.Statement.RETURN_GENERATED_KEYS)) {
+            sql.setString(1, review.get(1).textValue());
+            sql.setInt(2, Integer.parseInt(review.get(2).textValue()));
+            sql.setFloat(3, 3.7f);
+            sql.setString(4, "Authored next legacy identity");
+            assertEquals(1, sql.executeUpdate());
+            try (var keys = sql.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                assertEquals(next, keys.getLong(1));
+                ArrayNode inserted = review.deepCopy();
+                inserted.set(0, SourceContract.JSON.valueToTree(Long.toString(next)));
+                inserted.set(4, SourceContract.JSON.valueToTree("Authored next legacy identity"));
+                assertNull(expectedReviews.put(TargetValues.key(COMMENTS, inserted), inserted));
+            }
+        }
+        assertEquals(expectedReviews, reviewRows(mysql, COMMENTS, false));
+        assertEquals(expectedTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(sourceReviews, reviewRows(pg, COMMENTS, true));
+        assertEquals(sourceTags, reviewRows(pg, SourceContract.REVIEW_TAGS, true));
+        assertEquals(privateBefore, privateState(pg));
+    }
+
+    private static int authoredReview(Connection pg, List<String> tags) throws SQLException {
+        int id;
+        try (var sql = pg.prepareStatement("""
+                INSERT INTO pubburi.t_comment(user_id,product_id,rating,comment)
+                SELECT u.id,p.id,?,? FROM
+                  (SELECT id FROM pubburi.t_user ORDER BY id LIMIT 1) u CROSS JOIN
+                  (SELECT id FROM pubburi.t_product ORDER BY id LIMIT 1) p RETURNING id
+                """)) {
+            sql.setFloat(1, 3.7f);
+            sql.setString(2, "원문 후기\n🌾");
+            try (var rows = sql.executeQuery()) { assertTrue(rows.next()); id = rows.getInt(1); }
+        }
+        try (var sql = pg.prepareStatement("INSERT INTO pubburi.t_comment_taste_tag(comment_id,tag) VALUES(?,?)")) {
+            for (String tag : tags) { sql.setInt(1, id); sql.setString(2, tag); assertEquals(1, sql.executeUpdate()); }
+        }
+        return id;
+    }
+
+    private static Map<String, JsonNode> reviewRows(Connection connection, SourceContract.Table table, boolean pg) throws SQLException {
+        var result = new TreeMap<String, JsonNode>();
+        String columns = pg ? SourceImportTool.columns(table) : mysqlColumns(table);
+        try (var sql = connection.createStatement(); var rows = sql.executeQuery(
+                "SELECT " + columns + " FROM " + (pg ? "pubburi." : "") + table.name())) {
+            while (rows.next()) {
+                var row = SourceContract.JSON.valueToTree(pg ? TargetValues.row(table, rows) : SourceContract.row(table, rows));
+                assertNull(result.put(TargetValues.key(table, row), row));
+            }
+        }
+        return result;
+    }
+
+    private static Map<String, List<String>> privateState(Connection pg) throws SQLException {
+        var result = new TreeMap<String, List<String>>();
+        for (String table : TargetSchemaContract.POSTGRES_ONLY_TABLES) {
+            var values = new ArrayList<String>();
+            try (var sql = pg.createStatement(); var rows = sql.executeQuery(
+                    "SELECT row_to_json(t)::text FROM pubburi." + table + " t ORDER BY row_to_json(t)::text COLLATE \"C\"")) {
+                while (rows.next()) values.add(rows.getString(1));
+            }
+            result.put(table, values);
+        }
+        return result;
+    }
+
+    private static void copyReview(SourceSettings legacy, JsonNode review, List<JsonNode> tags) throws Exception {
+        ImportTransaction.run(legacy.connect(), mysql -> {
+            SourceSession.guard(mysql, legacy);
+            insert(mysql, COMMENTS, review);
+            for (var tag : tags) insert(mysql, SourceContract.REVIEW_TAGS, tag);
+            return null;
+        });
     }
 
     private static void verifyLinkedOrder(Connection pg, SourceSettings legacy, Connection mysql,
@@ -305,6 +457,7 @@ final class ReverseOrderRehearsal {
                     switch (column.kind()) {
                         case "TEXT" -> sql.setString(parameter, value.textValue());
                         case "I32" -> sql.setInt(parameter, Integer.parseInt(value.textValue()));
+                        case "F32" -> sql.setFloat(parameter, Float.intBitsToFloat(Integer.parseUnsignedInt(value.textValue(), 16)));
                         case "INSTANT" -> sql.setObject(parameter, LocalDateTime.ofInstant(Instant.parse(value.textValue()), ZoneOffset.UTC));
                         default -> throw new IllegalArgumentException("legacy_order_cell_kind_rejected");
                     }
