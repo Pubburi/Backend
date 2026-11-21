@@ -146,6 +146,40 @@ def run(environ):
             source["PUBBURI_SOURCE_TYPED_SNAPSHOT_DIR"] = typed["PUBBURI_SOURCE_SNAPSHOT_DIR"]
             for key in ('URL','DB_NAME','USER','PASSWORD','RUN_TOKEN','WINDOW_UUID'):
                 source['PUBBURI_SOURCE_TYPED_'+key] = typed['PUBBURI_SOURCE_'+key]
+            # Clone only the approved common schema. DDL is preparation in a new
+            # database, never part of the later atomic data-copy transaction.
+            common_tables = tuple(line.split('\t')[0] for line in
+                (ROOT / 'tools/postgresql-migration/src/main/resources/source-primary-contract.tsv').read_text().splitlines()) + ('t_comment_taste_tag',)
+            if (len(common_tables) != 17 or len(set(common_tables)) != 17
+                    or any(not re.fullmatch(r't_[a-z_]+', name) for name in common_tables)):
+                raise ValueError('source_ci_common_table_whitelist_rejected')
+            common_database, common_writer = 'source_reverse_common_ci', 'source_common_writer'
+            common_password, common_token, common_window = secrets.token_hex(24), secrets.token_hex(24), str(uuid.uuid4())
+            common_url = source['PUBBURI_SOURCE_URL'].rsplit('/',1)[0]+'/'+common_database
+            if common_database in (database,typed_database):
+                raise ValueError('source_ci_common_target_is_source')
+            verify_owned_source(dict(source,PUBBURI_SOURCE_URL=common_url,PUBBURI_SOURCE_DB_NAME=common_database))
+            verify_owned_source(typed)
+            ddl = command(['docker','exec','-e','MYSQL_PWD',cid,'mysqldump','--protocol=TCP','-h127.0.0.1',
+                '-u'+typed_reader,'--ssl-mode=VERIFY_IDENTITY',
+                '--ssl-ca=/tmp/pubburi-source-tls/ca.pem','--default-character-set=utf8mb4',
+                '--no-data','--no-tablespaces','--skip-lock-tables','--skip-add-drop-table',
+                '--skip-triggers','--set-gtid-purged=OFF',typed_database,*common_tables],
+                env=dict(environ,MYSQL_PWD=typed_password),text=True).stdout
+            sql("CREATE DATABASE "+common_database+" CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE "+common_database+";\n"+ddl,timeout=40)
+            for name in common_tables:
+                if sql('SHOW CREATE TABLE '+typed_database+'.'+name) != sql('SHOW CREATE TABLE '+common_database+'.'+name):
+                    raise ValueError('source_ci_common_schema_changed')
+                if sql('SELECT count(*) FROM '+common_database+'.'+name) != '0':
+                    raise ValueError('source_ci_common_target_not_empty')
+            sql("USE "+common_database+"; CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); "
+                "INSERT INTO pubburi_source_snapshot_guard VALUES ('"+common_token+"','QUIESCED','"+common_window+"'); "
+                "CREATE USER '"+common_writer+"'@'%' IDENTIFIED BY '"+common_password+"' REQUIRE SSL; "
+                "GRANT SELECT ON "+common_database+".pubburi_source_snapshot_guard TO '"+common_writer+"'@'%'; "+
+                ' '.join("GRANT SELECT,INSERT ON "+common_database+'.'+name+" TO '"+common_writer+"'@'%';" for name in common_tables))
+            source.update(PUBBURI_SOURCE_COMMON_URL=common_url,PUBBURI_SOURCE_COMMON_DB_NAME=common_database,
+                PUBBURI_SOURCE_COMMON_USER=common_writer,PUBBURI_SOURCE_COMMON_PASSWORD=common_password,
+                PUBBURI_SOURCE_COMMON_RUN_TOKEN=common_token,PUBBURI_SOURCE_COMMON_WINDOW_UUID=common_window)
             reverse_database, reverse_writer = "source_reverse_order_ci", "source_reverse_writer"
             reverse_password, reverse_token, reverse_window = secrets.token_hex(24), secrets.token_hex(24), str(uuid.uuid4())
             reverse_url = source["PUBBURI_SOURCE_URL"].rsplit("/", 1)[0] + "/" + reverse_database
@@ -185,6 +219,7 @@ def run(environ):
             jpa = run_jpa(source, directory / "accepted", directory, recovery_control=recovery_control)
         return {"status": "passed", "jpa_rehearsal_verified": jpa, "postgresql_import_verified": imported, "source_tables": 16, "tls": "VERIFY_IDENTITY", "reader_only": True,
                 "typed_source_version": 2 if imported else None, "typed_source_tables": 17 if imported else None,
+                "common_reverse_tables": 17 if imported else None,
                 "api_jpa_cutover": False, "source_original_touched": False}
     finally:
         # Diagnostic failures never bypass cleanup; never remove a non-owned container.

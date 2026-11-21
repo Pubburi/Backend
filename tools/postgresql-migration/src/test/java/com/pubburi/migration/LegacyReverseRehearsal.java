@@ -33,6 +33,111 @@ final class LegacyReverseRehearsal {
 
     private LegacyReverseRehearsal() { }
 
+    static void verifyCommon(Map<String, String> env, Connection pg, SourceArtifact.Snapshot source) throws Exception {
+        var common = new HashMap<>(env);
+        for (String key : List.of("URL", "DB_NAME", "USER", "PASSWORD", "RUN_TOKEN", "WINDOW_UUID")) {
+            common.put("PUBBURI_SOURCE_" + key, env.get("PUBBURI_SOURCE_COMMON_" + key));
+        }
+        var legacy = SourceSettings.from(common);
+        var original = SourceSettings.from(env);
+        assertEquals("source_reverse_common_ci", legacy.database());
+        assertEquals("source_common_writer", legacy.user());
+        assertNotEquals(original.database(), legacy.database());
+        assertNotEquals(env.get("PUBBURI_SOURCE_REVERSE_DB_NAME"), legacy.database());
+        assertNotEquals(original.token(), legacy.token());
+        assertNotEquals(original.window(), legacy.window());
+        assertEquals(2, source.version());
+        assertEquals(17, source.tables().size());
+        boolean autoCommit = pg.getAutoCommit(), readOnly = pg.isReadOnly();
+        int isolation = pg.getTransactionIsolation();
+        pg.setReadOnly(true);
+        pg.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+        pg.setAutoCommit(false);
+        try (var mysql = legacy.connect()) {
+            assertEquals(source.data().path("sourceServer").textValue(), SourceSession.guard(mysql, legacy));
+            try (var sql = mysql.createStatement()) { sql.execute("SET SESSION information_schema_stats_expiry=0"); }
+            assertEquals(1, SourceImportIntegrationTests.number(mysql, "SELECT @@session.foreign_key_checks"));
+            assertEquals(0, SourceImportIntegrationTests.number(mysql, """
+                    SELECT count(*) FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE()
+                      AND REFERENCED_TABLE_NAME IS NOT NULL AND REFERENCED_TABLE_SCHEMA<>DATABASE()
+                    """));
+            SourceImportTool.compare(pg, source);
+            var before = commonRows(pg, true);
+            var privateBefore = privateState(pg);
+            var sequences = SourceImportIntegrationTests.sequences(pg);
+            for (var table : source.tables()) {
+                assertEquals(0, SourceImportIntegrationTests.number(mysql, "SELECT count(*) FROM " + table.name()));
+            }
+            assertCommonHighwater(mysql, source);
+
+            // A real duplicate of the final composite child key is reached only
+            // after all 17 common tables have been written. No DDL runs in this TX.
+            var conflict = new java.util.LinkedHashMap<>(before);
+            var repeated = new ArrayList<>(before.get(SourceContract.REVIEW_TAGS.name()));
+            assertFalse(repeated.isEmpty());
+            repeated.add(repeated.get(0));
+            conflict.put(SourceContract.REVIEW_TAGS.name(), repeated);
+            assertEquals(1062, assertThrows(SQLException.class, () -> copyCommon(legacy, conflict)).getErrorCode());
+            for (var table : source.tables()) {
+                assertEquals(0, SourceImportIntegrationTests.number(mysql, "SELECT count(*) FROM " + table.name()));
+            }
+            assertEquals(before, commonRows(pg, true));
+            assertEquals(privateBefore, privateState(pg));
+            assertEquals(sequences, SourceImportIntegrationTests.sequences(pg));
+
+            copyCommon(legacy, before);
+            assertEquals(before, commonRows(mysql, false));
+            assertCommonHighwater(mysql, source);
+            assertEquals(before, commonRows(pg, true));
+            assertEquals(privateBefore, privateState(pg));
+            assertEquals(sequences, SourceImportIntegrationTests.sequences(pg));
+            SourceSession.guard(mysql, legacy);
+        } finally {
+            pg.rollback();
+            pg.setAutoCommit(autoCommit);
+            pg.setReadOnly(readOnly);
+            pg.setTransactionIsolation(isolation);
+        }
+        try (var current = new SourceSession(original, source.version())) {
+            SourceImportTool.compareSource(current, source);
+            current.finish();
+        }
+    }
+
+    private static void assertCommonHighwater(Connection mysql, SourceArtifact.Snapshot source) throws SQLException {
+        for (var identity : IdentityReservations.IDENTITIES) {
+            assertEquals(Long.parseLong(source.data().path("sourceNext").path(identity.table()).textValue()),
+                    SourceImportIntegrationTests.number(mysql,
+                    "SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='" + identity.table() + "'"));
+        }
+    }
+
+    private static Map<String, List<JsonNode>> commonRows(Connection connection, boolean pg) throws SQLException {
+        var result = new java.util.LinkedHashMap<String, List<JsonNode>>();
+        for (var table : SourceContract.tables(2)) {
+            result.put(table.name(), List.copyOf(storedRows(connection, table, pg).values()));
+        }
+        return result;
+    }
+
+    private static void copyCommon(SourceSettings legacy, Map<String, List<JsonNode>> rows) throws Exception {
+        ImportTransaction.run(legacy.connect(), mysql -> {
+            SourceSession.guard(mysql, legacy);
+            if (SourceImportIntegrationTests.number(mysql, "SELECT @@session.foreign_key_checks") != 1) {
+                throw new IllegalStateException("legacy_common_foreign_keys_required");
+            }
+            for (var table : SourceContract.tables(2)) {
+                for (var row : rows.get(table.name())) insert(mysql, table, row);
+            }
+            // JSONRAW is compared as stored text, not parsed/reserialized equality.
+            // Any incompatible representation must roll back the complete bundle.
+            if (!rows.equals(commonRows(mysql, false))) {
+                throw new IllegalStateException("legacy_common_value_mismatch");
+            }
+            return null;
+        });
+    }
+
     static void verify(Map<String, String> env, Connection pg, SourceArtifact.Snapshot source) throws Exception {
         var reverse = new HashMap<>(env);
         for (String key : List.of("URL", "DB_NAME", "USER", "PASSWORD", "RUN_TOKEN", "WINDOW_UUID")) {
@@ -138,12 +243,12 @@ final class LegacyReverseRehearsal {
             assertEquals("comment_id,tag", rows.getString(1));
         }
         assertEquals(0, SourceImportIntegrationTests.number(pg, "SELECT ('dry' COLLATE \"C\" = 'dry ' COLLATE \"C\")::int"));
-        var beforeReviews = reviewRows(mysql, COMMENTS, false);
-        var beforeTags = reviewRows(mysql, SourceContract.REVIEW_TAGS, false);
+        var beforeReviews = storedRows(mysql, COMMENTS, false);
+        var beforeTags = storedRows(mysql, SourceContract.REVIEW_TAGS, false);
         assertFalse(beforeReviews.isEmpty());
         assertFalse(beforeTags.isEmpty());
-        var sourceReviews = reviewRows(pg, COMMENTS, true);
-        var sourceTags = reviewRows(pg, SourceContract.REVIEW_TAGS, true);
+        var sourceReviews = storedRows(pg, COMMENTS, true);
+        var sourceTags = storedRows(pg, SourceContract.REVIEW_TAGS, true);
         var privateBefore = privateState(pg);
 
         int incompatible = authoredReview(pg, List.of("dry", "dry "));
@@ -165,28 +270,28 @@ final class LegacyReverseRehearsal {
         assertNull(sourceReviews.put(TargetValues.key(COMMENTS, review), review));
         for (var tag : rejectedTags) assertNull(sourceTags.put(TargetValues.key(SourceContract.REVIEW_TAGS, tag), tag));
         for (var tag : tags) assertNull(sourceTags.put(TargetValues.key(SourceContract.REVIEW_TAGS, tag), tag));
-        assertEquals(sourceReviews, reviewRows(pg, COMMENTS, true));
-        assertEquals(sourceTags, reviewRows(pg, SourceContract.REVIEW_TAGS, true));
+        assertEquals(sourceReviews, storedRows(pg, COMMENTS, true));
+        assertEquals(sourceTags, storedRows(pg, SourceContract.REVIEW_TAGS, true));
 
         // PG C retains both values. The legacy PAD SPACE key rejects the second
         // child after the new header and first child were inserted in this TX.
         assertEquals(1062, assertThrows(SQLException.class,
                 () -> copyReview(legacy, rejected, rejectedTags)).getErrorCode());
-        assertEquals(beforeReviews, reviewRows(mysql, COMMENTS, false));
-        assertEquals(beforeTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
-        assertEquals(sourceReviews, reviewRows(pg, COMMENTS, true));
-        assertEquals(sourceTags, reviewRows(pg, SourceContract.REVIEW_TAGS, true));
+        assertEquals(beforeReviews, storedRows(mysql, COMMENTS, false));
+        assertEquals(beforeTags, storedRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(sourceReviews, storedRows(pg, COMMENTS, true));
+        assertEquals(sourceTags, storedRows(pg, SourceContract.REVIEW_TAGS, true));
 
         copyReview(legacy, review, tags);
         var expectedReviews = new TreeMap<>(beforeReviews);
         var expectedTags = new TreeMap<>(beforeTags);
         assertNull(expectedReviews.put(TargetValues.key(COMMENTS, review), review));
         for (var tag : tags) assertNull(expectedTags.put(TargetValues.key(SourceContract.REVIEW_TAGS, tag), tag));
-        assertEquals(expectedReviews, reviewRows(mysql, COMMENTS, false));
-        assertEquals(expectedTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(expectedReviews, storedRows(mysql, COMMENTS, false));
+        assertEquals(expectedTags, storedRows(mysql, SourceContract.REVIEW_TAGS, false));
         assertEquals(1062, assertThrows(SQLException.class, () -> copyReview(legacy, review, tags)).getErrorCode());
-        assertEquals(expectedReviews, reviewRows(mysql, COMMENTS, false));
-        assertEquals(expectedTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(expectedReviews, storedRows(mysql, COMMENTS, false));
+        assertEquals(expectedTags, storedRows(mysql, SourceContract.REVIEW_TAGS, false));
 
         long next = SourceImportIntegrationTests.number(mysql,
                 "SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t_comment'");
@@ -209,10 +314,10 @@ final class LegacyReverseRehearsal {
                 assertNull(expectedReviews.put(TargetValues.key(COMMENTS, inserted), inserted));
             }
         }
-        assertEquals(expectedReviews, reviewRows(mysql, COMMENTS, false));
-        assertEquals(expectedTags, reviewRows(mysql, SourceContract.REVIEW_TAGS, false));
-        assertEquals(sourceReviews, reviewRows(pg, COMMENTS, true));
-        assertEquals(sourceTags, reviewRows(pg, SourceContract.REVIEW_TAGS, true));
+        assertEquals(expectedReviews, storedRows(mysql, COMMENTS, false));
+        assertEquals(expectedTags, storedRows(mysql, SourceContract.REVIEW_TAGS, false));
+        assertEquals(sourceReviews, storedRows(pg, COMMENTS, true));
+        assertEquals(sourceTags, storedRows(pg, SourceContract.REVIEW_TAGS, true));
         assertEquals(privateBefore, privateState(pg));
     }
 
@@ -234,7 +339,7 @@ final class LegacyReverseRehearsal {
         return id;
     }
 
-    private static Map<String, JsonNode> reviewRows(Connection connection, SourceContract.Table table, boolean pg) throws SQLException {
+    private static Map<String, JsonNode> storedRows(Connection connection, SourceContract.Table table, boolean pg) throws SQLException {
         var result = new TreeMap<String, JsonNode>();
         String columns = pg ? SourceImportTool.columns(table) : mysqlColumns(table);
         try (var sql = connection.createStatement(); var rows = sql.executeQuery(
@@ -249,7 +354,9 @@ final class LegacyReverseRehearsal {
 
     private static Map<String, List<String>> privateState(Connection pg) throws SQLException {
         var result = new TreeMap<String, List<String>>();
-        for (String table : TargetSchemaContract.POSTGRES_ONLY_TABLES) {
+        var tables = new ArrayList<>(TargetSchemaContract.POSTGRES_ONLY_TABLES);
+        tables.add("migration_source_receipt");
+        for (String table : tables) {
             var values = new ArrayList<String>();
             try (var sql = pg.createStatement(); var rows = sql.executeQuery(
                     "SELECT row_to_json(t)::text FROM pubburi." + table + " t ORDER BY row_to_json(t)::text COLLATE \"C\"")) {
@@ -456,8 +563,13 @@ final class LegacyReverseRehearsal {
                 } else {
                     switch (column.kind()) {
                         case "TEXT" -> sql.setString(parameter, value.textValue());
+                        case "UUID", "JSONRAW" -> sql.setString(parameter, value.textValue());
                         case "I32" -> sql.setInt(parameter, Integer.parseInt(value.textValue()));
+                        case "I64" -> sql.setLong(parameter, Long.parseLong(value.textValue()));
                         case "F32" -> sql.setFloat(parameter, Float.intBitsToFloat(Integer.parseUnsignedInt(value.textValue(), 16)));
+                        case "F64" -> sql.setDouble(parameter, Double.longBitsToDouble(Long.parseUnsignedLong(value.textValue(), 16)));
+                        case "BOOL" -> sql.setInt(parameter, value.booleanValue() ? 1 : 0);
+                        case "DECIMAL" -> sql.setBigDecimal(parameter, new java.math.BigDecimal(value.textValue()));
                         case "INSTANT" -> sql.setObject(parameter, LocalDateTime.ofInstant(Instant.parse(value.textValue()), ZoneOffset.UTC));
                         default -> throw new IllegalArgumentException("legacy_order_cell_kind_rejected");
                     }
