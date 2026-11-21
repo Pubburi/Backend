@@ -256,6 +256,53 @@ def run(environ, runtime, recovery_control, selected_release):
             else:raise ValueError('recovery_ci_target_function_accepted')
         finally:
             with recovery.connect(admin_target) as connection:connection.execute('DROP FUNCTION public.recovery_forbidden()')
+        # A missing preparation grant reaches the real pg_restore client. Its
+        # failure must retain evidence without publishing a usable recovery.
+        with recovery.connect(target) as connection:
+            if connection.execute("SELECT has_database_privilege(current_user,current_database(),'CREATE')").fetchone() != (True,):
+                raise ValueError('recovery_ci_target_create_fixture_missing')
+            marker = connection.execute('SELECT token FROM public.pubburi_pg_migration_guard ORDER BY token').fetchall()
+        refused = local.STATE/'refused-client-create'
+        try:
+            with recovery.connect(admin_target) as connection:
+                connection.execute(sql.SQL('REVOKE CREATE ON DATABASE {} FROM {}').format(
+                    sql.Identifier(target['PUBBURI_PG_DB_NAME']), sql.Identifier(target['PUBBURI_PG_USER'])))
+            with recovery.connect(target) as connection:
+                if connection.execute("SELECT has_database_privilege(current_user,current_database(),'CREATE')").fetchone() != (False,):
+                    raise ValueError('recovery_ci_target_create_not_removed')
+            try:
+                recovery.restore(target,archive,pin,refused,local=local)
+            except subprocess.CalledProcessError as error:
+                if error.returncode == 0 or 'pg_restore' not in error.cmd:
+                    raise ValueError('recovery_ci_wrong_client_failure') from None
+            else:
+                raise ValueError('recovery_ci_unprepared_target_restored')
+            if {path.name for path in refused.iterdir()} != {'attempt.json','restore-error.log'}:
+                raise ValueError('recovery_ci_failed_client_published_completion')
+            if pg.strict_json(pg.private_file(refused/'attempt.json',8192)) != {
+                    'status':'restore_started_completion_unknown','manifest_sha256':pin,
+                    'target_database':target['PUBBURI_PG_DB_NAME']}:
+                raise ValueError('recovery_ci_failed_client_attempt_changed')
+            # Diagnose only the fixed cause; raw client output stays in its private file.
+            diagnostic = pg.private_file(refused/'restore-error.log',65536)
+            if b'permission denied for database' not in diagnostic or b'CREATE SCHEMA pubburi' not in diagnostic:
+                raise ValueError('recovery_ci_create_failure_not_observed')
+            with recovery.connect(target) as connection:
+                if (connection.execute("SELECT to_regnamespace('pubburi')").fetchone() != (None,)
+                        or connection.execute('SELECT token FROM public.pubburi_pg_migration_guard ORDER BY token').fetchall() != marker):
+                    raise ValueError('recovery_ci_failed_client_changed_target')
+            if pg.private_file(selector,16384) != source_selection:
+                raise ValueError('recovery_ci_failed_client_changed_selection')
+            with recovery.connect(control) as connection:
+                if json.loads(json.dumps(recovery.state(connection))) != manifest['state']:
+                    raise ValueError('recovery_ci_failed_client_changed_source')
+        finally:
+            with recovery.connect(admin_target) as connection:
+                connection.execute(sql.SQL('GRANT CREATE ON DATABASE {} TO {}').format(
+                    sql.Identifier(target['PUBBURI_PG_DB_NAME']), sql.Identifier(target['PUBBURI_PG_USER'])))
+        with recovery.connect(target) as connection:
+            if connection.execute("SELECT has_database_privilege(current_user,current_database(),'CREATE')").fetchone() != (True,):
+                raise ValueError('recovery_ci_target_create_not_restored')
         attempt=local.STATE/'restored'
         recovery.restore(target,archive,pin,attempt,local=local)
         preservation = (local, control, target, archive, pin, attempt, pg.sha(attempt/'promotion.json'))
@@ -401,6 +448,7 @@ def run(environ, runtime, recovery_control, selected_release):
         'internal_notifications_snapshots_and_first_read_time_preserved':True,
         'preservation_rejects_sibling_copy_and_same_count_notification_change':True,
         'backup_rejects_missing_search_delivery_before_archive':True,
+        'failed_restore_client_keeps_evidence_and_allows_separate_retry':True,
         'explicit_promotion_and_stale_source_reactivation_guard_verified':True,
         'promoted_native_selected_runtime_and_owned_cleanup_verified':True,
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
