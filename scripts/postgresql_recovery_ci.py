@@ -1,5 +1,6 @@
 """Recovery acceptance inside the existing owned source/JPA CI lifecycle, never an independent stack."""
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import http.cookiejar
 import uuid
@@ -10,6 +11,7 @@ import secrets
 import subprocess
 import time
 from types import SimpleNamespace
+from threading import Barrier
 
 import local_stack
 import postgresql_recovery as recovery
@@ -440,6 +442,149 @@ def run(environ, runtime, recovery_control, selected_release):
         after['tables']['t_comment'] = before['tables']['t_comment']
         if after != before:
             raise ValueError('recovery_ci_unrelated_state_changed_after_restart_write')
+
+    # The original archive/review comparison above remains unchanged. Now accept
+    # one new transaction on the promoted copy, then restart before retrying it.
+    operation_id = str(uuid.uuid4())
+    mutable = {
+        't_user': (('id',),(actor,),{'stamps':1}),
+        't_product': (('id',),(pid,),{'order_count':1}),
+        't_product_search_version': (('product_id',),(pid,),{'source_version':1}),
+        't_user_cart': (('user_id',),(actor,),{'version':1,'updated_at':None}),
+        't_user_cart_item': (('user_id','product_id'),(actor,pid),{'quantity':-1})}
+    exclusions = {table: (columns,values) for table,(columns,values,_) in mutable.items()}
+    def selected_row(connection, table):
+        columns,values = exclusions[table]
+        predicate = ' AND '.join('"'+column+'"=%s' for column in columns)
+        cursor = connection.execute('SELECT * FROM pubburi."'+table+'" WHERE '+predicate, values)
+        rows = cursor.fetchall()
+        if len(rows) != 1:raise ValueError('recovery_ci_checkout_row_missing_or_ambiguous')
+        return dict(zip((column.name for column in cursor.description),rows[0]))
+    def protected_rows(connection, primary):
+        result = {}
+        for table,(columns,values) in exclusions.items():
+            predicate = ' AND '.join('"'+column+'"=%s' for column in columns)
+            order = ','.join('"'+column+'"::text COLLATE "C"' for column in primary[table].split(','))
+            digest = hashlib.sha256()
+            with connection.cursor() as cursor, cursor.copy('COPY (SELECT * FROM pubburi."'+table+'" WHERE NOT ('+
+                    predicate+') ORDER BY '+order+') TO STDOUT (FORMAT binary)',values) as copied:
+                for chunk in copied:digest.update(chunk)
+            result[table] = digest.hexdigest()
+        return result
+    with recovery.connect(target) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection,target)
+        checkout_before = json.loads(json.dumps(recovery.state(connection)))
+        primary = recovery.schema_primary(checkout_before,'checkout_schema_changed')
+        original_rows = {table:selected_row(connection,table) for table in mutable}
+        new_ids = {}
+        sequence_tables = {'t_order_o_id_seq':('t_order','o_id'),'t_order_detail_d_id_seq':('t_order_detail','d_id'),
+            't_stamp_id_seq':('t_stamp','id'),'t_product_search_outbox_event_id_seq':('t_product_search_outbox','event_id')}
+        for sequence,(table,column) in sequence_tables.items():
+            sequence_value,sequence_called = checkout_before['sequences'][sequence]
+            new_ids[table] = sequence_value+1 if sequence_called else sequence_value
+            exclusions[table] = ((column,),(new_ids[table],))
+        exclusions['t_product_search_delivery'] = (('event_id',),(new_ids['t_product_search_outbox'],))
+        exclusions['t_user_cart_operation'] = (('user_id','operation_id'),(actor,uuid.UUID(operation_id)))
+        protected_before = protected_rows(connection,primary)
+    intent = {'operationId':operation_id,'expectedVersion':original_rows['t_user_cart']['version'],
+        'items':[{'productId':pid,'quantity':1}],'orderType':'TAKEOUT','orderTable':'복구 후 포장'}
+    with selected_runtime(local,'checkout') as base:
+        user=http.cookiejar.CookieJar()
+        request(user,base,'POST','/api/auth/login',{'id':actor,'pass':new_password})
+        fresh = request(user,base,'POST',cart_path+'/checkout',intent,headers=notebook_headers)
+        if (fresh['operationId'] != operation_id or fresh['replayed'] is not False or fresh['status'] != 'APPLIED'
+                or fresh['orderId'] != new_ids['t_order'] or len(fresh['cart']['items']) != 1
+                or fresh['cart']['version'] != original_rows['t_user_cart']['version']+1
+                or fresh['cart']['items'][0]['productId'] != pid
+                or fresh['cart']['items'][0]['quantity'] != original_rows['t_user_cart_item']['quantity']-1):
+            raise ValueError('recovery_ci_new_checkout_contract_changed')
+        receipt = request(user,base,'GET','/api/orders/'+str(fresh['orderId']))
+        if (receipt['totalPrice'] != original_rows['t_product']['price'] or len(receipt['details']) != 1
+                or receipt['details'][0]['unitPrice'] != original_rows['t_product']['price']
+                or receipt['details'][0]['quantity'] != 1):
+            raise ValueError('recovery_ci_new_checkout_price_changed')
+    with recovery.connect(target) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection,target)
+        checkout_after = json.loads(json.dumps(recovery.state(connection)))
+        if protected_rows(connection,primary) != protected_before:
+            raise ValueError('recovery_ci_checkout_changed_other_rows')
+        for table,(_,_,changes) in mutable.items():
+            row = selected_row(connection,table)
+            for column,delta in changes.items():
+                if (row[column] is None or (delta is None and row[column] < original_rows[table][column])
+                        or (delta is not None and row[column] != original_rows[table][column]+delta)):
+                    raise ValueError('recovery_ci_checkout_mutation_changed')
+                row[column] = original_rows[table][column]
+            if row != original_rows[table]:raise ValueError('recovery_ci_checkout_changed_retained_fields')
+        product = original_rows['t_product']
+        order_row = selected_row(connection,'t_order')
+        if order_row.pop('order_time') is None or order_row != {'o_id':fresh['orderId'],'user_id':actor,
+                'order_type':'TAKEOUT','order_table':intent['orderTable'],'completed':'N',
+                'total_price':product['price'],'price_basis':'ORDER_SNAPSHOT'}:
+            raise ValueError('recovery_ci_checkout_order_row_changed')
+        if selected_row(connection,'t_order_detail') != {'d_id':new_ids['t_order_detail'],'order_id':fresh['orderId'],
+                'product_id':pid,'quantity':1,'product_name':product['name'],'product_type':product['type'],
+                'product_img':product['img'],'unit_price':product['price'],'sum_price':product['price']}:
+            raise ValueError('recovery_ci_checkout_detail_row_changed')
+        if selected_row(connection,'t_stamp') != {'id':new_ids['t_stamp'],'user_id':actor,'order_id':fresh['orderId'],'quantity':1}:
+            raise ValueError('recovery_ci_checkout_reward_row_changed')
+        event_row = selected_row(connection,'t_product_search_outbox')
+        if event_row.pop('created_at') is None or event_row != {'event_id':new_ids['t_product_search_outbox'],
+                'product_id':pid,'source_version':original_rows['t_product_search_version']['source_version']+1,'deleted':False,
+                'payload':{'productId':pid,'sourceVersion':original_rows['t_product_search_version']['source_version']+1,
+                    'deleted':False,'document':{'name':product['name'],'type':product['type'],'priceKrw':product['price'],
+                        'abvPercent':product['abv'],'orderCount':product['order_count']+1,'tasteTags':None,'aromaTags':None}}}:
+            raise ValueError('recovery_ci_checkout_event_row_changed')
+        delivery = selected_row(connection,'t_product_search_delivery')
+        if delivery.pop('available_at') is None or delivery != {'event_id':new_ids['t_product_search_outbox'],
+                'status':'PENDING','claim_token':None,'lease_until':None,'attempts':0,'delivered_at':None,'last_error':None}:
+            raise ValueError('recovery_ci_checkout_delivery_row_changed')
+        operation = selected_row(connection,'t_user_cart_operation')
+        if not re.fullmatch('[0-9a-f]{64}',operation.pop('intent_hash')) or operation != {'user_id':actor,
+                'operation_id':uuid.UUID(operation_id),'kind':'CHECKOUT','status':'APPLIED','order_id':fresh['orderId']}:
+            raise ValueError('recovery_ci_checkout_operation_row_changed')
+        additions = set(exclusions)-set(mutable)
+        for table,prior in checkout_before['tables'].items():
+            current = checkout_after['tables'][table]
+            if table not in exclusions:
+                if current != prior:raise ValueError('recovery_ci_checkout_changed_other_tables')
+            elif current['rows'] != prior['rows']+(1 if table in additions else 0):
+                raise ValueError('recovery_ci_checkout_row_count_changed')
+        expected_sequences = dict(checkout_before['sequences'])
+        for sequence,(table,_) in sequence_tables.items():expected_sequences[sequence] = [new_ids[table],True]
+        if (checkout_after['sequences'] != expected_sequences
+                or {key:value for key,value in checkout_after.items() if key not in ('tables','sequences')}
+                != {key:value for key,value in checkout_before.items() if key not in ('tables','sequences')}):
+            raise ValueError('recovery_ci_checkout_sequence_or_schema_changed')
+    with selected_runtime(local,'checkout-replay') as base:
+        cookies = [http.cookiejar.CookieJar(),http.cookiejar.CookieJar()]
+        for cookie in cookies:request(cookie,base,'POST','/api/auth/login',{'id':actor,'pass':new_password})
+        ready = Barrier(3)
+        def replay_checkout(cookie):
+            ready.wait(timeout=5)
+            return request(cookie,base,'POST',cart_path+'/checkout',intent,headers=notebook_headers)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            pending = [workers.submit(replay_checkout,cookie) for cookie in cookies]
+            ready.wait(timeout=5)
+            replays = [future.result(timeout=15) for future in pending]
+        for replay in replays:
+            if (replay['operationId'] != operation_id or replay['replayed'] is not True or replay['status'] != 'APPLIED'
+                    or replay['orderId'] != fresh['orderId'] or replay['cart'] != fresh['cart']):
+                raise ValueError('recovery_ci_restarted_checkout_replay_changed')
+    with recovery.connect(target) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection,target)
+        if json.loads(json.dumps(recovery.state(connection))) != checkout_after:
+            raise ValueError('recovery_ci_checkout_replay_wrote_again')
+    with recovery.connect(control) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection,control)
+        if (connection.execute("SELECT has_database_privilege(%s,current_database(),'CONNECT')",(role,)).fetchone() != (False,)
+                or json.loads(json.dumps(recovery.state(connection))) != before
+                or pg.private_file(selector,16384) != promoted_selection):
+            raise ValueError('recovery_ci_checkout_changed_frozen_source_or_selection')
     report={'status':'passed','business_tables':23,'control_tables':2,'sequences':7,
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'private_notebook_original_arrays_memo_revision_preserved':True,
@@ -451,17 +596,23 @@ def run(environ, runtime, recovery_control, selected_release):
         'failed_restore_client_keeps_evidence_and_allows_separate_retry':True,
         'explicit_promotion_and_stale_source_reactivation_guard_verified':True,
         'promoted_native_selected_runtime_and_owned_cleanup_verified':True,
+        'new_checkout_after_recovery':{'orders':checkout_after['tables']['t_order']['rows']-checkout_before['tables']['t_order']['rows'],
+            'details':checkout_after['tables']['t_order_detail']['rows']-checkout_before['tables']['t_order_detail']['rows'],
+            'stamps':checkout_after['tables']['t_stamp']['rows']-checkout_before['tables']['t_stamp']['rows'],
+            'events':checkout_after['tables']['t_product_search_outbox']['rows']-checkout_before['tables']['t_product_search_outbox']['rows'],
+            'native_restart_replayed_requests':len(replays)},
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],
-        'after_start_writes':'one new review and its sequence changed; frozen source and all other rows stayed equal'}
+        'after_start_writes':'one review then one checkout; only declared transaction rows/sequences changed; restarted replays wrote nothing'}
     recovery.private.write_json(directory/'result.json',report)
     # Private control/runtime material can be retained by the owning caller for independent UI acceptance.
     minimal={key:restored[key] for key in recovery.PG_KEYS}
     minimal.update(PUBBURI_JPA_REHEARSAL='1',PUBBURI_JPA_SOURCE_ID=restored['PUBBURI_JPA_SOURCE_ID'],PUBBURI_JPA_PORT='0')
     recovery.private.write_json(directory/'fixture.json',{'environment':minimal,'control':{key:target[key] for key in recovery.PG_KEYS},'actor':{'id':actor,'password':new_password},
         'product_id':pid,'order_id':order['oId'],'review_id':review['id'],'archive':str(archive),'manifest_sha256':pin,
-        'post_restore_writes':{'review_id':created['id'],'comment_sequence_before':[value,called]},
+        'post_restore_writes':{'review_id':created['id'],'comment_sequence_before':[value,called],
+            'checkout_order_id':fresh['orderId'],'checkout_operation_id':operation_id},
         'admin_actor':{'id':runtime['PUBBURI_JPA_ADMIN_ID'],'password':runtime['PUBBURI_JPA_ADMIN_PASSWORD']}})
     print('Owned stopped-writer PostgreSQL recovery, isolated selection and JPA restart passed.',flush=True)
     return directory
