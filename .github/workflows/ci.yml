@@ -68,6 +68,8 @@ jobs:
       PUBBURI_PG_RECOVERY_RUN_TOKEN: pubburi-pg-recovery-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_RESTORE_DB_NAME: pubburi_pg_restored_ci
       PUBBURI_PG_RESTORE_RUN_TOKEN: pubburi-pg-restored-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBBURI_PG_RESTORE_NEXT_DB_NAME: pubburi_pg_restored_next_ci
+      PUBBURI_PG_RESTORE_NEXT_RUN_TOKEN: pubburi-pg-restored-next-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_BLOCKED_DB_NAME: pubburi_pg_blocked_ci
       PUBBURI_PG_BLOCKED_RUN_TOKEN: pubburi-pg-blocked-${{ github.run_id }}-${{ github.run_attempt }}
       PUBBURI_PG_CA: ${{ github.workspace }}/.pubburi/postgres-ci-tls/ca.pem
