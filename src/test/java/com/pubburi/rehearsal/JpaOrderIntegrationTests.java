@@ -33,6 +33,58 @@ class JpaOrderIntegrationTests extends JpaOrderTestSupport {
     @Autowired EntityManagerFactory entities;
     @Autowired PlatformTransactionManager transactions;
 
+    @Test void nonIntegerOrderItemsAreRejectedBeforeAnyTransactionWrites() throws Exception {
+        var sql = control();
+        var admin = loggedIn("ADMIN");
+        String user = addUser();
+        int product = create(admin, ownName());
+        var buyer = loginUser(user);
+        String sequenceSql = """
+            SELECT 'order' AS sequence_name, last_value, is_called FROM pubburi.t_order_o_id_seq
+            UNION ALL SELECT 'detail', last_value, is_called FROM pubburi.t_order_detail_d_id_seq
+            UNION ALL SELECT 'stamp', last_value, is_called FROM pubburi.t_stamp_id_seq
+            UNION ALL SELECT 'event', last_value, is_called FROM pubburi.t_product_search_outbox_event_id_seq
+            ORDER BY sequence_name
+            """;
+        try {
+            var before = orderState(sql, user, product);
+            var sequences = sql.queryForList(sequenceSql);
+            var invalidDetails = List.of(
+                Map.of("productId", product, "quantity", 1.5),
+                Map.of("productId", product, "quantity", "1"),
+                Map.of("productId", product + 0.5, "quantity", 1),
+                Map.of("productId", Integer.toString(product), "quantity", 1)
+            );
+            for (var detail : invalidDetails) {
+                var rejected = request(buyer, "POST", "/api/orders", Map.of("details", List.of(detail)));
+                assertEquals(400, rejected.status());
+                assertEquals("VALIDATION_FAILED", rejected.body().path("error").path("code").textValue());
+                assertEquals(before, orderState(sql, user, product));
+                assertEquals(sequences, sql.queryForList(sequenceSql));
+            }
+
+            var created = request(buyer, "POST", "/api/orders", order(product, 1));
+            assertEquals(201, created.status());
+            var receipt = created.body().path("data");
+            int order = receipt.path("oId").intValue();
+            assertEquals(1200, receipt.path("totalPrice").intValue());
+            assertEquals("ORDER_SNAPSHOT", receipt.path("priceBasis").textValue());
+            assertEquals(1, receipt.path("details").size());
+            assertEquals(1, receipt.path("details").get(0).path("quantity").intValue());
+            assertEquals(1200, receipt.path("details").get(0).path("unitPrice").intValue());
+            assertEquals(receipt, request(buyer, "GET", "/api/orders/" + order, null).body().path("data"));
+            assertEquals(1, sql.queryForObject("SELECT stamps FROM pubburi.t_user WHERE id=?", Integer.class, user));
+            assertEquals(1, sql.queryForObject("SELECT quantity FROM pubburi.t_stamp WHERE order_id=?", Integer.class, order));
+            assertEquals(1, sql.queryForObject("SELECT order_count FROM pubburi.t_product WHERE id=?", Integer.class, product));
+            var emitted = events(sql, product);
+            assertEquals(2, emitted.size());
+            assertEquals("PENDING", emitted.get(1).get("status"));
+            assertEquals(1, json.readTree((String) emitted.get(1).get("payload")).path("document").path("orderCount").intValue());
+        } finally {
+            clean(sql, user, product);
+        }
+    }
+
     @Test void existingHttpCreatesNormalizedSnapshotsAndRetainsHistoryAfterProductAndUserDeletion() throws Exception {
         var sql = control(); var admin = loggedIn("ADMIN"); String user = addUser(); int product = create(admin, ownName());
         var buyer = loginUser(user); int id = 0;
