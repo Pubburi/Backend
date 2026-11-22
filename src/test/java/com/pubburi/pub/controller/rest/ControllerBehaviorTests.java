@@ -19,6 +19,7 @@ import com.pubburi.pub.controller.auth.AccessGuard;
 import com.pubburi.pub.controller.auth.SessionUser;
 import com.pubburi.pub.controller.auth.SessionFixtures;
 import com.pubburi.pub.controller.request.AdminUserRequest;
+import com.pubburi.pub.controller.request.OrderCreateRequest;
 import com.pubburi.pub.controller.request.ProductRequest;
 import com.pubburi.pub.controller.request.ProductFeaturesRequest;
 import com.pubburi.pub.controller.api.PageCriteria;
@@ -32,6 +33,39 @@ import jakarta.validation.Validator;
 class ControllerBehaviorTests {
 	private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 	private final ObjectMapper json = new ObjectMapper();
+
+	@Test
+	void orderItemIntegerTokensAndExistingPositiveBoundsArePreserved() throws Exception {
+		String order = """
+				{"details":[{"productId":%s,"quantity":%s}]}
+				""";
+		OrderCreateRequest lower = json.readValue(order.formatted(1, 1), OrderCreateRequest.class);
+		assertThat(validator.validate(lower)).isEmpty();
+		String max = order.formatted(Integer.MAX_VALUE, Integer.MAX_VALUE);
+		OrderCreateRequest upper = json.readValue(max, OrderCreateRequest.class);
+		assertThat(upper.details().get(0).productId()).isEqualTo(Integer.MAX_VALUE);
+		assertThat(upper.details().get(0).quantity()).isEqualTo(Integer.MAX_VALUE);
+		assertThat(validator.validate(upper)).isEmpty();
+
+		for (String field : List.of("productId", "quantity")) {
+			boolean isProduct = field.equals("productId");
+			for (String token : List.of("1.9", "1.0", "1e0", "\"1\"", "2147483648", "-2147483649")) {
+				String input = isProduct ? order.formatted(token, 1) : order.formatted(1, token);
+				assertThatThrownBy(() -> json.readValue(input, OrderCreateRequest.class))
+						.isInstanceOf(JsonProcessingException.class);
+			}
+
+			for (String token : List.of("null", "0", "-1")) {
+				String input = isProduct ? order.formatted(token, 1) : order.formatted(1, token);
+				OrderCreateRequest invalid = json.readValue(input, OrderCreateRequest.class);
+				assertThat(validator.validate(invalid))
+						.anyMatch(violation -> violation.getPropertyPath().toString().endsWith("." + field));
+			}
+			String missing = isProduct ? "{\"details\":[{\"quantity\":1}]}" : "{\"details\":[{\"productId\":1}]}";
+			assertThat(validator.validate(json.readValue(missing, OrderCreateRequest.class)))
+					.anyMatch(violation -> violation.getPropertyPath().toString().endsWith("." + field));
+		}
+	}
 
 	@Test
 	void productIntegerFieldsRejectFractionsStringsAndOutOfRangeValues() throws Exception {
