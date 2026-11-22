@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.pubburi.pub.model.dao.ProductDao;
 import com.pubburi.pub.model.dao.ProductSearchOutboxDao;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,6 +29,67 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
     @Autowired ProductSearchOutboxDao outbox;
     @Autowired PlatformTransactionManager transactions;
     @Autowired DataSource dataSource;
+
+    @Test void malformedProductIntegersCannotWriteProductsOrSearchEvents() throws Exception {
+        var sql = control();var admin = loggedIn("ADMIN");String name = ownName();
+        var identity = sourceIdentity(sql);
+        var created = request(admin,"POST","/api/admin/products",product(name,1));
+        assertEquals(201,created.status());int id = created.body().path("data").path("id").intValue();
+        String counts = "SELECT (SELECT count(*) FROM pubburi.t_product) AS products,"
+            + "(SELECT count(*) FROM pubburi.t_product_search_version) AS versions,"
+            + "(SELECT count(*) FROM pubburi.t_product_search_outbox) AS events,"
+            + "(SELECT count(*) FROM pubburi.t_product_search_delivery) AS deliveries";
+        String sequences = "SELECT 'product' AS sequence_name,last_value,is_called FROM pubburi.t_product_id_seq UNION ALL "
+            + "SELECT 'event' AS sequence_name,last_value,is_called FROM pubburi.t_product_search_outbox_event_id_seq ORDER BY sequence_name";
+        try {
+            var stable = state(sql,id);var stableCounts = sql.queryForMap(counts);var stableSequences = sql.queryForList(sequences);
+            var invalidInputs = new ArrayList<ObjectNode>();
+            for (String field : List.of("price","orderCount")) {
+                for (String token : List.of("1200.9","1200.0","1e3","\"1200\"","2147483648","-2147483649")) {
+                    ObjectNode input = json.valueToTree(product(name,1200));
+                    input.set(field,json.readTree(token));invalidInputs.add(input);
+                }
+            }
+            for (String mode : List.of("null","omitted","zero","negative")) {
+                ObjectNode input = json.valueToTree(product(name,1200));
+                switch (mode) {
+                    case "null" -> input.putNull("price");
+                    case "omitted" -> input.remove("price");
+                    case "zero" -> input.put("price",0);
+                    case "negative" -> input.put("price",-1);
+                }
+                invalidInputs.add(input);
+            }
+            ObjectNode negativeCount = json.valueToTree(product(name,1200));
+            negativeCount.put("orderCount",-1);invalidInputs.add(negativeCount);
+            for (var input : invalidInputs) {
+                assertEquals(400,request(admin,"PUT","/api/admin/products/"+id,input.toString()).status());
+                assertEquals(400,request(admin,"POST","/api/admin/products",input.toString()).status());
+                assertEquals(stable,state(sql,id));assertEquals(stableCounts,sql.queryForMap(counts));
+                assertEquals(stableSequences,sql.queryForList(sequences));
+            }
+            ObjectNode minimum = json.valueToTree(product(name,1));
+            ObjectNode maximum = json.valueToTree(product(name,Integer.MAX_VALUE));maximum.put("orderCount",Integer.MAX_VALUE);
+            ObjectNode nullCount = json.valueToTree(product(name,1200));nullCount.putNull("orderCount");
+            ObjectNode omittedCount = json.valueToTree(product(name,1200));omittedCount.remove("orderCount");
+            for (var input : List.of(minimum,maximum,nullCount,omittedCount)) {
+                int previousEvents = events(sql,id).size();
+                assertEquals(200,request(admin,"PUT","/api/admin/products/"+id,input.toString()).status());
+                var current = request(client(),"GET","/api/products/"+id,null).body().path("data");
+                assertEquals(input.path("price").intValue(),current.path("price").intValue());
+                assertEquals(input.path("orderCount").intValue(),current.path("orderCount").intValue());
+                var emitted = events(sql,id);assertEquals(previousEvents+1,emitted.size());
+                var latest = emitted.get(emitted.size()-1);
+                assertEquals("PENDING",latest.get("status"));
+                var document = json.readTree((String)latest.get("payload")).path("document");
+                assertEquals(current.path("price"),document.path("priceKrw"));
+                assertEquals(current.path("orderCount"),document.path("orderCount"));
+            }
+            assertEquals(identity,sourceIdentity(sql));
+        } finally {
+            assertEquals(200,request(admin,"DELETE","/api/admin/products/"+id,null).status());
+        }
+    }
 
     @Test void adminWritesKeepDtoValidationAndProduceOnePendingEventPerSuccessfulTransaction() throws Exception {
         var sql = control();
