@@ -62,10 +62,13 @@ def run(environ, runtime, recovery_control, selected_release):
     target=dict(control,PUBBURI_PG_DB_NAME=environ['PUBBURI_PG_RESTORE_DB_NAME'],
         PUBBURI_PG_RUN_TOKEN=environ['PUBBURI_PG_RESTORE_RUN_TOKEN'],
         PUBBURI_PG_URL=runtime['PUBBURI_PG_URL'].rsplit('/',1)[0]+'/'+environ['PUBBURI_PG_RESTORE_DB_NAME'])
+    next_target=dict(control,PUBBURI_PG_DB_NAME=environ['PUBBURI_PG_RESTORE_NEXT_DB_NAME'],
+        PUBBURI_PG_RUN_TOKEN=environ['PUBBURI_PG_RESTORE_NEXT_RUN_TOKEN'],
+        PUBBURI_PG_URL=runtime['PUBBURI_PG_URL'].rsplit('/',1)[0]+'/'+environ['PUBBURI_PG_RESTORE_NEXT_DB_NAME'])
     if not isinstance(recovery_control,dict) or set(recovery_control)!={'user','password'}:
         raise ValueError('recovery_ci_separate_control_required')
     admin=dict(control,PUBBURI_PG_USER=recovery_control['user'],PUBBURI_PG_PASSWORD=recovery_control['password'])
-    verify_owned_postgres(control);verify_owned_postgres(target)
+    verify_owned_postgres(control);verify_owned_postgres(target);verify_owned_postgres(next_target)
     role=runtime['PUBBURI_PG_USER']
     if not re.fullmatch('[a-z][a-z0-9_]{0,50}',role):raise ValueError('recovery_ci_runtime_role_invalid')
     actor='ci_jpa_recovery_'+secrets.token_hex(8);password=secrets.token_hex(20);new_password=secrets.token_hex(20)
@@ -504,6 +507,14 @@ def run(environ, runtime, recovery_control, selected_release):
                 or receipt['details'][0]['unitPrice'] != original_rows['t_product']['price']
                 or receipt['details'][0]['quantity'] != 1):
             raise ValueError('recovery_ci_new_checkout_price_changed')
+        latest_notebook = request(user,base,'GET',notebook_path,headers=notebook_headers)
+        if latest_notebook['currentProduct'] != fresh['cart']['items'][0]['currentProduct']:
+            raise ValueError('recovery_ci_checkout_notebook_current_product_changed')
+        if ({key:value for key,value in latest_notebook.items() if key != 'currentProduct'}
+                != {key:value for key,value in retained_notebook.items() if key != 'currentProduct'}):
+            raise ValueError('recovery_ci_checkout_notebook_content_changed')
+        if request(user,base,'GET',notification_path,headers=notification_headers) != retained_notifications:
+            raise ValueError('recovery_ci_checkout_notifications_changed')
     with recovery.connect(target) as connection, connection.transaction():
         connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         recovery.guard(connection,target)
@@ -558,7 +569,7 @@ def run(environ, runtime, recovery_control, selected_release):
                 or {key:value for key,value in checkout_after.items() if key not in ('tables','sequences')}
                 != {key:value for key,value in checkout_before.items() if key not in ('tables','sequences')}):
             raise ValueError('recovery_ci_checkout_sequence_or_schema_changed')
-    with selected_runtime(local,'checkout-replay') as base:
+    def replay_checkout_pair(base):
         cookies = [http.cookiejar.CookieJar(),http.cookiejar.CookieJar()]
         for cookie in cookies:request(cookie,base,'POST','/api/auth/login',{'id':actor,'pass':new_password})
         ready = Barrier(3)
@@ -573,6 +584,9 @@ def run(environ, runtime, recovery_control, selected_release):
             if (replay['operationId'] != operation_id or replay['replayed'] is not True or replay['status'] != 'APPLIED'
                     or replay['orderId'] != fresh['orderId'] or replay['cart'] != fresh['cart']):
                 raise ValueError('recovery_ci_restarted_checkout_replay_changed')
+        return replays
+    with selected_runtime(local,'checkout-replay') as base:
+        replays = replay_checkout_pair(base)
     with recovery.connect(target) as connection, connection.transaction():
         connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         recovery.guard(connection,target)
@@ -585,6 +599,77 @@ def run(environ, runtime, recovery_control, selected_release):
                 or json.loads(json.dumps(recovery.state(connection))) != before
                 or pg.private_file(selector,16384) != promoted_selection):
             raise ValueError('recovery_ci_checkout_changed_frozen_source_or_selection')
+
+    # A JVM restart cannot prove recovery of writes accepted after the first
+    # archive. Back up that newer state, restore into a third marker-only DB,
+    # and repeat the actual operation receipt through the selected launcher.
+    second_archive = local.STATE/'second-backup'
+    second_attempt = local.STATE/'second-restored'
+    admin_next = dict(next_target,PUBBURI_PG_USER=recovery_control['user'],PUBBURI_PG_PASSWORD=recovery_control['password'])
+    with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' NOLOGIN')
+    try:
+        second_pin = recovery.backup(target,second_archive,local=local)
+        second_manifest,_ = recovery.approved_archive(second_archive,second_pin,local)
+        if (second_manifest['source_database'] != target['PUBBURI_PG_DB_NAME']
+                or second_manifest['state'] != checkout_after
+                or second_manifest['state'] == before):
+            raise ValueError('recovery_ci_second_archive_missing_new_writes')
+        recovery.restore(next_target,second_archive,second_pin,second_attempt,local=local)
+        second_completion_pin = pg.sha(second_attempt/'promotion.json')
+        if recovery.verify_preserved(local,target,next_target,second_archive,second_pin,second_attempt,second_completion_pin) != verified:
+            raise ValueError('recovery_ci_second_preservation_not_verified')
+        with recovery.connect(next_target) as connection:connection.execute(runtime_grants(role))
+        with recovery.connect(admin_next) as connection:
+            connection.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(
+                sql.Identifier(next_target['PUBBURI_PG_DB_NAME']),sql.Identifier(role)))
+            connection.execute(sql.SQL('GRANT SELECT ON public.pubburi_pg_migration_guard TO {}').format(sql.Identifier(role)))
+        next_config = local.STATE/'second-restored.json'
+        next_environment = dict(target_environment,**{
+            key:next_target[key] for key in ('PUBBURI_PG_URL','PUBBURI_PG_DB_NAME','PUBBURI_PG_RUN_TOKEN')})
+        pg.write_json(next_config,{'schema_version':1,'environment':next_environment})
+        with recovery.connect(admin_target) as connection:
+            connection.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM {}').format(
+                sql.Identifier(target['PUBBURI_PG_DB_NAME']),sql.Identifier(role)))
+        recovery.promote(local,target,next_target,second_archive,second_pin,second_attempt,
+            second_completion_pin,next_config,release)
+    finally:
+        with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' LOGIN')
+    selected_next = SimpleNamespace(pg_config=None,release_dir=None)
+    if not pg.selected(local,selected_next) or Path(selected_next.pg_config) != next_config:
+        raise ValueError('recovery_ci_second_target_not_selected')
+    second_selection = pg.private_file(selector,16384)
+    latest_runtime = dict(restored,**pg.configuration(selected_next.pg_config))
+    with selected_runtime(local,'second-restored') as base:
+        user = http.cookiejar.CookieJar()
+        request(user,base,'POST','/api/auth/login',{'id':actor,'pass':new_password})
+        if request(user,base,'GET','/api/orders/'+str(fresh['orderId'])) != receipt:
+            raise ValueError('recovery_ci_second_order_not_restored')
+        if request(user,base,'GET',cart_path,headers=notebook_headers) != fresh['cart']:
+            raise ValueError('recovery_ci_second_cart_not_restored')
+        if request(user,base,'GET',notebook_path,headers=notebook_headers) != latest_notebook:
+            raise ValueError('recovery_ci_second_notebook_not_restored')
+        if request(user,base,'GET',notification_path,headers=notification_headers) != retained_notifications:
+            raise ValueError('recovery_ci_second_notifications_not_restored')
+        reviews = request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')
+        if [item for item in reviews['items'] if item['id'] == created['id']] != [dict(created,tasteTags=[])]:
+            raise ValueError('recovery_ci_second_new_review_not_restored')
+        second_replays = replay_checkout_pair(base)
+    with recovery.connect(next_target) as connection, connection.transaction():
+        connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        recovery.guard(connection,next_target)
+        if json.loads(json.dumps(recovery.state(connection))) != checkout_after:
+            raise ValueError('recovery_ci_second_replay_wrote_again')
+    for frozen,expected in ((control,before),(target,checkout_after)):
+        with recovery.connect(frozen) as connection, connection.transaction():
+            connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            recovery.guard(connection,frozen)
+            if (connection.execute("SELECT has_database_privilege(%s,current_database(),'CONNECT')",(role,)).fetchone() != (False,)
+                    or json.loads(json.dumps(recovery.state(connection))) != expected):
+                raise ValueError('recovery_ci_second_restore_changed_frozen_source')
+    if (pg.private_file(selector,16384) != second_selection
+            or recovery.approved_archive(archive,pin,local)[0] != manifest
+            or recovery.approved_archive(second_archive,second_pin,local)[0] != second_manifest):
+        raise ValueError('recovery_ci_second_restore_changed_archive_or_selection')
     report={'status':'passed','business_tables':23,'control_tables':2,'sequences':7,
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'private_notebook_original_arrays_memo_revision_preserved':True,
@@ -604,13 +689,21 @@ def run(environ, runtime, recovery_control, selected_release):
         'archive_manifest_sha256':pin,'artifact_directory':str(archive.relative_to(local_stack.BACKEND)),
         'attempt_directory':str(attempt.relative_to(local_stack.BACKEND)),
         'source_database':control['PUBBURI_PG_DB_NAME'],'restored_database':target['PUBBURI_PG_DB_NAME'],
-        'after_start_writes':'one review then one checkout; only declared transaction rows/sequences changed; restarted replays wrote nothing'}
+        'after_start_writes':'one review then one checkout; only declared transaction rows/sequences changed; restarted replays wrote nothing',
+        'second_restore':{'status':'passed','business_tables':23,'control_tables':2,'sequences':7,
+            'new_review_checkout_and_operation_receipt_preserved':True,'native_selected_start_and_owned_cleanup_verified':True,
+            'replayed_requests':len(second_replays),'replay_changed_rows_or_sequences':False,
+            'prior_sources_preserved_and_runtime_fenced':True,'prior_archive_preserved':True,
+            'archive_manifest_sha256':second_pin,'artifact_directory':str(second_archive.relative_to(local_stack.BACKEND)),
+            'attempt_directory':str(second_attempt.relative_to(local_stack.BACKEND)),
+            'source_database':target['PUBBURI_PG_DB_NAME'],'restored_database':next_target['PUBBURI_PG_DB_NAME']}}
     recovery.private.write_json(directory/'result.json',report)
     # Private control/runtime material can be retained by the owning caller for independent UI acceptance.
-    minimal={key:restored[key] for key in recovery.PG_KEYS}
-    minimal.update(PUBBURI_JPA_REHEARSAL='1',PUBBURI_JPA_SOURCE_ID=restored['PUBBURI_JPA_SOURCE_ID'],PUBBURI_JPA_PORT='0')
-    recovery.private.write_json(directory/'fixture.json',{'environment':minimal,'control':{key:target[key] for key in recovery.PG_KEYS},'actor':{'id':actor,'password':new_password},
-        'product_id':pid,'order_id':order['oId'],'review_id':review['id'],'archive':str(archive),'manifest_sha256':pin,
+    minimal={key:latest_runtime[key] for key in recovery.PG_KEYS}
+    minimal.update(PUBBURI_JPA_REHEARSAL='1',PUBBURI_JPA_SOURCE_ID=latest_runtime['PUBBURI_JPA_SOURCE_ID'],PUBBURI_JPA_PORT='0')
+    recovery.private.write_json(directory/'fixture.json',{'environment':minimal,'control':{key:next_target[key] for key in recovery.PG_KEYS},'actor':{'id':actor,'password':new_password},
+        'product_id':pid,'order_id':order['oId'],'review_id':review['id'],'archive':str(second_archive),'manifest_sha256':second_pin,
+        'first_restore':{'archive':str(archive),'manifest_sha256':pin,'database':target['PUBBURI_PG_DB_NAME']},
         'post_restore_writes':{'review_id':created['id'],'comment_sequence_before':[value,called],
             'checkout_order_id':fresh['orderId'],'checkout_operation_id':operation_id},
         'admin_actor':{'id':runtime['PUBBURI_JPA_ADMIN_ID'],'password':runtime['PUBBURI_JPA_ADMIN_PASSWORD']}})
