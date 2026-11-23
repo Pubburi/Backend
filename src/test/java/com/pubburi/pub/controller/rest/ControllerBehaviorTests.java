@@ -29,10 +29,26 @@ import com.pubburi.pub.model.service.ProductService;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import jakarta.validation.constraints.NotNull;
 
 class ControllerBehaviorTests {
 	private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 	private final ObjectMapper json = new ObjectMapper();
+
+	@Test
+	void orderItemListsRequireNonNullObjectsAndRetainValidLists() throws Exception {
+		String item = "{\"productId\":1,\"quantity\":1}";
+		for (String details : List.of("[null]", "[null," + item + "]", "[" + item + ",null]")) {
+			OrderCreateRequest request = json.readValue("{\"details\":" + details + "}", OrderCreateRequest.class);
+			assertThat(validator.validate(request)).anyMatch(violation ->
+					violation.getConstraintDescriptor().getAnnotation().annotationType() == NotNull.class
+					&& violation.getPropertyPath().toString().startsWith("details["));
+		}
+		for (String details : List.of("[" + item + "]", "[" + item + "," + item + "]")) {
+			assertThat(validator.validate(json.readValue("{\"details\":" + details + "}", OrderCreateRequest.class))).isEmpty();
+		}
+		assertThat(validator.validate(json.readValue("{\"details\":[]}", OrderCreateRequest.class))).isNotEmpty();
+	}
 
 	@Test
 	void orderItemIntegerTokensAndExistingPositiveBoundsArePreserved() throws Exception {
