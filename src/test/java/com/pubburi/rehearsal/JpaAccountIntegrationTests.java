@@ -1,16 +1,98 @@
 package com.pubburi.rehearsal;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
+import com.pubburi.pub.model.dao.UserDao;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "server.port=0")
 @EnabledIfEnvironmentVariable(named = "PUBBURI_JPA_INTEGRATION", matches = "1")
 class JpaAccountIntegrationTests extends JpaAccountTestSupport {
+    @MockitoSpyBean UserDao accounts;
+
+    @Test void profileKeepsOneSnapshotWhenAnOrdinaryOrderCommitsBetweenItsDataReads() throws Exception {
+        var sql = control();
+        var admin = loggedIn("ADMIN");
+        String id = join();
+        int product = create(admin, ownName());
+        var memberRead = new CountDownLatch(1);
+        var continueProfile = new CountDownLatch(1);
+        var firstRead = new AtomicBoolean(true);
+        var worker = Executors.newSingleThreadExecutor();
+        Future<Reply> reading = null;
+        try {
+            var viewer = login(id, password);
+            var buyer = login(id, password);
+            var beforeReply = profile(viewer, id);
+            assertEquals(200, beforeReply.status());
+            var before = beforeReply.body();
+            assertEquals(0, before.at("/data/user/stamps").intValue());
+            assertTrue(before.at("/data/orders").isEmpty());
+
+            doAnswer(invocation -> {
+                Object member = invocation.callRealMethod();
+                if (firstRead.compareAndSet(true, false)) {
+                    memberRead.countDown();
+                    if (!continueProfile.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Profile data read was not released");
+                    }
+                }
+                return member;
+            }).when(accounts).selectById(id);
+
+            reading = worker.submit(() -> profile(viewer, id));
+            assertTrue(memberRead.await(5, TimeUnit.SECONDS));
+            var created = request(buyer, "POST", "/api/orders",
+                Map.of("details", List.of(Map.of("productId", product, "quantity", 3))));
+            assertEquals(201, created.status());
+            var order = created.body().path("data");
+            int orderId = order.path("oId").intValue();
+            assertEquals(3600, order.path("totalPrice").intValue());
+            assertEquals(3, order.at("/details/0/quantity").intValue());
+            assertEquals(3, sql.queryForObject("SELECT stamps FROM pubburi.t_user WHERE id=?", Integer.class, id));
+            assertEquals(3, sql.queryForObject("SELECT quantity FROM pubburi.t_stamp WHERE order_id=?", Integer.class, orderId));
+            var committedAccount = accountState(sql, id);
+            var committedProduct = state(sql, product);
+
+            continueProfile.countDown();
+            var observed = reading.get(10, TimeUnit.SECONDS);
+            assertEquals(200, observed.status());
+            assertTrue(before.equals(observed.body()), "A single profile response mixed two transaction snapshots");
+
+            var after = profile(viewer, id);
+            assertEquals(200, after.status());
+            var latest = after.body().path("data");
+            assertEquals(3, latest.at("/user/stamps").intValue());
+            assertEquals(1, latest.path("orders").size());
+            assertEquals(order, latest.path("orders").get(0));
+            assertEquals(json.valueToTree(Map.of("img", "seeds.png", "step", 1, "stepMax", 10, "to", 8, "title", "씨앗")),
+                latest.path("grade"));
+            assertTrue(committedAccount.equals(accountState(sql, id)), "Profile reads changed the account or its ledger");
+            assertTrue(committedProduct.equals(state(sql, product)), "Profile reads changed the product or search event state");
+        } finally {
+            continueProfile.countDown();
+            try {
+                if (reading != null) reading.get(10, TimeUnit.SECONDS);
+            } finally {
+                worker.shutdownNow();
+                try {
+                    assertTrue(worker.awaitTermination(3, TimeUnit.SECONDS));
+                } finally {
+                    reset(accounts);
+                    clean(sql, id, product, List.of());
+                }
+            }
+        }
+    }
+
     @Test void registrationUsesRealInsertOnlyRepositoryAndNeverExposesCredentialsOrAcceptsRole() throws Exception {
         var sql = control(); String id = accountId(); var guest = client();
         try {
