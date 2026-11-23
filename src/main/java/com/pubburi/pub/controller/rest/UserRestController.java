@@ -5,6 +5,8 @@ import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -109,6 +111,7 @@ public class UserRestController {
 	}
 
 	@GetMapping("/users/{id}/profile")
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public ResponseEntity<ApiResponse<ProfileResponse>> profile(@PathVariable String id, HttpSession session) {
 		accessGuard.requireSelfOrAdmin(session, id);
 		User user = userService.getUserById(id);
