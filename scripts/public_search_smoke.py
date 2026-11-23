@@ -27,6 +27,22 @@ TABLE_KEYS = {"t_user": "id", "t_product": "id", "t_product_feature": "product_i
     "t_order_detail": "d_id", "t_stamp": "id", "t_comment": "id",
     "t_user_favorite": "user_id,product_id", "t_user_preference": "user_id",
     "t_user_preference_value": "user_id,kind,value_text"}
+FINGERPRINT_TABLE_KEYS = {"t_comment_taste_tag": "comment_id,tag"}
+POSTGRESQL_FINGERPRINT_TABLE_KEYS = {"t_user_recommendation_feedback": "user_id,product_id",
+    "t_user_notebook": "id", "t_user_cart": "user_id", "t_user_cart_item": "user_id,product_id",
+    "t_user_cart_operation": "user_id,operation_id", "t_user_notification": "id"}
+
+
+def fingerprint_rows(ordered_rows):
+    """Hash PK-ordered full rows without persisting private notes or operation contents."""
+    digest = hashlib.sha256()
+    for row in ordered_rows:
+        raw = json.dumps(
+            row, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False, default=str,
+        ).encode("utf-8")
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return {"rows": len(ordered_rows), "sha256": digest.hexdigest()}
 
 
 def verify_fixture_login_transition(before,after,identifier,password):
@@ -82,7 +98,16 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
     def rows(statement, params=()):
         with owner.transaction() as cursor:
             cursor.execute(statement, params); return cursor.fetchall()
-    def business(): return {table: rows("SELECT * FROM " + table + " ORDER BY " + keys) for table, keys in TABLE_KEYS.items()}
+    fingerprint_keys = dict(FINGERPRINT_TABLE_KEYS)
+    if dialect == "postgresql":
+        fingerprint_keys.update(POSTGRESQL_FINGERPRINT_TABLE_KEYS)
+
+    def business():
+        snapshot = {table: rows("SELECT * FROM " + table + " ORDER BY " + keys) for table, keys in TABLE_KEYS.items()}
+        for table, keys in fingerprint_keys.items():
+            snapshot[table] = fingerprint_rows(rows("SELECT * FROM " + table + " ORDER BY " + keys))
+        return snapshot
+
     before = business()
     initial_snapshot=private/("public-search-"+dialect+"-business-before.json")
     initial_snapshot.write_text(json.dumps(before,ensure_ascii=False,default=str));initial_snapshot.chmod(0o600)
@@ -301,5 +326,6 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         "original_business_preserved":True,"original_event_version_and_completed_ACK_preserved":True,"original_completed_ACKs":len(old_acks),
         "current_completed_ACKs":len(current_acks),"source_UUID_unchanged":True,"all_owned_processes_stopped":all(row["stopped"] for row in process_rows),"performance_claim":False}
     report["authored_admin_legacy_hash_upgraded"]=fixture_hash_upgrade
+    report["additional_business_preservation"] = {table: after[table] for table in fingerprint_keys}
     output=private/("public-search-"+dialect+"-report.json");output.write_text(json.dumps(report,ensure_ascii=False,indent=2,default=str));output.chmod(0o600)
     return {key:value for key,value in report.items() if key not in {"cases"}}
