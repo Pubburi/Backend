@@ -99,8 +99,22 @@ def run(environ):
             raise ValueError("source_ci_fresh_database_required")
         if not sql("SELECT @@version").startswith("8.4."):
             raise ValueError("source_ci_version_rejected")
-        # All following DDL targets only this new owned container/database.
-        sql("SET time_zone='+00:00'; CREATE DATABASE " + database + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + database + ";\n" + (ROOT / "data.sql").read_text(), timeout=40)
+        def bootstrap_review_fixture(name):
+            if name not in {database,"source_typed_ci","source_reverse_order_ci"}:
+                raise ValueError("source_ci_review_fixture_scope_rejected")
+            verify_owned_source(dict(source,PUBBURI_SOURCE_DB_NAME=name,
+                PUBBURI_SOURCE_URL=source["PUBBURI_SOURCE_URL"].rsplit("/",1)[0]+"/"+name))
+            # CREATE cannot adopt an existing DB; all fixture writes precede its export window.
+            sql("SET time_zone='+00:00'; CREATE DATABASE " + name +
+                " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + name + ";\n" +
+                (ROOT / "data.sql").read_text(), timeout=40)
+            if sql("SELECT COUNT(*) FROM " + name + ".t_comment") != "0":
+                raise ValueError("source_ci_bootstrap_contains_sample_reviews")
+            # Migration coverage retains authored opinions only in these disposable CI copies.
+            sql("USE " + name + "; INSERT INTO t_comment (user_id,product_id,rating,comment) VALUES "
+                "('id01',1,4.5,'시원하고 좋아요!'),('id02',2,4.0,'깔끔한 소주'),('id03',5,5.0,'분위기 있을 때 최고');")
+
+        bootstrap_review_fixture(database)
         literal_scope = "`" + database.replace("_", "\\_") + "`.*"
         sql("CREATE USER '" + reader + "'@'%' IDENTIFIED BY '" + password + "' REQUIRE SSL; GRANT SELECT, SHOW VIEW ON " + literal_scope + " TO '" + reader + "'@'%'; "
             "CREATE USER '" + control + "'@'%' IDENTIFIED BY '" + control_password + "' REQUIRE SSL; GRANT SELECT ON " + literal_scope + " TO '" + control + "'@'%'; "
@@ -134,7 +148,7 @@ def run(environ):
             # A second owned DB separates authored type/state examples from the unmodified source copy.
             typed_database, typed_reader = "source_typed_ci", "source_typed_reader"
             typed_password, typed_token, typed_window = secrets.token_hex(24), secrets.token_hex(24), str(uuid.uuid4())
-            sql("SET time_zone='+00:00'; CREATE DATABASE " + typed_database + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + typed_database + ";\n" + (ROOT / "data.sql").read_text(), timeout=40)
+            bootstrap_review_fixture(typed_database)
             sql("SET time_zone='+00:00'; USE " + typed_database + ";\n" + (ROOT / "tools/postgresql-migration/src/test/resources/source-import-types.sql").read_text())
             typed_scope = "`" + typed_database.replace("_", "\\_") + "`.*"
             sql("CREATE USER '" + typed_reader + "'@'%' IDENTIFIED BY '" + typed_password + "' REQUIRE SSL; GRANT SELECT,SHOW VIEW ON " + typed_scope + " TO '" + typed_reader + "'@'%'; USE " + typed_database + "; CREATE TABLE pubburi_source_snapshot_guard(token VARCHAR(100) PRIMARY KEY,state VARCHAR(16) NOT NULL,window_uuid CHAR(36) NOT NULL); INSERT INTO pubburi_source_snapshot_guard VALUES ('" + typed_token + "','QUIESCED','" + typed_window + "');")
@@ -183,9 +197,7 @@ def run(environ):
             reverse_database, reverse_writer = "source_reverse_order_ci", "source_reverse_writer"
             reverse_password, reverse_token, reverse_window = secrets.token_hex(24), secrets.token_hex(24), str(uuid.uuid4())
             reverse_url = source["PUBBURI_SOURCE_URL"].rsplit("/", 1)[0] + "/" + reverse_database
-            verify_owned_source(dict(source, PUBBURI_SOURCE_URL=reverse_url, PUBBURI_SOURCE_DB_NAME=reverse_database))
-            sql("SET time_zone='+00:00'; CREATE DATABASE " + reverse_database +
-                " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; USE " + reverse_database + ";\n" + (ROOT / "data.sql").read_text(), timeout=40)
+            bootstrap_review_fixture(reverse_database)
             order_times_sql = ("SET time_zone='+00:00'; SELECT o_id, CAST(UNIX_TIMESTAMP(order_time) AS DECIMAL(20,6)) FROM "
                                + reverse_database + ".t_order ORDER BY o_id")
             order_times_before = sql(order_times_sql)

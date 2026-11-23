@@ -230,11 +230,6 @@ CREATE TABLE t_comment (
     CONSTRAINT fk_comment_product FOREIGN KEY (product_id) REFERENCES t_product(id) ON DELETE CASCADE
 );
 
-INSERT INTO t_comment (user_id, product_id, rating, comment) VALUES
-('id01', 1, 4.5, '시원하고 좋아요!'),
-('id02', 2, 4.0, '깔끔한 소주'),
-('id03', 5, 5.0, '분위기 있을 때 최고');
-
 -- 스탬프 적립
 CREATE TABLE t_stamp (
     id INT AUTO_INCREMENT PRIMARY KEY,
