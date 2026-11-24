@@ -2,11 +2,14 @@ package com.pubburi.rehearsal;
 
 import static org.junit.jupiter.api.Assertions.*;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pubburi.pub.controller.auth.FeedbackOwner;
 import java.net.*;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.Test;
@@ -35,6 +38,55 @@ class JpaNotebookIntegrationTests extends JpaAccountTestSupport {
     Map<String,Object> content(String memo){var value=new HashMap<String,Object>();value.put("experience","TRIED");value.put("rating",4.25);value.put("tasteTags",List.of("  Raw,comma\n🥃  "));value.put("aromaTags",List.of());value.put("memo",memo);return value;}
     JsonNode createNote(HttpClient owner,String user,int product,String memo)throws Exception{
         var body=content(memo);body.put("productId",product);var reply=note(owner,user,"POST","",body);assertEquals(201,reply.status());return reply.body().path("data");
+    }
+    @Test void editsKeepRestoredFutureTimestampsAndRecentNoteOrderMonotonic()throws Exception{
+        var sql=control();var admin=loggedIn("ADMIN");String user=join();
+        int firstProduct=create(admin,ownName());Integer secondProduct=null;
+        try{
+            secondProduct=create(admin,ownName());var owner=login(user,password);
+            var first=createNote(owner,user,firstProduct,"  first\n원문 🥃  ");
+            var second=createNote(owner,user,secondProduct,"  second\n보존 🌾  ");
+            String firstId=first.path("id").textValue(),secondId=second.path("id").textValue();
+            assertEquals(0,sql.queryForObject("SELECT count(*) FROM pubburi.t_user_notebook WHERE user_id=? AND updated_at<created_at",Integer.class,user));
+            Instant start=Instant.now().truncatedTo(ChronoUnit.MICROS);
+            var ordinary=content("  ordinary\n보존 🌾  ");ordinary.put("expectedVersion",second.path("version").longValue());
+            var saved=note(owner,user,"PUT","/"+secondId,ordinary);assertEquals(200,saved.status());
+            Instant end=Instant.now();
+            Instant savedTime=sql.queryForObject("SELECT updated_at FROM pubburi.t_user_notebook WHERE user_id=? AND id=?::uuid",java.sql.Timestamp.class,user,secondId).toInstant();
+            assertFalse(savedTime.isBefore(start));assertFalse(savedTime.isAfter(end));
+            assertEquals(second.path("createdAt"),saved.body().at("/data/createdAt"));
+            Instant future=Instant.now().plus(Duration.ofHours(1)).truncatedTo(ChronoUnit.MICROS);
+            assertEquals(1,sql.update("UPDATE pubburi.t_user_notebook SET updated_at=? WHERE user_id=? AND id=?::uuid",java.sql.Timestamp.from(future),user,firstId));
+            assertEquals(1,sql.update("UPDATE pubburi.t_user_notebook SET updated_at=? WHERE user_id=? AND id=?::uuid",java.sql.Timestamp.from(future.minus(Duration.ofMinutes(30))),user,secondId));
+            String stored="SELECT row_to_json(n)::text FROM pubburi.t_user_notebook n WHERE user_id=? AND id=?::uuid";
+            ObjectNode before=(ObjectNode)json.readTree(sql.queryForObject(stored,String.class,user,firstId));
+            String other=sql.queryForObject(stored,String.class,user,secondId);
+            var current=note(owner,user,"GET","/"+firstId,null).body().path("data");
+            var account=accountState(sql,user);var productOne=state(sql,firstProduct);var productTwo=state(sql,secondProduct);var source=sourceIdentity(sql);
+            long version=current.path("version").longValue();Instant previous=future;
+            for(String memo:List.of("  changed\n원문 🥃  ","  changed\n원문 🥃  ")){
+                var input=content(memo);input.put("expectedVersion",version);
+                var reply=note(owner,user,"PUT","/"+firstId,input);assertEquals(200,reply.status());var changed=reply.body().path("data");
+                Instant updated=sql.queryForObject("SELECT updated_at FROM pubburi.t_user_notebook WHERE user_id=? AND id=?::uuid",java.sql.Timestamp.class,user,firstId).toInstant();
+                assertFalse(updated.isBefore(previous.plusNanos(1000)));
+                assertTrue(changed.path("updatedAt").longValue()>=previous.toEpochMilli());assertEquals(++version,changed.path("version").longValue());
+                ObjectNode expected=(ObjectNode)current.deepCopy();expected.put("memo",memo);expected.set("version",changed.get("version"));expected.set("updatedAt",changed.get("updatedAt"));
+                assertEquals(expected,changed);assertEquals(changed,note(owner,user,"GET","/"+firstId,null).body().path("data"));
+                var actual=json.readTree(sql.queryForObject(stored,String.class,user,firstId));
+                assertEquals(version,actual.path("version").longValue());
+                ObjectNode expectedRow=before.deepCopy();expectedRow.put("memo",memo);expectedRow.set("version",actual.get("version"));expectedRow.set("updated_at",actual.get("updated_at"));
+                assertEquals(expectedRow,actual);
+                var page=note(owner,user,"GET","?size=2",null);assertEquals(200,page.status());assertEquals(2,page.body().at("/data/total").intValue());
+                assertEquals(List.of(firstId,secondId),List.of(page.body().at("/data/items/0/id").textValue(),page.body().at("/data/items/1/id").textValue()));
+                previous=updated;current=changed;
+            }
+            assertEquals(other,sql.queryForObject(stored,String.class,user,secondId));
+            assertEquals(account,accountState(sql,user));assertEquals(productOne,state(sql,firstProduct));assertEquals(productTwo,state(sql,secondProduct));
+            assertEquals(source,sourceIdentity(sql));
+        }finally{
+            clean(sql,user,secondProduct,List.of());
+            sql.update("DELETE FROM pubburi.t_product WHERE id=? AND name LIKE 'ci_jpa_write_%'",firstProduct);
+        }
     }
     @Test void ownPrivateCrudRetainsDeletedProductNotesAndNeverCrossesAccountOrRejoinBoundaries()throws Exception{
         var sql=control();var admin=loggedIn("ADMIN");String user=join(),other=join();int product=create(admin,ownName());Integer second=null;
