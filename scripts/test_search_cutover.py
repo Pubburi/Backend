@@ -1,13 +1,59 @@
 import os
 import sys
 import unittest
-from unittest.mock import Mock, patch
+from contextlib import nullcontext
+from unittest.mock import ANY, DEFAULT, Mock, patch
 
-from search_cutover import READ_ALIAS, READ_DEFINITION, main, move_alias, read_alias_index
+from search_cutover import CutoverPlan, READ_ALIAS, READ_DEFINITION, main, move_alias, read_alias_index, run_cutover
 from search_index import Engine, SearchError
+from search_relay import encode_target_identity
 
 
 class SearchCutoverTests(unittest.TestCase):
+    def test_cutover_rechecks_the_bound_generation_when_a_physical_index_is_missing(self):
+        plan = CutoverPlan(
+            "76b33720-8b20-4ed4-809e-3ea301fab26f", "authored-cluster",
+            "pubburi-products-v1-old", "old-uuid", "pubburi-products-v1-new", "new-uuid",
+        )
+        old = plan.identity(plan.old_index, plan.old_uuid)
+        new = plan.identity(plan.new_index, plan.new_uuid)
+        for bound, missing, error in (
+            (old, old, "owned_strict_mapping_required"),
+            (new, old, None),
+            (new, new, "cutover_physical_generation_changed"),
+        ):
+            with self.subTest(bound=bound["index_name"], missing=missing["index_name"]):
+                cursor, store = Mock(), Mock()
+                store.transaction.return_value = nullcontext(cursor)
+                encoded, fingerprint = encode_target_identity(bound)
+                with patch.multiple("search_cutover", guarded_transaction=DEFAULT, lock_source=DEFAULT,
+                        source_projection=DEFAULT, read_alias_index=DEFAULT, verify_generation=DEFAULT,
+                        verify_stage=DEFAULT, move_alias=DEFAULT) as checks:
+                    checks["lock_source"].return_value = {
+                        "source_id": plan.source_id, "fingerprint": fingerprint, "identity": encoded,
+                    }
+                    checks["source_projection"].return_value = ([], {})
+                    checks["read_alias_index"].return_value = bound["index_name"]
+
+                    def generation(engine, expected):
+                        self.assertEqual(engine.index, expected["index_name"])
+                        if expected == missing:
+                            raise SearchError(error or "retired_generation_must_not_be_read")
+
+                    checks["verify_generation"].side_effect = generation
+                    arguments = (store, Mock(), plan, "authored_ci", "authored-marker")
+                    if error:
+                        with self.assertRaisesRegex(SearchError, error):
+                            run_cutover(*arguments)
+                        checks["verify_stage"].assert_not_called()
+                    else:
+                        self.assertEqual(run_cutover(*arguments), {"status": "already_cut_over", "events": 0, "documents": 0})
+                        checks["verify_stage"].assert_called_with(ANY, plan.new_index, {})
+                    self.assertEqual({call.args[1]["index_name"] for call in checks["verify_generation"].call_args_list},
+                                     {bound["index_name"]})
+                    checks["move_alias"].assert_not_called()
+                    cursor.execute.assert_not_called()
+
     def test_fixed_alias_requires_exactly_one_filtered_nonwriter(self):
         http = Mock()
         index = "pubburi-products-v1-old"
