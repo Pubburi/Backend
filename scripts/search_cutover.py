@@ -224,13 +224,15 @@ def run_cutover(store, transport, plan, database, token):
         if alias not in allowed_aliases:
             raise SearchError("cutover_unexpected_read_generation")
         events, latest = source_projection(cursor)
-        verify_generation(old_engine, old)
+        if not already:
+            verify_generation(old_engine, old)
         verify_generation(new_engine, new)
         if not already:
             for event in events:
                 new_engine.apply(event)
         verify_stage(http, plan.new_index, latest)
-        verify_generation(old_engine, old)
+        if not already:
+            verify_generation(old_engine, old)
         verify_generation(new_engine, new)
         if read_alias_index(http) != alias:
             raise SearchError("cutover_read_alias_changed")

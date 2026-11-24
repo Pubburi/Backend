@@ -609,3 +609,15 @@ def business_cutover(http, state):
     else:
         raise AssertionError("Old physical writer remained bound after cutover")
     assert Relay(store, new, source).once()["status"] == "idle"
+    # Retire only this fixture's confirmed old physical generation, never the active alias.
+    old.ready()
+    assert target_identity(old, source) == old_id and read_alias_index(http) == new_index
+    assert sql(owner, binding) == after
+    status, removed = http.request("DELETE", "/" + old_index)
+    assert status == 200 and removed.get("acknowledged") is True
+    assert http.request("GET", "/" + old_index + "/_settings")[0] == 404
+    assert run_cutover(owner, http, plan, database, token) == dict(result, status="already_cut_over")
+    assert sql(owner, binding) == after and read_alias_index(http) == new_index
+    assert target_identity(new, source) == new_id and store.source_id() == source
+    assert sql(owner, immutable) == before_events and completed_ack_snapshot(owner) == before_acks
+    assert http.request("GET", f"/{new_index}/_doc/{state['final']['product_id']}")[1]["_source"] == state["final"]
