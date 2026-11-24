@@ -31,7 +31,10 @@ public class JpaNotebook {
     }
     public void change(Experience value,BigDecimal score,List<String> taste,List<String> aroma,String text){
         experience=value;rating=score;tasteTags=taste==null?null:taste.toArray(String[]::new);aromaTags=aroma==null?null:aroma.toArray(String[]::new);memo=text;
-        updatedAt=Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant now=Instant.now().truncatedTo(ChronoUnit.MICROS);
+        // A restored timestamp can be ahead of this JVM; preserve edit order and a dirty revision.
+        if(updatedAt==null)updatedAt=now.isBefore(createdAt)?createdAt:now;
+        else updatedAt=now.isAfter(updatedAt)?now:updatedAt.plusNanos(1000);
     }
     public UUID id(){return id;} public Integer productId(){return productId;} public String productName(){return productName;}
     public Experience experience(){return experience;} public BigDecimal rating(){return rating;}
