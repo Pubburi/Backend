@@ -1,6 +1,7 @@
 package com.pubburi.rehearsal;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.reset;
@@ -14,6 +15,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.Test;
@@ -158,6 +160,54 @@ class JpaOrderIntegrationTests extends JpaOrderTestSupport {
             assertEquals(3, sql.queryForObject("SELECT stamps FROM pubburi.t_user WHERE id=?", Integer.class, user));
             assertEquals(3, sql.queryForObject("SELECT order_count FROM pubburi.t_product WHERE id=?", Integer.class, product));
         } finally { clean(sql, user, product); }
+    }
+
+    @Test void createdReceiptIsBuiltBeforeTheOrderBecomesVisibleToOtherTransactions() throws Exception {
+        var sql = control(); var admin = loggedIn("ADMIN"); String user = addUser();
+        int product = create(admin, ownName()); var buyer = loginUser(user);
+        var executor = Executors.newSingleThreadExecutor();
+        var receiptPending = new CountDownLatch(1); var release = new CountDownLatch(1);
+        var createdId = new AtomicInteger();
+        try {
+            var source = sourceIdentity(sql);
+            doAnswer(call -> {
+                createdId.set(call.getArgument(0)); receiptPending.countDown();
+                assertTrue(release.await(5, TimeUnit.SECONDS));
+                return call.callRealMethod();
+            }).when(orders).selectOrderInfo(anyInt());
+            var creating = executor.submit(() -> request(buyer, "POST", "/api/orders", order(product, 2)));
+            assertTrue(receiptPending.await(5, TimeUnit.SECONDS)); int id = createdId.get(); assertTrue(id > 0);
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM pubburi.t_order WHERE o_id=?", Integer.class, id));
+            assertEquals(404, request(admin, "DELETE", "/api/admin/orders/" + id, null).status());
+            release.countDown(); var created = creating.get(5, TimeUnit.SECONDS);
+            assertEquals(201, created.status()); var receipt = created.body().path("data");
+            assertEquals(id, receipt.path("oId").intValue()); assertEquals(user, receipt.path("userId").textValue());
+            assertEquals("ORDER_SNAPSHOT", receipt.path("priceBasis").textValue());
+            assertEquals(2400, receipt.path("totalPrice").intValue()); assertEquals(1, receipt.path("details").size());
+            assertEquals(product, receipt.at("/details/0/productId").intValue());
+            assertEquals(2, receipt.at("/details/0/quantity").intValue());
+            assertEquals(1200, receipt.at("/details/0/unitPrice").intValue());
+            assertEquals(2400, receipt.at("/details/0/sumPrice").intValue());
+            assertEquals(1, sql.queryForObject("""
+                SELECT count(*) FROM pubburi.t_order o
+                JOIN pubburi.t_order_detail d ON d.order_id=o.o_id
+                JOIN pubburi.t_stamp s ON s.order_id=o.o_id AND s.user_id=o.user_id
+                WHERE o.o_id=? AND o.user_id=? AND o.total_price=2400
+                  AND d.product_id=? AND d.quantity=2 AND d.unit_price=1200 AND d.sum_price=2400 AND s.quantity=2
+                """, Integer.class, id, user, product));
+            assertEquals(2, sql.queryForObject("SELECT stamps FROM pubburi.t_user WHERE id=?", Integer.class, user));
+            assertEquals(2, sql.queryForObject("SELECT order_count FROM pubburi.t_product WHERE id=?", Integer.class, product));
+            var emitted = events(sql, product); assertEquals(2, emitted.size());
+            assertEquals("PENDING", emitted.get(1).get("status"));
+            assertEquals(2, json.readTree((String) emitted.get(1).get("payload")).path("document").path("orderCount").intValue());
+            assertEquals(source, sourceIdentity(sql)); reset(orders);
+            assertEquals(receipt, request(buyer, "GET", "/api/orders/" + id, null).body().path("data"));
+            assertEquals(200, request(admin, "DELETE", "/api/admin/orders/" + id, null).status());
+            assertEquals(404, request(buyer, "GET", "/api/orders/" + id, null).status());
+        } finally {
+            release.countDown(); reset(orders); executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS)); clean(sql, user, product);
+        }
     }
 
     @Test void committedDeleteCannotMixOrderHeadersDetailsAndPageTotal() throws Exception {
