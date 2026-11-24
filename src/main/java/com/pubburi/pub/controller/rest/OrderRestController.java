@@ -7,6 +7,7 @@ import com.pubburi.pub.model.service.AccountNotificationActions;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -53,6 +54,7 @@ public class OrderRestController {
 	}
 
 	@PostMapping("/orders")
+	@Transactional
 	public ResponseEntity<ApiResponse<OrderResponse>> makeOrder(@Valid @RequestBody OrderCreateRequest request,
 			HttpSession session) {
 		SessionUser user = accessGuard.requireLogin(session);
