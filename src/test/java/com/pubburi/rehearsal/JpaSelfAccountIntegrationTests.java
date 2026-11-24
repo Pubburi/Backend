@@ -155,6 +155,38 @@ class JpaSelfAccountIntegrationTests extends JpaAccountTestSupport {
         } finally { clean(sql,id,null,List.of()); }
     }
 
+    @Test void longExistingLegacyPasswordCanLoginAndChangeWithoutAnImplicitCredentialRewrite() throws Exception {
+        var sql=control(); var admin=loggedIn("ADMIN"); String id=join(); int product=create(admin,ownName());
+        try {
+            String legacyPassword="가".repeat(25), next="새로운 정상 비밀번호 42";
+            assertEquals(75,legacyPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+            assertTrue(next.getBytes(java.nio.charset.StandardCharsets.UTF_8).length<=72);
+            var digest=java.security.MessageDigest.getInstance("SHA-256").digest(legacyPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(1,sql.update("UPDATE pubburi.t_user SET password_hash=? WHERE id=?",HexFormat.of().formatHex(digest),id));
+            assertEquals(200,request(admin,"PUT","/api/admin/users/"+id,Map.of("stamps",7)).status()); children(sql,id,product);
+            var before=accountState(sql,id); var source=sourceIdentity(sql); var productBefore=state(sql,product);
+            var owner=login(id,legacyPassword); var second=login(id,legacyPassword);
+            assertEquals(200,request(owner,"GET","/api/auth/me",null).status());
+            assertEquals(200,request(second,"GET","/api/auth/me",null).status());
+            assertEquals(200,profile(owner,id).status());
+            assertEquals(before,accountState(sql,id));
+
+            var changed=request(owner,"PUT",PASSWORD,passwordInput(legacyPassword,next));
+            assertEquals(200,changed.status()); assertTrue(changed.body().path("data").booleanValue());
+            assertEquals(200,request(owner,"GET","/api/auth/me",null).status());
+            assertEquals(401,request(second,"GET","/api/auth/me",null).status());
+            var fresh=login(id,next); publicUser(profile(fresh,id).body().path("data").path("user"));
+            var expected=(Map<String,Object>)((List<?>)before.get("user")).get(0);
+            var after=accountState(sql,id); var changedRow=new HashMap<>((Map<String,Object>)((List<?>)after.get("user")).get(0));
+            String changedHash=(String)changedRow.get("password_hash");
+            assertTrue(changedHash.startsWith("$2")); assertTrue(hasher.matches(next,changedHash));
+            assertNotEquals(expected.get("auth_epoch"),changedRow.get("auth_epoch"));
+            changedRow.put("auth_epoch",expected.get("auth_epoch")); changedRow.put("password_hash",expected.get("password_hash"));
+            assertEquals(expected,changedRow); after.put("user",before.get("user")); assertEquals(before,after);
+            assertEquals(source,sourceIdentity(sql)); assertEquals(productBefore,state(sql,product));
+        } finally { clean(sql,id,product,List.of()); }
+    }
+
     static final class LoginGateHasher extends PasswordHasher {
         final AtomicReference<Pause> armed=new AtomicReference<>();
         @Override public boolean matches(String raw,String hashed) {

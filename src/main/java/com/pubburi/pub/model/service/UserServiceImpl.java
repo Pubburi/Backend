@@ -125,7 +125,7 @@ public class UserServiceImpl implements UserService {
 
 	private boolean validPassword(String value) {
 		return value != null && !value.isBlank() && value.length() >= 4 && value.length() <= 100
-				&& value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 72;
+				&& passwordHasher.isWithinBcryptLimit(value);
 	}
 
 	private void updateLocked(User user) {
@@ -174,7 +174,7 @@ public class UserServiceImpl implements UserService {
 		if (stored == null || !passwordHasher.matches(user.getPass(), stored.getPass())) {
 			return null;
 		}
-		if (passwordHasher.needsUpgrade(stored.getPass())) {
+		if (passwordHasher.needsUpgrade(stored.getPass()) && passwordHasher.isWithinBcryptLimit(user.getPass())) {
 			int upgraded = userDao.upgradePassword(stored.getId(), stored.getPass(), stored.getAuthEpoch(),
 					passwordHasher.hash(user.getPass()));
 			if (upgraded != 1) {

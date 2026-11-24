@@ -45,6 +45,44 @@ class UserServiceImplTests {
 	}
 
 	@Test
+	void loginRetainsAnExactLegacyCredentialBeyondTheBcryptByteLimit() {
+		String password = "가".repeat(25);
+		assertThat(password.getBytes(java.nio.charset.StandardCharsets.UTF_8)).hasSize(75);
+		String legacyHash = passwordHasher.legacySha256(password);
+		User stored = new User("id01", "회원", legacyHash, 7, "USER");
+		stored.setAuthEpoch("same-account");
+		userDao.saved = stored;
+
+		User result = userService.login(new User("id01", null, password, 0, null));
+
+		assertThat(result).isNotNull();
+		assertThat(result.getPass()).isNull();
+		assertThat(result.getAuthEpoch()).isEqualTo("same-account");
+		assertThat(result.getRole()).isEqualTo("USER");
+		assertThat(result.getStamps()).isEqualTo(7);
+		assertThat(userDao.saved.getPass()).isEqualTo(legacyHash);
+		assertThat(userDao.updatedPassword).isNull();
+	}
+
+	@Test
+	void loginStillUpgradesAnExactLegacyCredentialAtTheBcryptByteLimit() {
+		String password = "가".repeat(24);
+		assertThat(password.getBytes(java.nio.charset.StandardCharsets.UTF_8)).hasSize(72);
+		User stored = new User("id01", "회원", passwordHasher.legacySha256(password), 7, "USER");
+		stored.setAuthEpoch("same-account");
+		userDao.saved = stored;
+
+		User result = userService.login(new User("id01", null, password, 0, null));
+
+		assertThat(result).isNotNull();
+		assertThat(result.getPass()).isNull();
+		assertThat(result.getAuthEpoch()).isEqualTo("same-account");
+		assertThat(userDao.updatedPassword).startsWith("$2");
+		assertThat(passwordHasher.matches(password, userDao.saved.getPass())).isTrue();
+		assertThat(userDao.saved.getAuthEpoch()).isEqualTo("same-account");
+	}
+
+	@Test
 	void omittedProfileFieldsPreserveLockedRoleCredentialsAndEpoch() {
 		User stored = new User("id01", "old name", "existing hash", 7, "USER");
 		stored.setAuthEpoch("current-account");
@@ -219,7 +257,12 @@ class UserServiceImplTests {
 
 		@Override
 		public User selectById(String userId) {
-			return saved != null && saved.getId().equals(userId) ? saved : null;
+			if (saved == null || !saved.getId().equals(userId)) {
+				return null;
+			}
+			User selected = new User(saved.getId(), saved.getName(), saved.getPass(), saved.getStamps(), saved.getRole());
+			selected.setAuthEpoch(saved.getAuthEpoch());
+			return selected;
 		}
 
 		@Override

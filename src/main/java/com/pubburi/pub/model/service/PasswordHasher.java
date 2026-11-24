@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class PasswordHasher {
 	private static final String BCRYPT_PREFIX = "$2";
+	private static final int MAX_BCRYPT_BYTES = 72;
 	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
 	public String hash(String raw) {
@@ -31,6 +32,10 @@ public class PasswordHasher {
 
 	public boolean needsUpgrade(String hashed) {
 		return hashed != null && !isBcrypt(hashed);
+	}
+
+	boolean isWithinBcryptLimit(String raw) {
+		return raw != null && raw.getBytes(StandardCharsets.UTF_8).length <= MAX_BCRYPT_BYTES;
 	}
 
 	String legacySha256(String raw) {
