@@ -88,6 +88,7 @@ public class CommentServiceImpl implements CommentService {
 	}
 
 	@Override
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public PageResponse<Comment> getAllComments(PageCriteria criteria) {
 		List<Comment> comments = commentDao.selectAllPaged(criteria.size(), criteria.offset());
 		return PageResponse.of(comments, criteria, commentDao.countAll());
