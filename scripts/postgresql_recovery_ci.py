@@ -72,10 +72,38 @@ def run(environ, runtime, recovery_control, selected_release):
     role=runtime['PUBBURI_PG_USER']
     if not re.fullmatch('[a-z][a-z0-9_]{0,50}',role):raise ValueError('recovery_ci_runtime_role_invalid')
     actor='ci_jpa_recovery_'+secrets.token_hex(8);password=secrets.token_hex(20);new_password=secrets.token_hex(20)
+    deleted_actor='ci_jpa_recovery_deleted_'+secrets.token_hex(8);deleted_password=secrets.token_hex(20)
+    deleted_headers={'X-Pubburi-Account-Owner':deleted_actor}
+    deleted_restores=0
     def request(c,base,method,path,body=None,expected=200,*,headers=None):
         status,body=request_json(c,base,method,path,body,time.monotonic()+12,headers=headers)
         if status!=expected:raise ValueError('recovery_ci_http_contract_failed')
         return body['data']
+    def deleted_state(cookie,base):
+        request(cookie,base,'GET','/api/products/'+str(deleted_pid),expected=404)
+        request(cookie,base,'GET','/api/products/'+str(deleted_pid)+'/features',expected=404)
+        return {
+            'order':request(cookie,base,'GET','/api/orders/'+str(deleted_checkout['orderId'])),
+            'notebook':request(cookie,base,'GET',deleted_note_path,headers=deleted_headers),
+            'cart':request(cookie,base,'GET',cart_path,headers=deleted_headers),
+            'notifications':request(cookie,base,'GET',notification_path,headers=deleted_headers),
+            'favorite':request(cookie,base,'GET','/api/users/me/favorites/'+str(deleted_pid)),
+            'profile':request(cookie,base,'GET','/api/users/'+deleted_actor+'/profile'),
+            'operation':request(cookie,base,'GET',cart_path+'/operations/'+deleted_intent['operationId'],headers=deleted_headers)}
+    def verify_deleted_replay(base,database):
+        # The owned API is live: compare read-only snapshots without invoking the
+        # stopped-writer guard or changing its stricter backup/promotion contract.
+        with recovery.connect(database) as connection, connection.transaction():
+            connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            before_replay=recovery.state(connection)
+        cookie=http.cookiejar.CookieJar()
+        request(cookie,base,'POST','/api/auth/login',{'id':deleted_actor,'pass':deleted_password})
+        if deleted_state(cookie,base)!=retained_deleted:raise ValueError('recovery_ci_deleted_product_state_changed')
+        replay=request(cookie,base,'POST',cart_path+'/checkout',deleted_intent,headers=deleted_headers)
+        if replay!=retained_deleted['operation']:raise ValueError('recovery_ci_deleted_checkout_receipt_changed')
+        with recovery.connect(database) as connection, connection.transaction():
+            connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            if recovery.state(connection)!=before_replay:raise ValueError('recovery_ci_deleted_checkout_replay_wrote_again')
     with server(runtime,directory,'before',release/'runtime.jar') as base:
         admin_cookie=http.cookiejar.CookieJar();user=http.cookiejar.CookieJar()
         request(admin_cookie,base,'POST','/api/auth/login',{'id':runtime['PUBBURI_JPA_ADMIN_ID'],'pass':runtime['PUBBURI_JPA_ADMIN_PASSWORD']})
@@ -125,6 +153,46 @@ def run(environ, runtime, recovery_control, selected_release):
         retained_reviews=request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')
         retained_notebook=request(user,base,'GET',notebook_path,headers=notebook_headers)
         retained_cart=request(user,base,'GET',cart_path,headers=notebook_headers)
+        # A distinct customer keeps the active-product scenario and its later
+        # declared writes unchanged while exercising all unavailable references.
+        deleted_user=http.cookiejar.CookieJar()
+        request(deleted_user,base,'POST','/api/users',{'id':deleted_actor,'name':'Recovery deleted-product member','pass':deleted_password},201)
+        request(deleted_user,base,'POST','/api/auth/login',{'id':deleted_actor,'pass':deleted_password})
+        deleted_product=request(admin_cookie,base,'POST','/api/admin/products',{'name':'Recovery deleted 원문 🌾','type':'증류주',
+            'price':3100,'img':'authored.png','abv':12.5,'orderCount':0},201)
+        deleted_pid=deleted_product['id']
+        deleted_cart=request(deleted_user,base,'PUT',cart_path+'/items/'+str(deleted_pid),{'quantity':3,'expectedVersion':0},headers=deleted_headers)
+        deleted_intent={'operationId':str(uuid.uuid4()),'expectedVersion':deleted_cart['version'],
+            'items':[{'productId':deleted_pid,'quantity':2}],'orderType':'TAKEOUT','orderTable':'  삭제 상품 원문  '}
+        deleted_checkout=request(deleted_user,base,'POST',cart_path+'/checkout',deleted_intent,headers=deleted_headers)
+        deleted_note=request(deleted_user,base,'POST','/api/users/me/notebook',{'productId':deleted_pid,'experience':'TRIED','rating':3.25,
+            'tasteTags':['  private\n🌾  '],'aromaTags':[],'memo':'  삭제 뒤에도 남는 기록\n🌾  '},201,headers=deleted_headers)
+        deleted_note_path='/api/users/me/notebook/'+deleted_note['id']
+        request(deleted_user,base,'PUT','/api/users/me/favorites/'+str(deleted_pid))
+        request(admin_cookie,base,'PATCH','/api/admin/orders/'+str(deleted_checkout['orderId'])+'/complete')
+        deleted_review=request(deleted_user,base,'POST','/api/comments',{'productId':deleted_pid,'rating':3.75,'comment':'Authored removed opinion'},201)
+        request(admin_cookie,base,'DELETE','/api/comments/'+str(deleted_review['id']))
+        request(admin_cookie,base,'DELETE','/api/admin/products/'+str(deleted_pid))
+        retained_deleted=deleted_state(deleted_user,base)
+        historical=retained_deleted['order'];items=historical['details'];unavailable=retained_deleted['cart']['items']
+        if (historical['totalPrice']!=6200 or historical['priceBasis']!='ORDER_SNAPSHOT' or historical['completed']!='Y'
+                or historical['orderTable']!=deleted_intent['orderTable'] or len(items)!=1
+                or items[0]['productId'] is not None or items[0]['name']!=deleted_product['name']
+                or items[0]['quantity']!=2 or items[0]['unitPrice']!=3100 or items[0]['sumPrice']!=6200
+                or retained_deleted['notebook']!=dict(deleted_note,productId=None,currentProduct=None)
+                or retained_deleted['cart']['version']!=deleted_checkout['cart']['version'] or len(unavailable)!=1
+                or unavailable[0]!={'productId':deleted_pid,'productName':deleted_product['name'],'currentProduct':None,'quantity':1}
+                or retained_deleted['favorite']['favorited'] is not False
+                or retained_deleted['profile']['user']['stamps']!=2 or retained_deleted['profile']['orders']!=[historical]):
+            raise ValueError('recovery_ci_deleted_product_fixture_changed')
+        notices=retained_deleted['notifications']
+        if (notices['total']!=2 or notices['unreadCount']!=2
+                or {item['type']:item['targetAvailable'] for item in notices['items']}
+                !={'ORDER_COMPLETED':True,'REVIEW_REMOVED':False}
+                or [item['productName'] for item in notices['items'] if item['type']=='REVIEW_REMOVED']!=[deleted_product['name']]
+                or retained_deleted['operation']!=dict(deleted_checkout,replayed=True,cart=retained_deleted['cart'])):
+            raise ValueError('recovery_ci_deleted_product_notifications_or_nonce_changed')
+        verify_deleted_replay(base,control)
     # Preserve historical feedback as stored data without reintroducing its former API.
     with recovery.connect(control) as connection:
         connection.execute("INSERT INTO pubburi.t_user_recommendation_feedback(user_id,product_id,feedback) VALUES (%s,%s,'MATCHED')", (actor,pid))
@@ -399,6 +467,7 @@ def run(environ, runtime, recovery_control, selected_release):
             if result['status']!='RETIRED' or not result['replayed'] or result['cart']!=retained_cart or result['orderId'] is not None:raise ValueError('recovery_ci_cart_retirement_not_restored')
         status,error=request_json(user,base,'POST',cart_path+'/merge',{'operationId':retired_id,'expectedVersion':retained_cart['version'],'items':retire_intent['items']},time.monotonic()+12,headers=notebook_headers)
         if status!=409 or error['error']['code']!='CART_OPERATION_RETIRED':raise ValueError('recovery_ci_retired_operation_reapplied')
+        verify_deleted_replay(base,target);deleted_restores+=1
         created=request(user,base,'POST','/api/comments',{'productId':pid,'rating':2.5,'comment':'After recovery','tasteTags':[]},201)
         value,called=manifest['state']['sequences']['t_comment_id_seq']
         if created['id']!=(value+1 if called else value):raise ValueError('recovery_ci_consumed_id_reused')
@@ -653,6 +722,7 @@ def run(environ, runtime, recovery_control, selected_release):
         reviews = request(user,base,'GET','/api/products/'+str(pid)+'/comments?includeTasteTags=true&includeSummary=true')
         if [item for item in reviews['items'] if item['id'] == created['id']] != [dict(created,tasteTags=[])]:
             raise ValueError('recovery_ci_second_new_review_not_restored')
+        verify_deleted_replay(base,next_target);deleted_restores+=1
         second_replays = replay_checkout_pair(base)
     with recovery.connect(next_target) as connection, connection.transaction():
         connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -671,6 +741,7 @@ def run(environ, runtime, recovery_control, selected_release):
             or recovery.approved_archive(second_archive,second_pin,local)[0] != second_manifest):
         raise ValueError('recovery_ci_second_restore_changed_archive_or_selection')
     report={'status':'passed','business_tables':23,'control_tables':2,'sequences':7,
+        'deleted_product_restores_verified':deleted_restores,
         'post_import_order_review_favorite_password_feedback_preserved':True,'schema_and_binary_cells_exact_before_restart':True,
         'private_notebook_original_arrays_memo_revision_preserved':True,
         'cart_quantities_revision_and_merge_checkout_receipts_preserved':True,
