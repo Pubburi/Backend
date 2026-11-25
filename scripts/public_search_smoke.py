@@ -230,7 +230,10 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             b, _ = create("B",2000,0)
             assert compare(root,"DATABASE_FALLBACK","missing-pending-product")["total"]==2
             assert len(suggestions(name_prefix,"DATABASE_FALLBACK","missing-pending-product"))==2
-            features(b,[],None); c, _ = create("C",1000,5.1); features(c,["a","b","line\nx"],[]); drain()
+            features(b,[],None)
+            c, c_body = create("C",1000,5.1)
+            features(c,["a","b","line\nx"],[])
+            drain()
             suggestions(name_prefix,"ENGINE_VERIFIED","replayed-products")
             literal=" %_!\\*?한글"; first,first_body=create(literal,1234,5); second,_=create(literal,4321,6)
             drain()
@@ -290,6 +293,27 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
             compare(root+"A","DATABASE_FALLBACK","stale-live-after-delete"); drain()
             compare(root+"A","ENGINE_VERIFIED","durable-tombstone-filtered")
             assert http.request("GET","/"+index+"/_doc/"+str(a))[1]["_source"]["deleted"] is True
+
+            rename_filters = (
+                "&maxPriceKrw=1500&minAbvPercent=5.10&maxAbvPercent=5.10"
+                "&tasteTag=a&tasteTag=b&sort=priceAsc&page=1&size=1"
+            )
+            old_query = root + "C" + rename_filters
+            new_query = root + "Renamed" + rename_filters
+            original = compare(old_query, "ENGINE_VERIFIED", "rename-original-old-term")
+            assert original["total"] == 1 and [row["id"] for row in original["items"]] == [c]
+            c_body["name"] = name_prefix + "Renamed"
+            request(live, "PUT", "/api/admin/products/" + str(c), c_body, admin)
+            rename_replay = {}
+            for phase, expected_source in (("pending", "DATABASE_FALLBACK"), ("replayed", "ENGINE_VERIFIED")):
+                if phase == "replayed":
+                    drain()
+                old = compare(old_query, expected_source, "rename-" + phase + "-old-term")
+                new = compare(new_query, expected_source, "rename-" + phase + "-new-term")
+                assert old["total"] == 0 and old["items"] == []
+                assert new["total"] == 1 and [row["id"] for row in new["items"]] == [c]
+                rename_replay[phase] = {"source": expected_source, "old_total": old["total"], "new_total": new["total"]}
+
             unavailable = start("unavailable",True,"http://127.0.0.1:"+str(refusal.getsockname()[1]))
             wanted=root+"&maxPriceKrw=1500&tasteTag=a&tasteTag=b"
             bad, source_header=request(unavailable,"GET","/api/products"+wanted)
@@ -327,5 +351,6 @@ def verify(http, endpoint, private, environ, index, dialect="postgresql", baseli
         "current_completed_ACKs":len(current_acks),"source_UUID_unchanged":True,"all_owned_processes_stopped":all(row["stopped"] for row in process_rows),"performance_claim":False}
     report["authored_admin_legacy_hash_upgraded"]=fixture_hash_upgrade
     report["additional_business_preservation"] = {table: after[table] for table in fingerprint_keys}
+    report["renamed_product_list"] = rename_replay
     output=private/("public-search-"+dialect+"-report.json");output.write_text(json.dumps(report,ensure_ascii=False,indent=2,default=str));output.chmod(0o600)
     return {key:value for key,value in report.items() if key not in {"cases"}}
