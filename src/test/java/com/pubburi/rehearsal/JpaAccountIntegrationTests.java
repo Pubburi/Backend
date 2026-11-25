@@ -18,6 +18,69 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 class JpaAccountIntegrationTests extends JpaAccountTestSupport {
     @MockitoSpyBean UserDao accounts;
 
+    @Test void adminMemberPageKeepsOneSnapshotWhenTheReadMemberIsDeleted() throws Exception {
+        var sql = control();
+        var reader = loggedIn("ADMIN");
+        var writer = loggedIn("ADMIN");
+        String id = accountId();
+        var memberRead = new CountDownLatch(1);
+        var continuePage = new CountDownLatch(1);
+        var worker = Executors.newSingleThreadExecutor();
+        Future<Reply> reading = null;
+        try {
+            assertEquals(201, request(client(), "POST", "/api/users", registration(id)).status());
+            int offset = sql.queryForObject("SELECT count(*) FROM pubburi.t_user WHERE id < ?", Integer.class, id);
+            int page = offset + 1;
+            String route = "/api/admin/users?page=" + page + "&size=1";
+            var before = request(reader, "GET", route, null);
+            assertEquals(200, before.status());
+            assertTrue(id.equals(before.body().at("/data/items/0/id").textValue()));
+            publicUser(before.body().at("/data/items/0"));
+            int total = before.body().at("/data/total").intValue();
+
+            doAnswer(invocation -> {
+                Object items = invocation.callRealMethod();
+                memberRead.countDown();
+                assertTrue(continuePage.await(5, TimeUnit.SECONDS), "Member page read was not released");
+                return items;
+            }).when(accounts).selectPaged(1, offset);
+
+            reading = worker.submit(() -> request(reader, "GET", route, null));
+            assertTrue(memberRead.await(5, TimeUnit.SECONDS));
+            assertEquals(200, request(writer, "DELETE", "/api/admin/users/" + id, null).status());
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM pubburi.t_user WHERE id=?", Integer.class, id));
+            continuePage.countDown();
+
+            var during = reading.get(5, TimeUnit.SECONDS);
+            assertEquals(200, during.status());
+            assertEquals(total, during.body().at("/data/total").intValue(), "Member page items and total mixed two snapshots");
+            assertTrue(before.body().equals(during.body()));
+            reset(accounts);
+
+            var after = request(reader, "GET", route, null);
+            assertEquals(200, after.status());
+            int remaining = total - 1;
+            assertEquals(remaining, after.body().at("/data/total").intValue());
+            assertEquals(remaining, after.body().at("/data/totalPages").intValue());
+            assertEquals(page < remaining, after.body().at("/data/hasNext").booleanValue());
+            assertEquals(page <= remaining ? 1 : 0, after.body().at("/data/items").size());
+            assertFalse(id.equals(after.body().at("/data/items/0/id").textValue()));
+        } finally {
+            continuePage.countDown();
+            try {
+                if (reading != null) reading.get(10, TimeUnit.SECONDS);
+            } finally {
+                worker.shutdownNow();
+                try {
+                    assertTrue(worker.awaitTermination(3, TimeUnit.SECONDS));
+                } finally {
+                    reset(accounts);
+                    clean(sql, id, null, List.of());
+                }
+            }
+        }
+    }
+
     @Test void profileKeepsOneSnapshotWhenAnOrdinaryOrderCommitsBetweenItsDataReads() throws Exception {
         var sql = control();
         var admin = loggedIn("ADMIN");

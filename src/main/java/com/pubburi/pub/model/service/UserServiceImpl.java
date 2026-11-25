@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pubburi.pub.controller.api.PageCriteria;
@@ -30,6 +31,7 @@ public class UserServiceImpl implements UserService {
 	}
 
 	@Override
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public PageResponse<User> getUserPage(PageCriteria criteria) {
 		List<User> users = userDao.selectPaged(criteria.size(), criteria.offset()).stream().map(User::withoutPass)
 				.toList();
