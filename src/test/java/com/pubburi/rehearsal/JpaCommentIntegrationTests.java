@@ -68,6 +68,46 @@ class JpaCommentIntegrationTests extends JpaAccountTestSupport {
         } finally { clean(sql, user, product, List.of()); }
     }
 
+    @Test void adminPageKeepsItsItemsAndTotalWhenTheAuthorDeletesAReadReview() throws Exception {
+        var sql = control(); var admin = loggedIn("ADMIN"); String user = join(); int product = create(admin, ownName());
+        var executor = Executors.newSingleThreadExecutor();
+        var countPending = new CountDownLatch(1); var deletionCommitted = new CountDownLatch(1);
+        try {
+            var owner = login(user, password); String retainedText = "  남겨 둔 후기\n원문  ";
+            var retained = request(owner, "POST", "/api/comments", review(product, 3.75f, retainedText));
+            assertEquals(201, retained.status()); int retainedId = retained.body().at("/data/id").intValue();
+            var removed = request(owner, "POST", "/api/comments", review(product, 4.25f, "  정상 삭제 후기\n원문  "));
+            assertEquals(201, removed.status()); int removedId = removed.body().at("/data/id").intValue();
+            String route = "/api/admin/comments?size=1";
+            var before = request(admin, "GET", route, null); assertEquals(200, before.status());
+            assertEquals(removed.body().path("data"), before.body().at("/data/items/0"));
+            var productBefore = state(sql, product); var accountBefore = accountState(sql, user); var source = sourceIdentity(sql);
+            doAnswer(call -> {
+                countPending.countDown(); assertTrue(deletionCommitted.await(5, TimeUnit.SECONDS));
+                return call.callRealMethod();
+            }).when(comments).countAll();
+            var reading = executor.submit(() -> request(admin, "GET", route, null));
+            assertTrue(countPending.await(5, TimeUnit.SECONDS));
+            assertEquals(200, request(owner, "DELETE", "/api/comments/" + removedId, null).status());
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM pubburi.t_comment WHERE id=?", Integer.class, removedId));
+            deletionCommitted.countDown(); var during = reading.get(5, TimeUnit.SECONDS);
+            assertEquals(200, during.status()); assertEquals(before.body(), during.body()); reset(comments);
+
+            var after = request(admin, "GET", route, null); assertEquals(200, after.status());
+            int remaining = before.body().at("/data/total").intValue() - 1;
+            assertEquals(remaining, after.body().at("/data/total").intValue());
+            assertEquals(remaining, after.body().at("/data/totalPages").intValue());
+            assertEquals(remaining > 1, after.body().at("/data/hasNext").booleanValue());
+            assertEquals(retained.body().path("data"), after.body().at("/data/items/0"));
+            assertEquals(retainedText, comments.select(retainedId).getComment());
+            assertEquals(accountBefore, accountState(sql, user)); assertEquals(productBefore, state(sql, product));
+            assertEquals(source, sourceIdentity(sql));
+        } finally {
+            deletionCommitted.countDown(); reset(comments); executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS)); clean(sql, user, product, List.of());
+        }
+    }
+
     @Test void publicPagesKeepDescIdsNullableHistoryAndMissingProductEmptyVersusFkConflict() throws Exception {
         var sql = control(); var admin = loggedIn("ADMIN"); String user = join(); int product = create(admin, ownName());
         try {
