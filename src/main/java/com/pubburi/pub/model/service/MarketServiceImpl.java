@@ -3,6 +3,7 @@ package com.pubburi.pub.model.service;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pubburi.pub.controller.api.PageCriteria;
@@ -25,6 +26,7 @@ public class MarketServiceImpl implements MarketService {
 	}
 
 	@Override
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public PageResponse<Market> getMarketPage(PageCriteria criteria) {
 		List<Market> markets = marketDao.selectPaged(criteria.size(), criteria.offset());
 		return PageResponse.of(markets, criteria, marketDao.countAll());

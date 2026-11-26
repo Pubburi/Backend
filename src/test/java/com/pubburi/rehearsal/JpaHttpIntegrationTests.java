@@ -1,6 +1,8 @@
 package com.pubburi.rehearsal;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 import com.fasterxml.jackson.databind.*;
 import com.pubburi.pub.model.dao.*;
 import com.pubburi.pub.model.dto.*;
@@ -21,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -31,6 +34,7 @@ class JpaHttpIntegrationTests {
     @Autowired UserService users;@Autowired UserDao userDao;@Autowired PasswordHasher hasher;
     @Autowired JdbcTemplate sql;@Autowired DataSource dataSource;@Autowired PlatformTransactionManager transactions;
     @Autowired Environment environment;@Autowired EntityManagerFactory entities;
+    @MockitoSpyBean MarketDao markets;
     final ObjectMapper json=new ObjectMapper();
     HttpClient client(){return HttpClient.newBuilder().cookieHandler(new CookieManager(null,CookiePolicy.ACCEPT_ALL)).connectTimeout(Duration.ofSeconds(3)).build();}
     record Reply(int status,JsonNode body){ }
@@ -48,6 +52,70 @@ class JpaHttpIntegrationTests {
         assertEquals(1,control.queryForObject("SELECT count(*) FROM public.pubburi_pg_migration_guard WHERE token=?",Integer.class,settings.token()));return control;
     }
     Map<String,Object> market(String name){return Map.of("name",name,"latitude",37.123456789,"longitude",127.987654321,"image","authored.png");}
+
+    @Test void marketPageKeepsOneSnapshotWhenTheReadMarketIsDeleted() throws Exception {
+        var reader = client();
+        var writer = client();
+        login(writer, required("PUBBURI_JPA_ADMIN_ID"), required("PUBBURI_JPA_ADMIN_PASSWORD"));
+        var created = request(writer, "POST", "/api/admin/markets", market("Authored market " + UUID.randomUUID()));
+        assertEquals(201, created.status());
+        int marketId = created.body().at("/data/id").intValue();
+        assertTrue(marketId > 0);
+        String deletion = "/api/admin/markets/" + marketId;
+        var rowsRead = new CountDownLatch(1);
+        var continuePage = new CountDownLatch(1);
+        var worker = Executors.newSingleThreadExecutor();
+        Future<Reply> reading = null;
+        boolean deleted = false;
+        try {
+            var firstPage = request(reader, "GET", "/api/markets?page=1&size=1", null);
+            assertEquals(200, firstPage.status());
+            int total = firstPage.body().at("/data/total").intValue();
+            assertTrue(total > 0);
+            String route = "/api/markets?page=" + total + "&size=1";
+            var before = request(reader, "GET", route, null);
+            assertEquals(200, before.status());
+            assertEquals(marketId, before.body().at("/data/items/0/id").intValue());
+            doAnswer(invocation -> {
+                Object rows = invocation.callRealMethod();
+                rowsRead.countDown();
+                assertTrue(continuePage.await(5, TimeUnit.SECONDS), "Market page read was not released");
+                return rows;
+            }).when(markets).selectPaged(1, total - 1);
+
+            reading = worker.submit(() -> request(reader, "GET", route, null));
+            assertTrue(rowsRead.await(5, TimeUnit.SECONDS));
+            assertEquals(200, request(writer, "DELETE", deletion, null).status());
+            deleted = true;
+            continuePage.countDown();
+
+            var during = reading.get(5, TimeUnit.SECONDS);
+            assertEquals(200, during.status());
+            assertEquals(before.body(), during.body(), "Market page items and total mixed two snapshots");
+            reset(markets);
+
+            var after = request(reader, "GET", route, null);
+            assertEquals(200, after.status());
+            var afterPage = after.body().path("data");
+            assertTrue(afterPage.path("items").isArray() && afterPage.path("items").isEmpty());
+            assertEquals(total - 1, afterPage.path("total").intValue());
+            assertEquals(total - 1, afterPage.path("totalPages").intValue());
+            assertFalse(afterPage.path("hasNext").booleanValue());
+        } finally {
+            continuePage.countDown();
+            try {
+                if (reading != null) reading.get(10, TimeUnit.SECONDS);
+            } finally {
+                worker.shutdownNow();
+                reset(markets);
+                if (!deleted) {
+                    int status = request(writer, "DELETE", deletion, null).status();
+                    assertTrue(status == 200 || status == 404, "Authored market cleanup failed");
+                }
+            }
+        }
+    }
+
     @Test void realHttpSessionPermissionsAndMarketCrudUseJpaAndPreserveDtoContract()throws Exception {
         for(String ddl:List.of("CREATE TABLE pubburi.ci_jpa_forbidden(id INT)","ALTER TABLE pubburi.t_market ADD COLUMN ci_jpa_forbidden INT","DROP TABLE pubburi.t_market")) {
             var rejected=assertThrows(org.springframework.dao.DataAccessException.class,()->sql.execute(ddl));assertEquals("42501",((SQLException)rejected.getMostSpecificCause()).getSQLState());
