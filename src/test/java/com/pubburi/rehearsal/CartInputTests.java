@@ -37,4 +37,42 @@ class CartInputTests {
         var resolve=merge();resolve.remove(List.of("operationId","expectedVersion"));resolve.put("kind","MERGE").putNull("orderType").putNull("orderTable");
         for(var wrong:List.of(resolve.deepCopy().put("expectedVersion",0),resolve.deepCopy().put("orderType","TAKEOUT"),resolve.deepCopy().put("orderTable","raw"),resolve.deepCopy().put("kind","CHECKOUT"),resolve.deepCopy().put("kind","OTHER")))assertThrows(Exception.class,()->json.readValue(wrong.toString(),CartInput.Resolve.class));
     }
+
+    @Test void confirmedTotalIsOptionalStrictAndBoundToCheckoutResolution() throws Exception {
+        var checkout = merge().put("orderType", "TAKEOUT").putNull("orderTable");
+        var legacy = json.readValue(checkout.toString(), CartInput.Checkout.class);
+        assertNull(legacy.expectedTotalPrice());
+        var resolve = checkout.deepCopy();
+        resolve.remove(List.of("operationId", "expectedVersion"));
+        resolve.put("kind", "CHECKOUT");
+        var legacyResolve = json.readValue(resolve.toString(), CartInput.Resolve.class);
+        assertNull(legacyResolve.expectedTotalPrice());
+        String legacyHash = "9529a64aa9936fc87d311bb210a4a6ac73f4e9bc9422f638a18328f45a4454e4";
+        assertEquals(legacyHash, CartInput.intent(legacy.items(), legacy.orderType(), legacy.orderTable(), legacy.expectedTotalPrice()));
+        assertEquals(legacyHash, CartInput.intent(legacyResolve.items(), legacyResolve.orderType(), legacyResolve.orderTable(), legacyResolve.expectedTotalPrice()));
+
+        var quoted = json.readValue(checkout.put("expectedTotalPrice", 0).toString(), CartInput.Checkout.class);
+        assertEquals(0, quoted.expectedTotalPrice());
+        var quotedResolve = json.readValue(resolve.put("expectedTotalPrice", 0).toString(), CartInput.Resolve.class);
+        String quotedHash = CartInput.intent(quoted.items(), quoted.orderType(), quoted.orderTable(), quoted.expectedTotalPrice());
+        assertEquals(quotedHash, CartInput.intent(quotedResolve.items(), quotedResolve.orderType(), quotedResolve.orderTable(), quotedResolve.expectedTotalPrice()));
+        assertNotEquals(legacyHash, quotedHash);
+        assertNotEquals(quotedHash, CartInput.intent(quoted.items(), quoted.orderType(), quoted.orderTable(), 1));
+        assertEquals(Integer.MAX_VALUE, json.readValue(checkout.put("expectedTotalPrice", Integer.MAX_VALUE).toString(),
+                CartInput.Checkout.class).expectedTotalPrice());
+
+        for (var invalid : List.of(NullNode.getInstance(), BooleanNode.TRUE, IntNode.valueOf(-1),
+                LongNode.valueOf((long) Integer.MAX_VALUE + 1), DoubleNode.valueOf(1.0), TextNode.valueOf("1"))) {
+            checkout.set("expectedTotalPrice", invalid);
+            resolve.set("expectedTotalPrice", invalid);
+            assertThrows(Exception.class, () -> json.readValue(checkout.toString(), CartInput.Checkout.class));
+            assertThrows(Exception.class, () -> json.readValue(resolve.toString(), CartInput.Resolve.class));
+        }
+        String duplicate = checkout.put("expectedTotalPrice", 0).toString()
+                .replace("\"expectedTotalPrice\":0", "\"expectedTotalPrice\":0,\"expectedTotalPrice\":1");
+        assertThrows(Exception.class, () -> json.readValue(duplicate, CartInput.Checkout.class));
+        resolve.put("kind", "MERGE").putNull("orderType").put("expectedTotalPrice", 0);
+        assertThrows(Exception.class, () -> json.readValue(resolve.toString(), CartInput.Resolve.class));
+        assertThrows(Exception.class, () -> json.readValue(merge().put("expectedTotalPrice", 0).toString(), CartInput.Merge.class));
+    }
 }

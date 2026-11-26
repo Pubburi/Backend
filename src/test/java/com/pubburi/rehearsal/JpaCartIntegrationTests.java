@@ -55,6 +55,87 @@ class JpaCartIntegrationTests extends CartTestSupport {
             assertEquals(404,cart(fresh,user,"GET","/operations/"+merged,null).status());assertEquals(404,cart(fresh,user,"GET","/operations/"+checked,null).status());assertEquals(0,version(get(fresh,user)));
         }finally{clean(sql,user,first,List.of());clean(sql,other,second,List.of());}
     }
+    @Test void changedPriceRetiresTheConfirmationEvenIfThePreviousTotalReturns() throws Exception {
+        var sql = control();
+        var admin = loggedIn("ADMIN");
+        String user = join();
+        String productName = ownName();
+        int productId = create(admin, productName);
+        try {
+            var customer = login(user, password);
+            var otherDevice = login(user, password);
+            var initial = put(customer, user, productId, 2, 0);
+            long initialVersion = version(initial);
+            int originalPrice = line(initial, productId).at("/currentProduct/price").intValue();
+            int changedPrice = originalPrice + 500;
+            String productPath = "/api/admin/products/" + productId;
+            var items = List.of(item(productId, 2));
+            UUID staleId = UUID.randomUUID();
+            var staleConfirmation = checkout(staleId, initialVersion, items);
+            staleConfirmation.put("expectedTotalPrice", originalPrice * 2);
+
+            assertEquals(200, request(admin, "PUT", productPath, product(productName, changedPrice)).status());
+            var beforeRejection = get(otherDevice, user);
+            assertEquals(initialVersion, version(beforeRejection));
+            assertEquals(changedPrice, line(beforeRejection, productId).at("/currentProduct/price").intValue());
+            var accountBefore = accountState(sql, user);
+            var cartBefore = cartState(sql, user);
+            var rejected = cart(customer, user, "POST", "/checkout", staleConfirmation);
+            assertEquals(409, rejected.status());
+            assertEquals("CART_PRICE_CHANGED", rejected.body().at("/error/code").textValue());
+            assertEquals(beforeRejection, get(customer, user));
+            assertEquals(accountBefore, accountState(sql, user));
+            var cartAfter = cartState(sql, user);
+            assertEquals(cartBefore.get("header"), cartAfter.get("header"));
+            assertEquals(cartBefore.get("items"), cartAfter.get("items"));
+            assertEquals(1, ((List<?>) cartAfter.get("operations")).size());
+
+            String staleOperation = "/operations/" + staleId;
+            var receipt = cart(otherDevice, user, "GET", staleOperation, null);
+            assertEquals(200, receipt.status());
+            assertEquals("RETIRED", receipt.body().at("/data/status").textValue());
+            assertTrue(receipt.body().at("/data/orderId").isNull());
+            var resolution = resolution(true, items);
+            resolution.put("expectedTotalPrice", changedPrice * 2);
+            assertEquals(409, cart(otherDevice, user, "POST", staleOperation + "/resolve", resolution).status());
+            resolution.put("expectedTotalPrice", originalPrice * 2);
+            assertEquals(receipt, cart(otherDevice, user, "POST", staleOperation + "/resolve", resolution));
+
+            assertEquals(200, request(admin, "PUT", productPath, product(productName, originalPrice)).status());
+            var delayed = cart(otherDevice, user, "POST", "/checkout", staleConfirmation);
+            assertEquals(409, delayed.status());
+            assertEquals("CART_OPERATION_RETIRED", delayed.body().at("/error/code").textValue());
+            assertEquals(cartAfter, cartState(sql, user));
+            assertEquals(accountBefore, accountState(sql, user));
+
+            assertEquals(200, request(admin, "PUT", productPath, product(productName, changedPrice)).status());
+            var reviewed = get(customer, user);
+            int newTotal = line(reviewed, productId).at("/currentProduct/price").intValue() * 2;
+            UUID confirmedId = UUID.randomUUID();
+            var confirmed = checkout(confirmedId, version(reviewed), items);
+            confirmed.put("expectedTotalPrice", newTotal);
+            var accepted = cart(customer, user, "POST", "/checkout", confirmed);
+            assertEquals(200, accepted.status());
+            assertEquals("APPLIED", accepted.body().at("/data/status").textValue());
+            assertEquals(initialVersion + 1, version(accepted.body().at("/data/cart")));
+            assertTrue(accepted.body().at("/data/cart/items").isEmpty());
+            int orderId = accepted.body().at("/data/orderId").intValue();
+            assertEquals(newTotal, request(customer, "GET", "/api/orders/" + orderId, null).body().at("/data/totalPrice").intValue());
+
+            assertEquals(200, request(admin, "PUT", productPath, product(productName, originalPrice)).status());
+            resolution.put("expectedTotalPrice", newTotal);
+            var replay = cart(otherDevice, user, "POST", "/checkout", confirmed);
+            assertEquals(200, replay.status());
+            assertTrue(replay.body().at("/data/replayed").booleanValue());
+            assertEquals(orderId, replay.body().at("/data/orderId").intValue());
+            assertEquals(replay, cart(otherDevice, user, "POST", "/operations/" + confirmedId + "/resolve", resolution));
+            confirmed.put("expectedTotalPrice", originalPrice * 2);
+            assertEquals(409, cart(otherDevice, user, "POST", "/checkout", confirmed).status());
+            assertEquals(1, sql.queryForObject("SELECT count(*) FROM pubburi.t_order WHERE user_id=?", Integer.class, user));
+        } finally {
+            clean(sql, user, productId, List.of());
+        }
+    }
     @Test void concurrentRetryDoesNotDoubleMergeOrOrderAndRevokedEpochCannotMutate()throws Exception{
         var sql=control();var admin=loggedIn("ADMIN");String user=join();int product=create(admin,ownName());var executor=Executors.newFixedThreadPool(2);
         try{

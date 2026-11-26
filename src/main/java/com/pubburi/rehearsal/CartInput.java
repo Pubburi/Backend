@@ -11,6 +11,7 @@ import java.util.*;
 
 public final class CartInput {
     public static final int MAX_ITEMS=100,MAX_QUANTITY=99;
+    private static final String EXPECTED_TOTAL_PRICE = "expectedTotalPrice";
     private CartInput(){ }
     @Schema(name="CartInputItem")
     public record Item(int productId,int quantity){ }
@@ -19,13 +20,33 @@ public final class CartInput {
     @JsonDeserialize(using=MergeDeserializer.class) @Schema(additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
     public record Merge(UUID operationId,long expectedVersion,List<Item> items){ }
     @JsonDeserialize(using=CheckoutDeserializer.class) @Schema(additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
-    public record Checkout(UUID operationId,long expectedVersion,List<Item> items,String orderType,String orderTable){ }
+    public record Checkout(UUID operationId, long expectedVersion, List<Item> items, String orderType, String orderTable,
+            @Schema(description = "Total in won confirmed by the customer", minimum = "0", maximum = "2147483647",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED) Integer expectedTotalPrice) { }
     @JsonDeserialize(using=ResolveDeserializer.class) @Schema(additionalProperties=Schema.AdditionalPropertiesValue.FALSE)
-    public record Resolve(com.pubburi.rehearsal.persistence.JpaCartOperation.Kind kind,List<Item> items,String orderType,String orderTable){ }
+    public record Resolve(com.pubburi.rehearsal.persistence.JpaCartOperation.Kind kind, List<Item> items, String orderType,
+            String orderTable, @Schema(description = "Original confirmed total in won when supplied for CHECKOUT",
+                    minimum = "0", maximum = "2147483647", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                    Integer expectedTotalPrice) { }
     private static IllegalArgumentException invalid(){return new IllegalArgumentException("Invalid cart input");}
-    private static JsonNode root(JsonParser parser,String...keys)throws IOException{
-        parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);JsonNode node=parser.getCodec().readTree(parser);
-        if(node==null || !node.isObject() || node.size()!=keys.length || Arrays.stream(keys).anyMatch(key->!node.has(key)) || parser.nextToken()!=null)throw invalid();return node;
+    private static JsonNode root(JsonParser parser, String... keys) throws IOException {
+        return root(parser, false, keys);
+    }
+    private static JsonNode root(JsonParser parser, boolean allowExpectedTotal, String... keys) throws IOException {
+        parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+        JsonNode node = parser.getCodec().readTree(parser);
+        if (node == null || !node.isObject()) throw invalid();
+        int fields = keys.length + (allowExpectedTotal && node.has(EXPECTED_TOTAL_PRICE) ? 1 : 0);
+        if (node.size() != fields || Arrays.stream(keys).anyMatch(key -> !node.has(key)) || parser.nextToken() != null) {
+            throw invalid();
+        }
+        return node;
+    }
+    private static Integer expectedTotalPrice(JsonNode node) {
+        JsonNode total = node.get(EXPECTED_TOTAL_PRICE);
+        if (total == null) return null;
+        if (!total.isIntegralNumber() || !total.canConvertToInt() || total.intValue() < 0) throw invalid();
+        return total.intValue();
     }
     private static int integer(JsonNode node,int max){if(!node.isIntegralNumber() || !node.canConvertToInt() || node.intValue()<1 || node.intValue()>max)throw invalid();return node.intValue();}
     private static UUID operation(JsonNode node){
@@ -43,11 +64,16 @@ public final class CartInput {
         if(node.isNull())return null;if(!node.isTextual())throw invalid();String text=node.textValue();
         if(text.codePointCount(0,text.length())>20 || text.indexOf('\0')>=0 || text.codePoints().anyMatch(p->p>=Character.MIN_SURROGATE && p<=Character.MAX_SURROGATE))throw invalid();return text;
     }
-    public static String intent(List<Item> items,String orderType,String orderTable){
+    public static String intent(List<Item> items, String orderType, String orderTable) {
+        return intent(items, orderType, orderTable, null);
+    }
+    public static String intent(List<Item> items, String orderType, String orderTable, Integer expectedTotalPrice) {
         // Length-delimited literal table and sorted unique integer pairs are independent of JSON spelling/revision.
         var value=new StringBuilder(orderType==null?"MERGE":"CHECKOUT:"+orderType).append('\0');
         if(orderTable==null)value.append('N');else value.append('S').append(orderTable.getBytes(StandardCharsets.UTF_8).length).append(':').append(orderTable);
         value.append('\0');for(var item:items.stream().sorted(Comparator.comparingInt(Item::productId)).toList())value.append(item.productId()).append(':').append(item.quantity()).append(';');
+        // Omitting the total preserves the digest for operations stored before this field existed.
+        if (expectedTotalPrice != null) value.append('\0').append(expectedTotalPrice);
         try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.toString().getBytes(StandardCharsets.UTF_8)));}
         catch(NoSuchAlgorithmException error){throw new IllegalStateException(error);}
     }
@@ -62,20 +88,24 @@ public final class CartInput {
     public static class CheckoutDeserializer extends JsonDeserializer<Checkout>{
         @Override public Checkout getNullValue(DeserializationContext c)throws JsonMappingException{return c.reportInputMismatch(Checkout.class,"Cart object is required");}
         @Override public Checkout deserialize(JsonParser p,DeserializationContext c)throws IOException{
-            var n=root(p,"operationId","expectedVersion","items","orderType","orderTable");var type=n.get("orderType");
+            var n=root(p,true,"operationId","expectedVersion","items","orderType","orderTable");var type=n.get("orderType");
             if(!type.isTextual() || !Set.of("ONLINE","OFFLINE","TAKEOUT").contains(type.textValue()))throw invalid();
-            return new Checkout(operation(n.get("operationId")),NotebookInput.version(n.get("expectedVersion")),items(n.get("items")),type.textValue(),table(n.get("orderTable")));
+            return new Checkout(operation(n.get("operationId")), NotebookInput.version(n.get("expectedVersion")),
+                    items(n.get("items")), type.textValue(), table(n.get("orderTable")), expectedTotalPrice(n));
         }
     }
     public static class ResolveDeserializer extends JsonDeserializer<Resolve>{
         @Override public Resolve getNullValue(DeserializationContext c)throws JsonMappingException{return c.reportInputMismatch(Resolve.class,"Cart object is required");}
         @Override public Resolve deserialize(JsonParser p,DeserializationContext c)throws IOException{
-            var n=root(p,"kind","items","orderType","orderTable");var kind=n.get("kind");
+            var n=root(p,true,"kind","items","orderType","orderTable");var kind=n.get("kind");
             if(!kind.isTextual())throw invalid();com.pubburi.rehearsal.persistence.JpaCartOperation.Kind value;
             try{value=com.pubburi.rehearsal.persistence.JpaCartOperation.Kind.valueOf(kind.textValue());}catch(IllegalArgumentException error){throw invalid();}
-            if(value==com.pubburi.rehearsal.persistence.JpaCartOperation.Kind.MERGE){if(!n.get("orderType").isNull() || !n.get("orderTable").isNull())throw invalid();return new Resolve(value,items(n.get("items")),null,null);}
+            if (value == com.pubburi.rehearsal.persistence.JpaCartOperation.Kind.MERGE) {
+                if (!n.get("orderType").isNull() || !n.get("orderTable").isNull() || n.has(EXPECTED_TOTAL_PRICE)) throw invalid();
+                return new Resolve(value, items(n.get("items")), null, null, null);
+            }
             var type=n.get("orderType");if(!type.isTextual() || !Set.of("ONLINE","OFFLINE","TAKEOUT").contains(type.textValue()))throw invalid();
-            return new Resolve(value,items(n.get("items")),type.textValue(),table(n.get("orderTable")));
+            return new Resolve(value, items(n.get("items")), type.textValue(), table(n.get("orderTable")), expectedTotalPrice(n));
         }
     }
 }
