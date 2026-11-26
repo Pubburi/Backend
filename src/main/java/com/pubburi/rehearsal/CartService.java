@@ -75,14 +75,28 @@ public class CartService {
         lines.flush();advance(cart);operations.saveAndFlush(JpaCartOperation.create(owner.id(),input.operationId(),Kind.MERGE,hash,null));
         return new Result(input.operationId(),false,Status.APPLIED,view(owner.id(),cart),null);
     }
-    @Transactional(isolation=Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED, noRollbackFor = PriceChanged.class)
     public Result checkout(SessionUser owner,CartInput.Checkout input){
-        lockOwner(owner);String hash=CartInput.intent(input.items(),input.orderType(),input.orderTable());var replay=replay(owner,input.operationId(),Kind.CHECKOUT,hash);if(replay!=null)return replay;
+        lockOwner(owner);
+        String hash = CartInput.intent(input.items(), input.orderType(), input.orderTable(), input.expectedTotalPrice());
+        var replay = replay(owner, input.operationId(), Kind.CHECKOUT, hash);
+        if (replay != null) return replay;
         var cart=locked(owner);expected(cart,input.expectedVersion());var owned=new HashMap<Integer,JpaCartItem>();for(var row:lines.owned(owner.id()))owned.put(row.productId(),row);
         for(var item:input.items()){
             var row=owned.get(item.productId());if(row==null || row.currentProductId()==null || row.quantity()<item.quantity())throw conflict("Cart checkout items changed");
         }
-        lockProducts(input.items());
+        var current = lockProducts(input.items());
+        if (input.expectedTotalPrice() != null) {
+            long totalPrice = 0;
+            for (var item : input.items()) {
+                totalPrice += (long) current.get(item.productId()).getPrice() * item.quantity();
+            }
+            if (totalPrice != input.expectedTotalPrice()) {
+                // Commit only the retirement so a delayed retry cannot order if the old price returns.
+                operations.saveAndFlush(JpaCartOperation.retire(owner.id(), input.operationId(), Kind.CHECKOUT, hash));
+                throw new PriceChanged();
+            }
+        }
         var order=new Order();order.setUserId(owner.id());order.setOrderType(input.orderType());order.setOrderTable(input.orderTable());
         var details=input.items().stream().map(item->{var row=new OrderDetail();row.setProductId(item.productId());row.setQuantity(item.quantity());return row;}).toList();
         if(orders.makeOrder(order,details)!=1)throw new IllegalStateException("Cart order could not be created");
@@ -95,7 +109,9 @@ public class CartService {
     }
     @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result resolve(SessionUser owner,UUID operation,CartInput.Resolve input){
-        lockOwner(owner);String hash=CartInput.intent(input.items(),input.orderType(),input.orderTable());var receipt=matching(owner,operation,input.kind(),hash);
+        lockOwner(owner);
+        String hash = CartInput.intent(input.items(), input.orderType(), input.orderTable(), input.expectedTotalPrice());
+        var receipt = matching(owner, operation, input.kind(), hash);
         if(receipt!=null)return new Result(operation,true,receipt.status(),view(owner.id(),carts.findById(owner.id()).orElseThrow()),receipt.orderId());
         var cart=locked(owner);expected(cart,cart.version());advance(cart);
         operations.saveAndFlush(JpaCartOperation.retire(owner.id(),operation,input.kind(),hash));
@@ -107,6 +123,11 @@ public class CartService {
     }
     private JpaCartOperation matching(SessionUser owner,UUID operation,Kind kind,String hash){var receipt=operations.findById(new JpaCartOperation.Key(owner.id(),operation)).orElse(null);if(receipt!=null && (receipt.kind()!=kind || !receipt.intentHash().equals(hash)))throw conflict("Operation ID is bound to a different intent");return receipt;}
     public static final class Retired extends ResponseStatusException {public Retired(){super(HttpStatus.CONFLICT,"Cart operation was retired; confirm a new action");}}
+    public static final class PriceChanged extends ResponseStatusException {
+        public PriceChanged() {
+            super(HttpStatus.CONFLICT, "Cart prices changed. Review the new total before ordering.");
+        }
+    }
     private Map<Integer,Product> lockProducts(List<CartInput.Item> items){
         var result=new HashMap<Integer,Product>();for(var item:items.stream().sorted(Comparator.comparingInt(CartInput.Item::productId)).toList()){var product=products.selectByIdForUpdate(item.productId());if(product==null)throw conflict("Cart product is no longer available");result.put(item.productId(),product);}return result;
     }

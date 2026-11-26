@@ -27,6 +27,11 @@ public class CartController {
     public ApiResponse<CartService.Result> resolve(@PathVariable String operationId,@RequestBody CartInput.Resolve input,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.resolve(owner,operationId(operationId),input);current(session,owner);return ApiResponse.ok(result);}
     @ExceptionHandler(CartService.Retired.class)
     public ResponseEntity<ApiResponse<Void>> retired(){return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error(ApiError.of("CART_OPERATION_RETIRED","Cart operation was retired; confirm a new action")));}
+    @ExceptionHandler(CartService.PriceChanged.class)
+    public ResponseEntity<ApiResponse<Void>> priceChanged(CartService.PriceChanged conflict) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ApiError.of("CART_PRICE_CHANGED", conflict.getReason())));
+    }
     @PutMapping(value="/items/{productId}",consumes=MediaType.APPLICATION_JSON_VALUE) @Operation(summary="Set an absolute cart quantity at its expected revision",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
     public ApiResponse<CartService.Cart> put(@PathVariable String productId,@RequestBody CartInput.Quantity input,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.put(owner,productId(productId),input);current(session,owner);return ApiResponse.ok(result);}
     @DeleteMapping("/items/{productId}") @Operation(summary="Remove this account's item, including an unavailable product",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
@@ -35,7 +40,7 @@ public class CartController {
     public ApiResponse<CartService.Cart> clear(@RequestParam(required=false) String expectedVersion,HttpServletRequest request,HttpSession session){queries(request,"expectedVersion");var owner=owner(request);var result=carts.remove(owner,null,version(expectedVersion));current(session,owner);return ApiResponse.ok(result);}
     @PostMapping(value="/merge",consumes=MediaType.APPLICATION_JSON_VALUE) @Operation(summary="Atomically merge an explicitly submitted guest cart exactly once",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
     public ApiResponse<CartService.Result> merge(@RequestBody CartInput.Merge input,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.merge(owner,input);current(session,owner);return ApiResponse.ok(result);}
-    @PostMapping(value="/checkout",consumes=MediaType.APPLICATION_JSON_VALUE) @Operation(summary="Atomically create one demo order and consume submitted cart quantities exactly once",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
+    @PostMapping(value="/checkout",consumes=MediaType.APPLICATION_JSON_VALUE) @Operation(summary="Check the confirmed total when supplied and atomically create one demo order",parameters=@Parameter(name=NotebookController.OWNER_HEADER,in=ParameterIn.HEADER,required=true,description=FeedbackOwner.DESCRIPTION))
     public ApiResponse<CartService.Result> checkout(@RequestBody CartInput.Checkout input,HttpServletRequest request,HttpSession session){queries(request);var owner=owner(request);var result=carts.checkout(owner,input);current(session,owner);return ApiResponse.ok(result);}
     private SessionUser owner(HttpServletRequest request){return (SessionUser)request.getAttribute(ACTOR);}
     private void current(HttpSession session,SessionUser expected){var actual=guard.requireLogin(session);if(!actual.id().equals(expected.id()) || !actual.authEpoch().equals(expected.authEpoch()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Account session is no longer current");}
