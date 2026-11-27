@@ -440,6 +440,21 @@ def run(environ, runtime, recovery_control, selected_release):
         with recovery.connect(admin) as connection:
             connection.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM {}').format(
                 sql.Identifier(control['PUBBURI_PG_DB_NAME']), sql.Identifier(role)))
+        with recovery.connect(admin_target) as connection:
+            connection.execute(sql.SQL('REVOKE SELECT ON public.pubburi_pg_migration_guard FROM {}').format(sql.Identifier(role)))
+        try:
+            try:
+                recovery.promote(*promotion)
+            except ValueError as error:
+                if str(error) != 'postgresql_recovery_promotion_target_runtime_grants_missing':
+                    raise
+            else:
+                raise ValueError('recovery_ci_target_without_runtime_reads_promoted')
+            if pg.private_file(selector, 16384) != source_selection:
+                raise ValueError('recovery_ci_rejected_promotion_changed_selection')
+        finally:
+            with recovery.connect(admin_target) as connection:
+                connection.execute(sql.SQL('GRANT SELECT ON public.pubburi_pg_migration_guard TO {}').format(sql.Identifier(role)))
         recovery.promote(*promotion)
     finally:
         with recovery.connect(admin) as connection:connection.execute('ALTER ROLE '+role+' LOGIN')

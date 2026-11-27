@@ -485,16 +485,28 @@ def promote(local, source, target, archive_dir, manifest_pin, restore_dir, compl
                                    'selected_source_changed' if is_source else 'restored_target_changed')
                 connections.append((connection, env, is_source))
             target_connection = connections[-1][0]
-            if target_connection.execute("""SELECT NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole
-                OR rolreplication OR rolbypassrls)
-                AND has_database_privilege(oid,current_database(),'CONNECT') FROM pg_roles WHERE rolname=%s
-                """, (runtime['PUBBURI_PG_USER'],)).fetchone() != (True,):
-                reject('promotion_target_runtime_not_stopped_or_missing')
             if private.selection_record(local) != previous:
                 reject('selected_source_changed')
             private.configuration(previous['pg_config'], previous['config_sha256'])
             for connection, env, is_source in connections:
                 promotion_fence(connection, env, source=is_source)
+            # The dump omits ACLs. Check the guarded startup reads while the runtime role is stopped.
+            runtime_access = target_connection.execute("""SELECT
+                NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+                    AND has_database_privilege(oid,current_database(),'CONNECT'),
+                has_schema_privilege(oid,'public','USAGE') AND has_schema_privilege(oid,'pubburi','USAGE')
+                    AND has_column_privilege(oid,'public.pubburi_pg_migration_guard','token','SELECT')
+                    AND has_column_privilege(oid,'pubburi.migration_source_receipt','singleton_id','SELECT')
+                    AND has_column_privilege(oid,'pubburi.migration_source_receipt','source_id','SELECT')
+                    AND has_column_privilege(oid,'pubburi.t_product_search_relay_target','singleton_id','SELECT')
+                    AND has_column_privilege(oid,'pubburi.t_product_search_relay_target','source_id','SELECT')
+                    AND has_table_privilege(oid,'pubburi.flyway_schema_history','SELECT')
+                FROM pg_roles WHERE rolname=%s
+                """, (runtime['PUBBURI_PG_USER'],)).fetchone()
+            if runtime_access is None or runtime_access[0] is not True:
+                reject('promotion_target_runtime_not_stopped_or_missing')
+            if runtime_access[1] is not True:
+                reject('promotion_target_runtime_grants_missing')
             # The external CONNECT fence and both table locks cover publication.
             private.publish_selection(local, pg_config, directory, pins, announce=False)
 
