@@ -160,7 +160,7 @@ public class ProductRestController {
 		product.setType(request.type());
 		product.setPrice(request.price());
 		product.setImg(request.img());
-		product.setAbv(request.abv());
+		product.setAbv(request.abv().floatValue());
 		product.setOrderCount(request.orderCount());
 		return product;
 	}

@@ -30,7 +30,7 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
     @Autowired PlatformTransactionManager transactions;
     @Autowired DataSource dataSource;
 
-    @Test void malformedProductIntegersCannotWriteProductsOrSearchEvents() throws Exception {
+    @Test void invalidNumericProductFieldsCannotWriteProductsOrSearchEvents() throws Exception {
         var sql = control();var admin = loggedIn("ADMIN");String name = ownName();
         var identity = sourceIdentity(sql);
         var created = request(admin,"POST","/api/admin/products",product(name,1));
@@ -62,6 +62,14 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
             }
             ObjectNode negativeCount = json.valueToTree(product(name,1200));
             negativeCount.put("orderCount",-1);invalidInputs.add(negativeCount);
+            ObjectNode omittedAbv = json.valueToTree(product(name, 1200));
+            omittedAbv.remove("abv");
+            invalidInputs.add(omittedAbv);
+            for (String token : List.of("null", "100.000001", "\"7.25\"")) {
+                ObjectNode input = json.valueToTree(product(name, 1200));
+                input.set("abv", json.readTree(token));
+                invalidInputs.add(input);
+            }
             for (var input : invalidInputs) {
                 assertEquals(400,request(admin,"PUT","/api/admin/products/"+id,input.toString()).status());
                 assertEquals(400,request(admin,"POST","/api/admin/products",input.toString()).status());
@@ -72,18 +80,23 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
             ObjectNode maximum = json.valueToTree(product(name,Integer.MAX_VALUE));maximum.put("orderCount",Integer.MAX_VALUE);
             ObjectNode nullCount = json.valueToTree(product(name,1200));nullCount.putNull("orderCount");
             ObjectNode omittedCount = json.valueToTree(product(name,1200));omittedCount.remove("orderCount");
-            for (var input : List.of(minimum,maximum,nullCount,omittedCount)) {
+            ObjectNode zeroAbv = json.valueToTree(product(name, 1200));
+            zeroAbv.put("abv", 0);
+            for (var input : List.of(minimum,maximum,nullCount,omittedCount,zeroAbv)) {
                 int previousEvents = events(sql,id).size();
                 assertEquals(200,request(admin,"PUT","/api/admin/products/"+id,input.toString()).status());
                 var current = request(client(),"GET","/api/products/"+id,null).body().path("data");
                 assertEquals(input.path("price").intValue(),current.path("price").intValue());
                 assertEquals(input.path("orderCount").intValue(),current.path("orderCount").intValue());
+                assertTrue(current.path("abv").isNumber());
+                assertEquals(input.path("abv").floatValue(), current.path("abv").floatValue());
                 var emitted = events(sql,id);assertEquals(previousEvents+1,emitted.size());
                 var latest = emitted.get(emitted.size()-1);
                 assertEquals("PENDING",latest.get("status"));
                 var document = json.readTree((String)latest.get("payload")).path("document");
                 assertEquals(current.path("price"),document.path("priceKrw"));
                 assertEquals(current.path("orderCount"),document.path("orderCount"));
+                assertEquals(current.path("abv"), document.path("abvPercent"));
             }
             assertEquals(identity,sourceIdentity(sql));
         } finally {
