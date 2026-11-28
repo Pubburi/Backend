@@ -325,6 +325,14 @@ def run(environ):
         if not any(row["oId"]==order_id for row in order_profile["data"]["orders"]):raise ValueError("jpa_runtime_profile_order_missing")
         expect(request(ordinary,base,"GET","/api/admin/orders")[0],403)
         expect(request(ordinary,base,"PATCH","/api/admin/orders/"+str(order_id)+"/complete")[0],403)
+        for actor,path in (
+                (admin,"/api/admin/orders?page=2.5"),
+                (ordinary,"/api/users/"+environ["PUBBURI_JPA_USER_ID"]+"/orders?size=2147483648"),
+                (ordinary,"/api/orders/recent-order-history")):
+            status,rejected=request(actor,base,"GET",path);expect(status,400)
+            if rejected!={"data":None,"message":None,"error":{"code":"BAD_REQUEST",
+                    "message":"Invalid path or query parameter","fields":{}}}:
+                raise ValueError("jpa_runtime_order_parameter_error_contract_changed")
         expect(request(admin,base,"GET","/api/orders")[0],405)
         status,docs=request(admin,base,"GET","/v3/api-docs");expect(status,200)
         operations=verify_openapi_scope(docs)
