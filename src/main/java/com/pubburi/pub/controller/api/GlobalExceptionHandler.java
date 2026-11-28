@@ -18,6 +18,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.server.ResponseStatusException;
@@ -68,6 +69,12 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException exception) {
 		return ResponseEntity.badRequest()
 				.body(ApiResponse.error(ApiError.of("VALIDATION_FAILED", "Malformed request body")));
+	}
+
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+	public ResponseEntity<ApiResponse<Void>> handleInvalidParameter() {
+		return ResponseEntity.badRequest()
+				.body(ApiResponse.error(ApiError.of("BAD_REQUEST", "Invalid path or query parameter")));
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
