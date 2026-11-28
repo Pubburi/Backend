@@ -13,10 +13,10 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 public record ProductRequest(
-		@NotBlank @Size(max = 100) String name,
-		@NotBlank @Size(max = 20) String type,
+		@NotBlank @Size(max = 100) @JsonDeserialize(using = StrictStringDeserializer.class) String name,
+		@NotBlank @Size(max = 20) @JsonDeserialize(using = StrictStringDeserializer.class) String type,
 		@Min(1) @JsonDeserialize(using = StrictIntegerDeserializer.Primitive.class) int price,
-		@NotBlank @Size(max = 100) String img,
+		@NotBlank @Size(max = 100) @JsonDeserialize(using = StrictStringDeserializer.class) String img,
 		@Schema(type = "number", format = "float") @NotNull @DecimalMin("0.0") @DecimalMax("100.0")
 		@JsonDeserialize(using = StrictDecimalDeserializer.class) BigDecimal abv,
 		@Min(0) @JsonDeserialize(using = StrictIntegerDeserializer.Primitive.class) int orderCount) {
