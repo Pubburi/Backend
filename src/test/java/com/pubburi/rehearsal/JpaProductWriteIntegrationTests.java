@@ -30,7 +30,7 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
     @Autowired PlatformTransactionManager transactions;
     @Autowired DataSource dataSource;
 
-    @Test void invalidNumericProductFieldsCannotWriteProductsOrSearchEvents() throws Exception {
+    @Test void invalidProductFieldsCannotWriteProductsOrSearchEvents() throws Exception {
         var sql = control();var admin = loggedIn("ADMIN");String name = ownName();
         var identity = sourceIdentity(sql);
         var created = request(admin,"POST","/api/admin/products",product(name,1));
@@ -42,8 +42,18 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
         String sequences = "SELECT 'product' AS sequence_name,last_value,is_called FROM pubburi.t_product_id_seq UNION ALL "
             + "SELECT 'event' AS sequence_name,last_value,is_called FROM pubburi.t_product_search_outbox_event_id_seq ORDER BY sequence_name";
         try {
+            var features = request(admin, "PUT", "/api/admin/products/" + id + "/features",
+                    Map.of("volumeMl", 375, "tasteTags", List.of("dry"), "sourceName", "Authored validation fixture"));
+            assertEquals(200, features.status());
             var stable = state(sql,id);var stableCounts = sql.queryForMap(counts);var stableSequences = sql.queryForList(sequences);
             var invalidInputs = new ArrayList<ObjectNode>();
+            for (String field : List.of("name", "type", "img")) {
+                for (String token : List.of("20261129", "false")) {
+                    ObjectNode input = json.valueToTree(product(name, 1200));
+                    input.set(field, json.readTree(token));
+                    invalidInputs.add(input);
+                }
+            }
             for (String field : List.of("price","orderCount")) {
                 for (String token : List.of("1200.9","1200.0","1e3","\"1200\"","2147483648","-2147483649")) {
                     ObjectNode input = json.valueToTree(product(name,1200));
@@ -76,16 +86,21 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
                 assertEquals(stable,state(sql,id));assertEquals(stableCounts,sql.queryForMap(counts));
                 assertEquals(stableSequences,sql.queryForList(sequences));
             }
+            assertEquals(created.body().path("data"), request(client(), "GET", "/api/products/" + id, null).body().path("data"));
             ObjectNode minimum = json.valueToTree(product(name,1));
             ObjectNode maximum = json.valueToTree(product(name,Integer.MAX_VALUE));maximum.put("orderCount",Integer.MAX_VALUE);
             ObjectNode nullCount = json.valueToTree(product(name,1200));nullCount.putNull("orderCount");
             ObjectNode omittedCount = json.valueToTree(product(name,1200));omittedCount.remove("orderCount");
-            ObjectNode zeroAbv = json.valueToTree(product(name, 1200));
+            ObjectNode zeroAbv = json.valueToTree(product("20261129", 1200));
             zeroAbv.put("abv", 0);
+            zeroAbv.put("img", "20261129.webp");
             for (var input : List.of(minimum,maximum,nullCount,omittedCount,zeroAbv)) {
                 int previousEvents = events(sql,id).size();
                 assertEquals(200,request(admin,"PUT","/api/admin/products/"+id,input.toString()).status());
                 var current = request(client(),"GET","/api/products/"+id,null).body().path("data");
+                for (String field : List.of("name", "type", "img")) {
+                    assertEquals(input.path(field), current.path(field));
+                }
                 assertEquals(input.path("price").intValue(),current.path("price").intValue());
                 assertEquals(input.path("orderCount").intValue(),current.path("orderCount").intValue());
                 assertTrue(current.path("abv").isNumber());
@@ -94,10 +109,14 @@ class JpaProductWriteIntegrationTests extends JpaWriteTestSupport {
                 var latest = emitted.get(emitted.size()-1);
                 assertEquals("PENDING",latest.get("status"));
                 var document = json.readTree((String)latest.get("payload")).path("document");
+                assertEquals(current.path("name"), document.path("name"));
+                assertEquals(current.path("type"), document.path("type"));
                 assertEquals(current.path("price"),document.path("priceKrw"));
                 assertEquals(current.path("orderCount"),document.path("orderCount"));
                 assertEquals(current.path("abv"), document.path("abvPercent"));
             }
+            assertEquals(features.body().path("data"),
+                    request(client(), "GET", "/api/products/" + id + "/features", null).body().path("data"));
             assertEquals(identity,sourceIdentity(sql));
         } finally {
             assertEquals(200,request(admin,"DELETE","/api/admin/products/"+id,null).status());
